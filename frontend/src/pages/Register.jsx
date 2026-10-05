@@ -106,8 +106,12 @@ export default function Register() {
     }
 
     setBusy(true)
-    setTimeout(() => {
-      const user = registerUser({
+    // Pausa deliberada: el alta contra la API es una transaccion (correlativo +
+    // hash + historico) y el retraso solo simula la latencia de una alta real.
+    await new Promise((resolve) => setTimeout(resolve, 900))
+
+    try {
+      const user = await registerUser({
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
         email: form.email.trim(),
@@ -115,10 +119,21 @@ export default function Register() {
         role: form.role,
         password: form.password,
       })
-      setBusy(false)
       toast.mint('Alta registrada', `${user.userId} emitido · ya puede iniciar sesion con su credencial`)
       navigate('/login', { replace: true })
-    }, 900)
+    } catch (error) {
+      const reason =
+        error?.details?.failed?.includes('length')
+          ? 'La contrasena debe tener al menos 12 caracteres'
+          : error?.details?.failed?.includes('symbol')
+            ? 'La contrasena necesita al menos un simbolo'
+            : error?.status === 409
+              ? 'El correo ya esta registrado'
+              : (error?.message ?? 'No fue posible completar el alta')
+      toast.danger('Alta rechazada', reason)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (

@@ -37,7 +37,7 @@ export default function Login() {
   const didactic = useAppStore((s) => s.didactic)
   const login = useAppStore((s) => s.login)
   const requestUnlock = useAppStore((s) => s.requestUnlock)
-  const resetLock = useAppStore((s) => s.resetLock)
+  const unlockAccount = useAppStore((s) => s.unlockAccount)
 
   const [userId, setUserId] = useState('LEG-2026-0001')
   const [password, setPassword] = useState(DEMO_PASSWORD)
@@ -62,7 +62,7 @@ export default function Login() {
 
   const remaining = locked ? Math.max(0, Math.ceil((lockedUntil - now) / 1000)) : 0
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault()
     if (locked || busy) return
 
@@ -70,8 +70,12 @@ export default function Login() {
       toast.danger('User ID invalido', idCheck.message)
       return
     }
+
+    // Una clave demasiado corta se cuenta como intento fallido, pero se resuelve
+    // en local: la politica real (12 caracteres y politica completa) la aplica el
+    // backend en /api/auth/login.
     if (password.length < 6) {
-      const result = login({ userId: idCheck.normalized, password })
+      const result = await login({ userId: idCheck.normalized, password })
       toast.danger(
         result.locked ? 'Cuenta bloqueada' : 'Credencial invalida',
         result.locked
@@ -86,17 +90,26 @@ export default function Login() {
     SIGNAL_STEPS.forEach((_, i) => {
       setTimeout(() => setStep(i + 1), 260 * (i + 1))
     })
-    setTimeout(() => {
-      const result = login({ userId: idCheck.normalized, password })
+
+    try {
+      const result = await login({ userId: idCheck.normalized, password })
+      if (result.ok) {
+        toast.mint('Acceso concedido', `Rol asignado: ${String(result.user.role).toUpperCase()} · evento AUTH_SUCCESS`)
+        navigate('/dashboard', { replace: true })
+        return
+      }
+      toast.danger(
+        result.locked ? 'Cuenta bloqueada' : 'Credencial invalida',
+        result.locked
+          ? 'Tres intentos fallidos · solicite el desbloqueo al administrador'
+          : `Intento ${result.attempts} de ${MAX_ATTEMPTS}`,
+      )
+    } catch (error) {
+      toast.danger('Fallo de autenticacion', error.message ?? 'No fue posible validar la credencial')
+    } finally {
       setBusy(false)
       setStep(-1)
-      if (result.ok) {
-        toast.mint('Acceso concedido', `Rol asignado: ${result.user.role.toUpperCase()} · evento AUTH_SUCCESS`)
-        navigate('/dashboard', { replace: true })
-      } else {
-        toast.danger('Credencial invalida', `Intento ${result.attempts} de ${MAX_ATTEMPTS}`)
-      }
-    }, 260 * SIGNAL_STEPS.length + 260)
+    }
   }
 
   const pickDirectory = (id) => {
@@ -315,18 +328,34 @@ export default function Login() {
                               </p>
                               <button
                                 type="button"
-                                onClick={resetLock}
+                                onClick={async () => {
+                                  // Con API, el desbloqueo real exige el permiso
+                                  // TOKEN_RESET (POST /api/auth/unlock) y deja
+                                  // is_locked = FALSE con el contador en cero.
+                                  const result = await unlockAccount(idCheck.normalized)
+                                  if (result.ok) {
+                                    setPassword('')
+                                    toast.mint('Cuenta desbloqueada', result.message)
+                                  } else if (result.reason === 'forbidden') {
+                                    toast.danger(
+                                      'Operacion rechazada',
+                                      'El desbloqueo requiere el permiso TOKEN_RESET del administrador',
+                                    )
+                                  } else {
+                                    toast.danger('No fue posible desbloquear', 'Revise la bitacora de auditoria')
+                                  }
+                                }}
                                 className="ls-btn-secondary mt-2 w-full text-[11px]"
                               >
-                                <Undo2 className="h-3.5 w-3.5" /> Simular desbloqueo del administrador
+                                <Undo2 className="h-3.5 w-3.5" /> Desbloquear como administrador
                               </button>
                             </div>
                           ) : (
                             <button
                               type="button"
-                              onClick={() => {
-                                requestUnlock()
-                                toast.pastel(
+                              onClick={async () => {
+                                await requestUnlock(idCheck.normalized)
+                                toast.info(
                                   'Escalado al administrador',
                                   'Solicitud de desbloqueo registrada como evento de auditoria',
                                   LifeBuoy,

@@ -29,6 +29,15 @@ export function relativePercent(value, total) {
 
 export const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
+/** Marca de tiempo ISO actual: la unidad de tiempo de toda la bitacora. */
+export const nowIso = () => new Date().toISOString()
+
+/** Alterna un valor dentro de una lista devolviendo una nueva (sin mutar). */
+export function toggleInList(list, value) {
+  const items = Array.isArray(list) ? list : []
+  return items.includes(value) ? items.filter((item) => item !== value) : [...items, value]
+}
+
 export function cryptoId(prefix = 'id') {
   const rand = Math.random().toString(36).slice(2, 8).toUpperCase()
   return `${prefix}-${rand}`
