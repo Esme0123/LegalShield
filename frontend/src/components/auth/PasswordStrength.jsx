@@ -6,7 +6,7 @@ import { scorePassword } from '@/lib/security'
 const SEGMENTS = [
   { at: 0, cls: 'bg-danger' },
   { at: 1, cls: 'bg-danger' },
-  { at: 2, cls: 'bg-pastel' },
+  { at: 2, cls: 'bg-ok' },
   { at: 3, cls: 'bg-accent' },
   { at: 4, cls: 'bg-accent' },
 ]
@@ -28,7 +28,7 @@ export default function PasswordStrength({ value, className = '' }) {
             result.tone === 'danger'
               ? 'text-danger'
               : result.tone === 'pastel'
-                ? 'text-pastel'
+                ? 'text-ok'
                 : 'text-accent',
           )}
         >
@@ -80,7 +80,7 @@ export function LockCounter({ attempts, max = 3, locked }) {
         <span
           className={cn(
             'font-mono text-[11px] font-bold',
-            locked ? 'text-danger' : attempts >= max - 1 ? 'text-pastel' : 'text-accent',
+            locked ? 'text-danger' : attempts >= max - 1 ? 'text-ok' : 'text-accent',
           )}
         >
           {locked ? 'BLOQUEADA' : `${max - attempts}/${max}`}
@@ -104,7 +104,7 @@ export function LockCounter({ attempts, max = 3, locked }) {
       </div>
 
       <p className="mt-2.5 flex items-start gap-1.5 text-[11px] leading-snug text-muted">
-        <Lock className="mt-0.5 h-3 w-3 shrink-0 text-pastel" />
+        <Lock className="mt-0.5 h-3 w-3 shrink-0 text-ok" />
         Al tercer fallo la cuenta se bloquea 120 s y se emite evento
         <span className="font-mono text-danger"> LOGIN_LOCKED</span>.
       </p>

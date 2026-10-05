@@ -274,14 +274,14 @@ export default function Cases() {
                 </div>
               </div>
 
-              <div className="mt-5 rounded-xl border border-pastel/40 bg-pastel/8 p-3.5">
-                <p className="flex items-center gap-2 text-[12px] font-semibold text-pastel">
+              <div className="mt-5 rounded-xl border border-ok/40 bg-ok/8 p-3.5">
+                <p className="flex items-center gap-2 text-[12px] font-semibold text-ok">
                   <ShieldCheck className="h-4 w-4" /> Nota didactica · Dither Veil
                 </p>
                 <p className="mt-1 text-[11.5px] leading-snug text-ink/85">
                   El tramado no es decorativo: representa la capa de privacidad que impide leer la
                   prueba sin una peticion de rol valida. Al revelar, el motor exige justificacion y
-                  escribe un evento <span className="font-mono text-pastel">DOC_REVEALED</span> con el
+                  escribe un evento <span className="font-mono text-ok">DOC_REVEALED</span> con el
                   actor y el motivo.
                 </p>
               </div>

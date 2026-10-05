@@ -1,10 +1,15 @@
 /**
  * LegalShield · Sistema de diseno
  *
- * Toda la paleta se expone en dos capas:
- *  1. Colores literales (`steel`, `mint`, `pastel`, ...) -> uso puntual, siempre iguales.
+ * Toda la paleta se expone en tres capas:
+ *  1. Colores literales (`steel`, `mint`, `pastel`, `cream`, ...) -> uso puntual, siempre iguales.
  *  2. Colores semanticos basados en variables CSS (`bg`, `surface`, `text`, ...)
  *     -> re-mapean al instante en modo claro / oscuro sin duplicar clases.
+ *  3. Tokens de estado (`ok`, `warn`, `gold`) -> tonos que dependen del fondo: en modo
+ *     claro se oscurecen para mantener contraste AA, en modo oscuro se aclaran.
+ *
+ * REGLA DE ORO: `#f3ecb0` (Soft Cream) NUNCA es fondo de pantalla ni de tarjeta.
+ * Solo badges pequenos, alertas de advertencia y highlights secundarios (`gold`).
  */
 
 const semantic = (variable) => `rgb(var(${variable}) / <alpha-value>)`
@@ -31,6 +36,7 @@ export default {
         indigo: '#4647ae',
         electric: '#4382df',
         ice: '#aaccd6',
+        slate: '#f8fafc',
 
         bg: semantic('--ls-bg'),
         bgdeep: semantic('--ls-bg-deep'),
@@ -47,6 +53,10 @@ export default {
         highlight: semantic('--ls-highlight'),
         danger: semantic('--ls-danger'),
         onAccent: semantic('--ls-on-accent'),
+        ok: semantic('--ls-ok'),
+        warn: semantic('--ls-warn'),
+        gold: semantic('--ls-gold'),
+        goldInk: semantic('--ls-gold-ink'),
       },
       fontFamily: {
         sans: ['Inter', 'Segoe UI', 'system-ui', '-apple-system', 'sans-serif'],
@@ -55,6 +65,7 @@ export default {
       },
       boxShadow: {
         card: '0 1px 0 0 rgb(var(--ls-border) / 0.35), 0 18px 40px -24px rgb(0 0 0 / 0.55)',
+        'card-soft': '0 1px 2px 0 rgb(17 46 129 / 0.04), 0 12px 28px -20px rgb(17 46 129 / 0.18)',
         lift: '0 26px 60px -30px rgb(var(--ls-accent) / 0.45)',
         glow: '0 0 0 1px rgb(var(--ls-accent) / 0.4), 0 0 28px -4px rgb(var(--ls-accent) / 0.55)',
         inset: 'inset 0 1px 0 0 rgb(255 255 255 / 0.06)',

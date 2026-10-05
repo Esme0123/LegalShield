@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/cn'
 
 /**
@@ -6,6 +7,9 @@ import { cn } from '@/lib/cn'
  * Al archivar/eliminar un expediente el documento se arruga de verdad: un filtro
  * SVG (feTurbulence + feDisplacementMap) aumenta su deformacion mientras la
  * ficha se comprime y gira, hasta desaparecer de la vista.
+ *
+ * Con el Modo Didactico apagado la ficha se retira en seco: el filtro, las
+ * chispas y el giro se omiten para que el archivado no bloquee la vista.
  */
 export default function PaperCrumple({
   crumpled = false,
@@ -14,6 +18,7 @@ export default function PaperCrumple({
   className = '',
   children,
 }) {
+  const didactic = useAppStore((s) => s.didactic)
   // React 19 devuelve ids con caracteres no-FILENAME-safe (guillemets, dos puntos)
   const filterId = `crumple${useId().replace(/[^a-zA-Z0-9]/g, '')}`
   const dispRef = useRef(null)
@@ -35,6 +40,19 @@ export default function PaperCrumple({
       }
       setSparks([])
       return undefined
+    }
+
+    // Modo sutil: la ficha se desvanece sin deformacion ni particulas.
+    if (!didactic) {
+      const wrap = wrapRef.current
+      if (wrap) {
+        wrap.style.opacity = '0'
+        wrap.style.transform = 'scale(0.98)'
+        wrap.style.filter = ''
+      }
+      setSparks([])
+      const timer = setTimeout(() => completeRef.current?.(), 180)
+      return () => clearTimeout(timer)
     }
 
     const start = performance.now()
@@ -93,12 +111,12 @@ export default function PaperCrumple({
       }
     }
     return () => cancelAnimationFrame(raf)
-  }, [crumpled, duration])
+  }, [crumpled, duration, didactic])
 
   return (
     <>
       <div ref={wrapRef} className={cn('origin-center will-change-transform', className)}>
-        <div style={{ filter: crumpled ? `url(#${filterId})` : undefined }}>
+        <div style={{ filter: crumpled && didactic ? `url(#${filterId})` : undefined }}>
           {children}
         </div>
       </div>
@@ -130,7 +148,7 @@ export default function PaperCrumple({
         sparks.map((s) => (
           <span
             key={s.id}
-            className="pointer-events-none fixed z-[70] h-1.5 w-1.5 rotate-45 rounded-[2px] bg-pastel shadow-[0_0_12px_2px] shadow-pastel/60"
+            className="pointer-events-none fixed z-[70] h-1.5 w-1.5 rotate-45 rounded-[2px] bg-ok shadow-[0_0_12px_2px] shadow-ok/60"
             style={{
               left: s.x,
               top: s.y,

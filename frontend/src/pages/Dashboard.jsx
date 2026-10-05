@@ -76,7 +76,7 @@ export default function Dashboard() {
               <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
                 Madurez ISO 27001
               </p>
-              <span className="font-display text-2xl font-bold text-pastel">{maturity}%</span>
+              <span className="font-display text-2xl font-bold text-ok">{maturity}%</span>
             </div>
             <Progress value={maturity} tone="pastel" className="mt-3" />
             <div className="mt-4 grid grid-cols-3 gap-2 text-center">

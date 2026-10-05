@@ -27,19 +27,19 @@ const SEVERITY = {
 
 const TYPE_TONE = {
   AUTH_SUCCESS: 'text-accent',
-  AUTH_FAILED: 'text-pastel',
+  AUTH_FAILED: 'text-ok',
   AUTH_LOGOUT: 'text-muted',
   LOGIN_LOCKED: 'text-danger',
-  UNLOCK_REQUESTED: 'text-pastel',
+  UNLOCK_REQUESTED: 'text-ok',
   PERMISSION_CHANGED: 'text-accent',
   PERMISSION_DENIED: 'text-danger',
-  DOC_REVEALED: 'text-pastel',
+  DOC_REVEALED: 'text-ok',
   CASE_ARCHIVED: 'text-info',
   TOKEN_ISSUED: 'text-danger',
   AUDIT_RECEIPT: 'text-info',
   INTRUSION_BLOCKED: 'text-danger',
   CONTROL_ASSESSED: 'text-muted',
-  RISK_REVIEWED: 'text-pastel',
+  RISK_REVIEWED: 'text-ok',
 }
 
 export default function Audit() {

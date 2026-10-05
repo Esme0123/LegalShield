@@ -27,7 +27,7 @@ export function ThemeProvider({ children }) {
       /* modo privado: se ignora la persistencia */
     }
     const meta = document.querySelector('meta[name="theme-color"]')
-    if (meta) meta.setAttribute('content', theme === 'light' ? '#f3ecb0' : '#112e81')
+    if (meta) meta.setAttribute('content', theme === 'light' ? '#f8fafc' : '#112e81')
   }, [theme])
 
   const toggleTheme = useCallback(() => setTheme((t) => (t === 'dark' ? 'light' : 'dark')), [])

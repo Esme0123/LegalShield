@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bell, Menu, RefreshCcw, Search, ShieldAlert } from 'lucide-react'
+import { Bell, Menu, RefreshCcw, Scale, Search, ShieldAlert } from 'lucide-react'
 import Sidebar from './Sidebar'
 import ThemeToggle from '@/components/ui/ThemeToggle'
+import EffectsToggle from '@/components/ui/EffectsToggle'
 import AeroShards from '@/components/reactbits/AeroShards'
 import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/cn'
@@ -11,10 +12,11 @@ import { timeAgo } from '@/lib/format'
 
 const TITLES = {
   '/dashboard': ['Panel de control', 'Estado operativo del despacho en tiempo real'],
-  '/roles': ['Matriz de accesos RBAC', 'Separacion de funciones aplicada sin recarga'],
+  '/roles': ['Matriz de accesos SIS-321', 'Permisos por sistema, recurso y rol'],
   '/cases': ['Expedientes judiciales', 'Gestion de prueba documental restringida'],
   '/audit': ['Logs de auditoria', 'Flujo forense en vivo · linterna de inspeccion activa'],
-  '/risk-assessment': ['Evaluacion ISO 27001', 'Autoevaluacion de controles y mapa de calor'],
+  '/risk-assessment': ['Evaluacion ISO 27001', 'Autoevaluacion, clasificacion y mapa de calor'],
+  '/profile': ['Mi perfil', 'Datos personales, contrasena e historial de accesos'],
 }
 
 export default function AppLayout() {
@@ -23,6 +25,8 @@ export default function AppLayout() {
   const [bellOpen, setBellOpen] = useState(false)
   const location = useLocation()
   const logs = useAppStore((s) => s.logs)
+  const session = useAppStore((s) => s.session)
+  const didactic = useAppStore((s) => s.didactic)
   const resetSimulation = useAppStore((s) => s.resetSimulation)
 
   const [title, subtitle] = TITLES[location.pathname] ?? ['LegalShield', '']
@@ -36,7 +40,7 @@ export default function AppLayout() {
   return (
     <div className="relative min-h-screen">
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-        <AeroShards density={0.00012} className="opacity-70" />
+        <AeroShards density={didactic ? 0.00012 : 0.00004} className={didactic ? 'opacity-70' : 'opacity-25'} />
       </div>
 
       <Sidebar
@@ -87,6 +91,26 @@ export default function AppLayout() {
               <RefreshCcw className="h-4 w-4" />
             </button>
 
+            <EffectsToggle className="hidden lg:inline-flex" />
+
+            <Link
+              to="/profile"
+              title="Mi perfil"
+              className="hidden h-9 items-center gap-2.5 rounded-lg border border-line/60 px-2 pr-3 transition hover:border-accent/60 hover:bg-surface2/40 md:flex"
+            >
+              <span className="grid h-6 w-6 place-items-center rounded-md bg-accent/15 text-accent">
+                <Scale className="h-3.5 w-3.5" />
+              </span>
+              <span className="text-left leading-none">
+                <span className="block font-mono text-[10.5px] font-semibold text-ink">
+                  {session?.userId ?? 'LEG-0000'}
+                </span>
+                <span className="mt-0.5 block text-[9.5px] capitalize text-muted">
+                  {session?.roleId ?? 'sesion'}
+                </span>
+              </span>
+            </Link>
+
             <div className="relative">
               <button
                 type="button"
@@ -135,7 +159,7 @@ export default function AppLayout() {
         </header>
 
         {/* Contenido */}
-        <main className="relative px-4 py-5 sm:px-6 sm:py-6">
+        <main className="relative px-4 py-6 sm:px-6 sm:py-8">
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}

@@ -2,7 +2,7 @@ import { motion } from 'framer-motion'
 import { cn } from '@/lib/cn'
 
 const RISK_TONE = {
-  baja: 'border-pastel/60 bg-pastel/12 text-pastel',
+  baja: 'border-ok/60 bg-ok/12 text-ok',
   media: 'border-info/60 bg-info/12 text-info',
   alta: 'border-accent/60 bg-accent/12 text-accent',
   critico: 'border-danger/60 bg-danger/12 text-danger',
@@ -13,9 +13,11 @@ export function Badge({ tone = 'neutral', children, className = '', pulse = fals
     neutral: 'border-line/50 bg-surface2/40 text-muted',
     mint: RISK_TONE.alta,
     pastel: RISK_TONE.baja,
+    ok: RISK_TONE.baja,
     accent: 'border-accent/60 bg-accent/12 text-accent',
     info: 'border-info/60 bg-info/12 text-info',
     danger: 'border-danger/60 bg-danger/12 text-danger',
+    warn: 'border-warn/55 bg-gold/25 text-warn',
     ice: 'border-lineSoft/50 bg-lineSoft/10 text-ice',
   }
   return (
@@ -42,16 +44,17 @@ export function RiskBadge({ risk }) {
 }
 
 export function SeverityDot({ severity }) {
-  const colors = { info: 'bg-info', warn: 'bg-accent', critico: 'bg-danger', ok: 'bg-pastel' }
+  const colors = { info: 'bg-info', warn: 'bg-accent', critico: 'bg-danger', ok: 'bg-ok' }
   return <span className={cn('inline-block h-2 w-2 shrink-0 rounded-full', colors[severity] ?? colors.info)} />
 }
 
 export function Progress({ value, max = 100, tone = 'accent', className = '' }) {
   const pct = Math.max(0, Math.min(100, (value / max) * 100))
   const tones = {
-    accent: 'bg-gradient-to-r from-accent to-pastel',
+    accent: 'bg-gradient-to-r from-accent to-ok',
     info: 'bg-gradient-to-r from-info to-accent',
-    pastel: 'bg-pastel',
+    pastel: 'bg-ok',
+    ok: 'bg-ok',
   }
   return (
     <div className={cn('h-1.5 w-full overflow-hidden rounded-full bg-surface2/60', className)}>
@@ -68,7 +71,8 @@ export function Progress({ value, max = 100, tone = 'accent', className = '' }) 
 export function StatCard({ icon: Icon, label, value, delta, tone = 'accent', foot }) {
   const glows = {
     accent: 'text-accent bg-accent/10 border-accent/40',
-    pastel: 'text-pastel bg-pastel/10 border-pastel/40',
+    pastel: 'text-ok bg-ok/10 border-ok/40',
+    ok: 'text-ok bg-ok/10 border-ok/40',
     info: 'text-info bg-info/10 border-info/40',
     danger: 'text-danger bg-danger/10 border-danger/40',
   }
@@ -77,7 +81,7 @@ export function StatCard({ icon: Icon, label, value, delta, tone = 'accent', foo
       initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      className="ls-card-hover group relative overflow-hidden p-4"
+      className="ls-card-hover group relative overflow-hidden p-6"
     >
       <div className="absolute -right-8 -top-10 h-24 w-24 rounded-full bg-accent/10 blur-2xl transition-opacity duration-500 group-hover:opacity-100 opacity-0" />
       <div className="flex items-start justify-between gap-3">

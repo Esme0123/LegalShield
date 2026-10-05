@@ -2,12 +2,16 @@ import { NavLink } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Activity,
+  Briefcase,
+  Building2,
   ChevronLeft,
   FileStack,
   LayoutDashboard,
   Lock,
   LogOut,
+  Scroll,
   ShieldCheck,
+  UserCheck,
   Users2,
   X,
 } from 'lucide-react'
@@ -15,13 +19,19 @@ import { cn } from '@/lib/cn'
 import { useAppStore } from '@/store/useAppStore'
 import { ROLES } from '@/data/seed'
 import { toast } from '@/store/toastStore'
+import EffectsToggle from '@/components/ui/EffectsToggle'
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, hint: 'Panorama operativo' },
-  { to: '/roles', label: 'Matriz RBAC', icon: Users2, hint: 'Accesos granulares' },
+  { to: '/roles', label: 'Matriz SIS-321', icon: UserCheck, hint: 'Permisos por rol' },
   { to: '/cases', label: 'Expedientes', icon: FileStack, hint: 'Juicios y documentos' },
-  { to: '/audit', label: 'Auditoria', icon: Activity, hint: 'Logs forenses en vivo' },
+  { to: '/audit', label: 'Auditoria', icon: Scroll, hint: 'Logs forenses en vivo' },
   { to: '/risk-assessment', label: 'ISO 27001', icon: ShieldCheck, hint: 'Riesgo y madurez' },
+]
+
+const SESSION_TOOLS = [
+  { to: '/profile', label: 'Mi perfil', icon: Briefcase, hint: 'Datos y credenciales' },
+  { to: '/dashboard', label: 'Despacho', icon: Building2, hint: 'Sede asignada' },
 ]
 
 function NavItem({ item, collapsed, onNavigate, permission }) {
@@ -161,6 +171,24 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
               />
             ))}
           </div>
+
+          {!collapsed && (
+            <>
+              <p className="mb-2 mt-5 px-3 font-mono text-[9.5px] uppercase tracking-[0.2em] text-muted/70">
+                Sesion
+              </p>
+              <div className="flex flex-col gap-1">
+                {SESSION_TOOLS.map((item) => (
+                  <NavItem
+                    key={item.label}
+                    item={item}
+                    collapsed={collapsed}
+                    onNavigate={onClose}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </nav>
 
         {/* Sesion */}
@@ -205,6 +233,8 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
             />
             {!collapsed && 'Contraer menu'}
           </button>
+
+          {!collapsed && <EffectsToggle className="mt-2 w-full justify-between" />}
         </div>
       </aside>
     </>

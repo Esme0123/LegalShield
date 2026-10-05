@@ -12,10 +12,10 @@ const TONES = {
     Icon: CheckCircle2,
   },
   pastel: {
-    ring: 'border-pastel/70',
+    ring: 'border-ok/70',
     glow: 'shadow-[0_26px_60px_-30px_rgba(173,231,146,0.65)]',
-    icon: 'border-pastel/60 bg-pastel/15 text-pastel',
-    bar: 'bg-pastel',
+    icon: 'border-ok/60 bg-ok/15 text-ok',
+    bar: 'bg-ok',
     Icon: ShieldCheck,
   },
   danger: {

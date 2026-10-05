@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Fingerprint,
+  Gavel,
   KeyRound,
   LifeBuoy,
   Lock,
   LogIn,
   MailCheck,
+  Scale,
   ScanFace,
   ShieldCheck,
   Undo2,
@@ -21,7 +23,7 @@ import { MAX_ATTEMPTS, useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { USER_ID_RE, validateUserId } from '@/lib/security'
 import { cn } from '@/lib/cn'
-import { DIRECTORY } from '@/data/seed'
+import { DEMO_PASSWORD } from '@/data/seed'
 
 const SIGNAL_STEPS = ['Analisis de User ID…', 'Verificacion de politica…', 'MFA · passkey', 'Emision de sesion']
 
@@ -31,12 +33,14 @@ export default function Login() {
   const lockedUntil = useAppStore((s) => s.lockedUntil)
   const unlockRequest = useAppStore((s) => s.unlockRequest)
   const session = useAppStore((s) => s.session)
+  const directory = useAppStore((s) => s.directory)
+  const didactic = useAppStore((s) => s.didactic)
   const login = useAppStore((s) => s.login)
   const requestUnlock = useAppStore((s) => s.requestUnlock)
   const resetLock = useAppStore((s) => s.resetLock)
 
   const [userId, setUserId] = useState('LEG-2026-0001')
-  const [password, setPassword] = useState('Juris2026!Abg')
+  const [password, setPassword] = useState(DEMO_PASSWORD)
   const [showPass, setShowPass] = useState(false)
   const [busy, setBusy] = useState(false)
   const [step, setStep] = useState(-1)
@@ -97,12 +101,12 @@ export default function Login() {
 
   const pickDirectory = (id) => {
     setUserId(id)
-    setPassword('Juris2026!Abg')
+    setPassword(DEMO_PASSWORD)
   }
 
   return (
     <div className="relative min-h-screen overflow-hidden">
-      <AeroShards density={0.0001} />
+      <AeroShards density={didactic ? 0.0001 : 0.00003} className={didactic ? '' : 'opacity-40'} />
 
       <header className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
         <div className="flex items-center gap-2.5">
@@ -140,7 +144,7 @@ export default function Login() {
               Gestion legal con{' '}
               <span className="relative inline-block">
                 <span className="relative z-10 text-accent">defensa en profundidad</span>
-                <span className="absolute inset-x-0 bottom-1 z-0 h-3 bg-pastel/30" />
+                <span className="absolute inset-x-0 bottom-1 z-0 h-3 bg-ok/30" />
               </span>
               .
             </h1>
@@ -152,8 +156,8 @@ export default function Login() {
             <div className="mt-7 grid gap-3 sm:grid-cols-3">
               {[
                 { icon: ScanFace, title: 'Identidad fuerte', copy: 'User ID estandar LEG-2026-XXXX + MFA' },
-                { icon: Lock, title: 'Minimo privilegio', copy: '12 permisos revisables en caliente' },
-                { icon: MailCheck, title: 'Evidencia', copy: 'Comprobantes firmados con hash SHA-256' },
+                { icon: Gavel, title: 'Minimo privilegio', copy: '18 permisos revisables en caliente' },
+                { icon: Scale, title: 'Evidencia', copy: 'Comprobantes firmados con hash SHA-256' },
               ].map(({ icon: Icon, title, copy }) => (
                 <div key={title} className="ls-panel">
                   <Icon className="mb-2 h-4 w-4 text-accent" />
@@ -168,7 +172,7 @@ export default function Login() {
                 Directorio de demostracion
               </p>
               <div className="flex flex-wrap gap-2">
-                {DIRECTORY.map((d) => (
+                {directory.map((d) => (
                   <button
                     key={d.userId}
                     type="button"
@@ -201,7 +205,7 @@ export default function Login() {
                     Sesion cifrada TLS 1.3 · registro de auditoria activo
                   </p>
                 </div>
-                <KeyRound className="h-5 w-5 shrink-0 text-pastel" />
+                <KeyRound className="h-5 w-5 shrink-0 text-ok" />
               </div>
 
               <form onSubmit={submit} className="mt-5 space-y-4">
@@ -395,7 +399,14 @@ export default function Login() {
 
                 <p className="text-center font-mono text-[10px] text-muted">
                   Ejercitese: tres contrasenas cortas bloquean la cuenta ·{' '}
-                  <span className="text-info">demo: Juris2026!Abg</span>
+                  <span className="text-info">demo: {DEMO_PASSWORD}</span>
+                </p>
+
+                <p className="text-center text-[11.5px] text-muted">
+                  No tienes cuenta registrada?{' '}
+                  <Link to="/register" className="font-semibold text-accent hover:underline">
+                    Crear acceso en el despacho
+                  </Link>
                 </p>
               </form>
             </div>

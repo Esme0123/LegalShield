@@ -1,274 +1,204 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  KeyRound,
+  Building2,
+  Key,
   RotateCcw,
+  Scale,
   ShieldCheck,
   SlidersHorizontal,
-  Users2,
+  UserCheck,
 } from 'lucide-react'
+import Sis321Matrix, { RESOURCE_COUNT } from '@/components/matrix/Sis321Matrix'
 import { Badge, SectionTitle } from '@/components/ui/primitives'
-import { PERMISSIONS, ROLES } from '@/data/seed'
+import { SIS321_ROLES, SIS321_SYSTEMS } from '@/data/seed'
 import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { cn } from '@/lib/cn'
 import { relativePercent } from '@/lib/format'
 
-const SEVERITY_TONE = {
-  critica: 'text-danger',
-  alta: 'text-accent',
-  media: 'text-info',
+const SYSTEM_ICONS = {
+  RED: Building2,
+  CORREO: UserCheck,
+  SISTEMA_A: Scale,
+  SISTEMA_B: ShieldCheck,
 }
 
-function PermissionCell({ roleId, permission, checked, onToggle, canManage }) {
-  const [flash, setFlash] = useState(false)
-
-  const handle = () => {
-    if (!canManage) {
-      toast.danger(
-        'Cambio rechazado',
-        'Tu rol no posee RBAC_MANAGE · evento PERMISSION_DENIED registrado',
-      )
-      return
-    }
-    setFlash(true)
-    setTimeout(() => setFlash(false), 600)
-    onToggle()
-  }
-
-  return (
-    <td className="text-center">
-      <button
-        type="button"
-        onClick={handle}
-        disabled={!canManage}
-        aria-pressed={checked}
-        aria-label={`${permission.id} para rol ${roleId}`}
-        className={cn(
-          'group relative grid h-9 w-9 place-items-center rounded-lg border transition-all duration-300 ease-shield',
-          canManage && 'hover:scale-110',
-          checked
-            ? 'border-accent/70 bg-accent/20 text-accent shadow-glow'
-            : 'border-line/50 bg-surface2/30 text-muted/50',
-          !canManage && 'cursor-not-allowed opacity-60',
-          flash && 'animate-pulse-ring',
-        )}
-      >
-        <span
-          className={cn(
-            'h-3.5 w-3.5 rounded-[4px] border transition-all duration-300',
-            checked ? 'scale-100 border-accent bg-accent' : 'scale-75 border-line',
-          )}
-        />
-        {checked && (
-          <span className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-pastel text-[9px] font-bold text-navy">
-            ✓
-          </span>
-        )}
-      </button>
-    </td>
-  )
-}
+const FILTERS = [
+  { id: 'all', label: 'Todos los roles' },
+  { id: 'critico', label: 'Cobertura critica' },
+  { id: 'alto', label: 'Cobertura alta' },
+  { id: 'bajo', label: 'Cobertura baja' },
+]
 
 export default function Roles() {
-  const rbac = useAppStore((s) => s.rbac)
-  const togglePermission = useAppStore((s) => s.togglePermission)
-  const resetRbac = useAppStore((s) => s.resetRbac)
-  const hasPermission = useAppStore((s) => s.hasPermission)
+  const sis321 = useAppStore((s) => s.sis321)
   const session = useAppStore((s) => s.session)
   const logs = useAppStore((s) => s.logs)
+  const hasPermission = useAppStore((s) => s.hasPermission)
+  const toggleMatrixAccess = useAppStore((s) => s.toggleMatrixAccess)
+  const setSystemColumn = useAppStore((s) => s.setSystemColumn)
+  const resetSis321 = useAppStore((s) => s.resetSis321)
 
   const [filter, setFilter] = useState('all')
 
-  const canManage = hasPermission('RBAC_MANAGE')
-  const groups = useMemo(() => {
-    const map = new Map()
-    PERMISSIONS.forEach((p) => {
-      if (!map.has(p.group)) map.set(p.group, [])
-      map.get(p.group).push(p)
+  const canEdit = hasPermission('RBAC_MANAGE') || session?.role === 'socio'
+
+  const coverage = useMemo(() => {
+    const values = SIS321_ROLES.map((r) => (sis321[r.id] ?? []).length / RESOURCE_COUNT)
+    return {
+      global: Math.round((values.reduce((a, v) => a + v, 0) / values.length) * 100),
+      grants: SIS321_ROLES.reduce((acc, r) => acc + (sis321[r.id] ?? []).length, 0),
+    }
+  }, [sis321])
+
+  const visibleRoles = useMemo(() => {
+    if (filter === 'all') return SIS321_ROLES
+    return SIS321_ROLES.filter((role) => {
+      const pct = Math.round(((sis321[role.id] ?? []).length / RESOURCE_COUNT) * 100)
+      if (filter === 'critico') return pct >= 80
+      if (filter === 'alto') return pct >= 45 && pct < 80
+      return pct < 45
     })
-    return [...map.entries()]
-  }, [])
+  }, [filter, sis321])
 
-  const visiblePermissions = useMemo(
-    () => PERMISSIONS.filter((p) => filter === 'all' || p.severity === filter),
-    [filter],
-  )
+  const lastChange = logs.find((l) => l.type === 'MATRIX_ACCESS_CHANGED')
 
-  const lastChange = logs.find((l) => l.type === 'PERMISSION_CHANGED')
-
-  const handleToggle = (roleId, permissionId) => {
-    const { granting, roleLabel } = togglePermission(roleId, permissionId)
+  const handleToggle = (roleId, resourceId) => {
+    const { granting, roleLabel, resourceLabel } = toggleMatrixAccess(roleId, resourceId)
     toast.pastel(
-      granting ? 'Permiso concedido' : 'Permiso retirado',
-      `${permissionId} ${granting ? 'otorgado a' : 'revocado para'} ${roleLabel} · reajuste dinamico de seguridad aplicado sin recarga`,
+      granting ? 'Acceso concedido' : 'Acceso retirado',
+      `${resourceLabel} ${granting ? 'habilitado' : 'deshabilitado'} para ${roleLabel} · matrice SIS-321 actualizada sin recarga`,
+    )
+  }
+
+  const handleColumn = (resourceId, grant) => {
+    setSystemColumn(resourceId, grant)
+    toast.info(
+      grant ? 'Columna habilitada' : 'Columna deshabilitada',
+      `${resourceId} aplicada a los ${SIS321_ROLES.length} roles · evento MATRIX_BULK_CHANGED`,
     )
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <SectionTitle
-        icon={Users2}
-        title="Matriz de accesos granular"
-        subtitle="Roles x permisos. Cada casilla alterada reevalua la sesion en caliente y sella un evento."
+        icon={Scale}
+        title="Matriz de roles y permisos SIS-321"
+        subtitle="Planilla de la UCB: nueve roles por sistema y recurso (RED, CORREO, SISTEMA A y SISTEMA B). Cada casilla alterada sella un evento critico."
         actions={
           <button
             type="button"
             onClick={() => {
-              resetRbac()
-              toast.info('Matriz restaurada', 'Permisos base del despacho reaplicados')
+              resetSis321()
+              toast.info('Matriz restaurada', 'Permisos base de la planilla SIS-321 reaplicados')
             }}
             className="ls-btn-secondary text-xs"
           >
-            <RotateCcw className="h-3.5 w-3.5" /> Restaurar base
+            <RotateCcw className="h-3.5 w-3.5" /> Restaurar planilla
           </button>
         }
       />
 
-      <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-        <div className="ls-card flex flex-wrap items-center gap-3 p-3.5">
-          <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-            <SlidersHorizontal className="h-3.5 w-3.5" /> Filtro criticidad
-          </span>
-          {[
-            { id: 'all', label: 'Todos' },
-            { id: 'critica', label: 'Criticos' },
-            { id: 'alta', label: 'Altos' },
-            { id: 'media', label: 'Medios' },
-          ].map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setFilter(f.id)}
-              className={cn(
-                'rounded-full border px-3 py-1 text-[11px] font-medium transition-all duration-300',
-                filter === f.id
-                  ? 'border-accent/70 bg-accent/15 text-accent'
-                  : 'border-line/50 text-muted hover:border-accent/50 hover:text-ink',
-              )}
-            >
-              {f.label}
-            </button>
-          ))}
-          <div className="ml-auto flex items-center gap-2">
-            {canManage ? (
-              <Badge tone="pastel">
-                <ShieldCheck className="h-3 w-3" /> Rbac habilitado para {session?.role}
-              </Badge>
-            ) : (
-              <Badge tone="danger">
-                <KeyRound className="h-3 w-3" /> Solo lectura · falta RBAC_MANAGE
-              </Badge>
-            )}
-          </div>
-        </div>
-
-        <div className="ls-card flex items-center gap-3 p-3.5">
-          <div className="text-center">
-            <p className="font-display text-xl font-bold text-pastel">
-              {relativePercent(
-                Object.values(rbac).reduce((a, r) => a + r.length, 0),
-                ROLES.length * PERMISSIONS.length,
-              )}
-              %
-            </p>
-            <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted">Cobertura</p>
-          </div>
-        </div>
-      </div>
-
-      <motion.div layout className="ls-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="ls-table min-w-[720px]">
-            <thead>
-              <tr>
-                <th className="w-[280px]">Permiso</th>
-                {ROLES.map((r) => {
-                  const count = rbac[r.id]?.length ?? 0
-                  return (
-                    <th key={r.id} className="text-center">
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="font-display text-[12px] font-bold text-ink">{r.label}</span>
-                        <span className="font-mono text-[9.5px] normal-case tracking-normal text-muted">
-                          {count}/{PERMISSIONS.length} · {r.short}
-                        </span>
-                      </div>
-                    </th>
-                  )
-                })}
-              </tr>
-            </thead>
-            {groups.map(([group, permissions]) => (
-              <tbody key={group}>
-                <tr className="bg-surface2/25 hover:bg-surface2/25">
-                  <td colSpan={ROLES.length + 1} className="border-b border-line/40">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent">
-                      {group}
-                    </span>
-                  </td>
-                </tr>
-                {permissions
-                  .filter((p) => visiblePermissions.includes(p))
-                  .map((p) => (
-                    <tr key={p.id}>
-                      <td>
-                        <p className="font-mono text-[11.5px] font-semibold text-info">{p.id}</p>
-                        <p className="text-[11px] text-muted">{p.label}</p>
-                      </td>
-                      {ROLES.map((r) => (
-                        <PermissionCell
-                          key={`${r.id}-${p.id}`}
-                          roleId={r.id}
-                          permission={p}
-                          checked={(rbac[r.id] ?? []).includes(p.id)}
-                          canManage={canManage}
-                          onToggle={() => handleToggle(r.id, p.id)}
-                        />
-                      ))}
-                    </tr>
-                  ))}
-              </tbody>
-            ))}
-          </table>
-        </div>
-      </motion.div>
-
-      {/* Resumen de roles */}
+      {/* Sistemas */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {ROLES.map((r) => (
-          <div key={r.id} className="ls-card p-3.5">
-            <div className="flex items-center justify-between">
-              <p className="font-display text-sm font-bold">{r.label}</p>
-              <Badge tone={r.accent === 'pastel' ? 'pastel' : r.accent === 'info' ? 'info' : 'accent'}>
-                {(rbac[r.id] ?? []).length} permisos
-              </Badge>
-            </div>
-            <p className="mt-1 text-[11px] leading-snug text-muted">{r.description}</p>
-            <div className="mt-2.5 flex flex-wrap gap-1">
-              {(rbac[r.id] ?? []).slice(0, 5).map((id) => (
-                <span key={id} className="ls-chip !px-1.5 !py-0.5 text-[9px]">
-                  {id}
+        {SIS321_SYSTEMS.map((system) => {
+          const Icon = SYSTEM_ICONS[system.id]
+          const granted = SIS321_ROLES.reduce(
+            (acc, role) => acc + (sis321[role.id] ?? []).filter((id) => system.resources.some((r) => r.id === id)).length,
+            0,
+          )
+          return (
+            <motion.div
+              key={system.id}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+              className="ls-card-hover p-5"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <span className="grid h-9 w-9 place-items-center rounded-lg border border-accent/40 bg-accent/10 text-accent">
+                  <Icon className="h-4 w-4" />
                 </span>
-              ))}
-              {(rbac[r.id] ?? []).length > 5 && (
-                <span className="ls-chip !px-1.5 !py-0.5 text-[9px]">+{rbac[r.id].length - 5}</span>
-              )}
-            </div>
-          </div>
-        ))}
+                <span className="font-display text-xl font-bold text-accent">
+                  {relativePercent(granted, SIS321_ROLES.length * system.resources.length)}%
+                </span>
+              </div>
+              <p className="mt-2.5 font-display text-[13px] font-bold tracking-tight">{system.label}</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-muted">{system.description}</p>
+              <div className="mt-2.5 flex flex-wrap gap-1">
+                {system.resources.map((r) => (
+                  <span key={r.id} className="ls-chip !px-1.5 !py-0.5 text-[9px]">
+                    {r.label}
+                  </span>
+                ))}
+              </div>
+            </motion.div>
+          )
+        })}
       </div>
+
+      {/* Filtros */}
+      <div className="ls-card flex flex-wrap items-center gap-3 p-5">
+        <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          <SlidersHorizontal className="h-3.5 w-3.5" /> Cobertura por rol
+        </span>
+        {FILTERS.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => setFilter(f.id)}
+            className={cn(
+              'rounded-full border px-3 py-1 text-[11px] font-medium transition-all duration-300',
+              filter === f.id
+                ? 'border-accent/70 bg-accent/15 text-accent'
+                : 'border-line/50 text-muted hover:border-accent/50 hover:text-ink',
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
+
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          <div className="text-right">
+            <p className="font-display text-xl font-bold text-accent">{coverage.global}%</p>
+            <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted">
+              {coverage.grants}/{SIS321_ROLES.length * RESOURCE_COUNT} celdas
+            </p>
+          </div>
+          {canEdit ? (
+            <Badge tone="pastel">
+              <ShieldCheck className="h-3 w-3" /> Edicion habilitada
+            </Badge>
+          ) : (
+            <Badge tone="danger">
+              <Key className="h-3 w-3" /> Solo lectura · falta RBAC_MANAGE
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      <Sis321Matrix
+        roles={visibleRoles}
+        matrix={sis321}
+        canEdit={canEdit}
+        onToggle={handleToggle}
+        onToggleColumn={handleColumn}
+      />
+
+      <p className="flex items-start gap-2 text-[11.5px] leading-snug text-muted">
+        <Scale className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+        Regla de separacion de funciones: ningun rol de control (Auditor, Analista, Autorizador)
+        acumula permisos de modificacion sobre el Sistema B. El encabezado de cada recurso marca
+        cuantos de los{' '}
+        {SIS321_ROLES.length} roles lo tienen habilitado y permite conmutar la columna completa.
+      </p>
 
       {lastChange && (
         <div className="ls-panel flex flex-wrap items-center gap-3 font-mono text-[11px] text-muted">
           <span className="text-accent">ULTIMO EVENTO</span>
           <span className="text-info">{lastChange.type}</span>
           <span className="text-ink">{lastChange.message}</span>
-          <span className="ml-auto">
-            severidad:{' '}
-            <span className={SEVERITY_TONE[lastChange.severity] ?? 'text-info'}>
-              {lastChange.severity}
-            </span>
-          </span>
         </div>
       )}
     </div>

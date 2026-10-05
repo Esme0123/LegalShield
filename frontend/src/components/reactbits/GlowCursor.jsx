@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useAppStore } from '@/store/useAppStore'
 import { rgbaToken, themeToken } from '@/lib/format'
 
 /**
@@ -6,9 +7,13 @@ import { rgbaToken, themeToken } from '@/lib/format'
  * Cursor con estela de luz usado como "linterna de inspeccion forense".
  * Se monta solo en la vista de auditoria; el contenedor oculta el cursor
  * nativo para que la estela sea el punto de foco real.
+ *
+ * Modo Didactico apagado: la estela se acorta y se apaga la etiqueta
+ * `data-inspect`, dejando un halo tenue que no tape la tabla de auditoria.
  */
 export default function GlowCursor({ color = '--ls-accent', trail = 16 }) {
   const canvasRef = useRef(null)
+  const didactic = useAppStore((s) => s.didactic)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -18,9 +23,13 @@ export default function GlowCursor({ color = '--ls-accent', trail = 16 }) {
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const rgb = themeToken(color, '110 204 175')
+    // Sin modo didactico la estela es corta y el halo discreto.
+    const trailLength = didactic ? trail : Math.max(4, Math.round(trail / 3))
+    const haloScale = didactic ? 1 : 0.45
+    const showLabels = didactic
 
     const pointer = { x: -200, y: -200, px: -200, py: -200 }
-    const points = Array.from({ length: trail }, () => ({ x: -200, y: -200 }))
+    const points = Array.from({ length: trailLength }, () => ({ x: -200, y: -200 }))
     let width = 0
     let height = 0
     let dpr = 1
@@ -57,20 +66,20 @@ export default function GlowCursor({ color = '--ls-accent', trail = 16 }) {
       pointer.py += (pointer.y - pointer.py) * 0.22
 
       points.unshift({ x: pointer.px, y: pointer.py })
-      if (points.length > trail) points.pop()
+      if (points.length > trailLength) points.pop()
 
       if (visible) {
         // Estela: mismo punto repetido con radio decreciente.
         points.forEach((p, i) => {
           const t = 1 - i / points.length
           ctx.beginPath()
-          ctx.arc(p.x, p.y, 2 + t * 26, 0, Math.PI * 2)
-          ctx.fillStyle = rgbaToken(rgb, 0.03 + t * 0.16)
+          ctx.arc(p.x, p.y, (2 + t * 26) * haloScale, 0, Math.PI * 2)
+          ctx.fillStyle = rgbaToken(rgb, 0.03 + t * 0.16 * haloScale)
           ctx.fill()
         })
 
         ctx.beginPath()
-        ctx.arc(pointer.px, pointer.py, inspected ? 15 : 9, 0, Math.PI * 2)
+        ctx.arc(pointer.px, pointer.py, (inspected ? 15 : 9) * haloScale, 0, Math.PI * 2)
         ctx.strokeStyle = rgbaToken(rgb, 0.9)
         ctx.lineWidth = 1.4
         ctx.stroke()
@@ -80,7 +89,7 @@ export default function GlowCursor({ color = '--ls-accent', trail = 16 }) {
         ctx.fillStyle = rgbaToken(rgb, 1)
         ctx.fill()
 
-        if (inspected) {
+        if (inspected && showLabels) {
           ctx.font = '600 11px ui-monospace, monospace'
           ctx.fillStyle = rgbaToken(rgb, 0.95)
           ctx.fillText(inspected, pointer.px + 20, pointer.py - 12)
@@ -105,7 +114,7 @@ export default function GlowCursor({ color = '--ls-accent', trail = 16 }) {
       window.removeEventListener('pointermove', onMove)
       document.removeEventListener('pointerleave', onLeave)
     }
-  }, [color, trail])
+  }, [color, trail, didactic])
 
   return (
     <canvas

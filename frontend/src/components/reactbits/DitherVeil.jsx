@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Eye, KeyRound, Lock, ShieldAlert } from 'lucide-react'
+import { useTheme } from '@/context/ThemeContext'
+import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/cn'
 import { makeDitherTexture } from '@/lib/dither'
 import { themeToken } from '@/lib/format'
@@ -9,6 +11,9 @@ import { themeToken } from '@/lib/format'
  * Dither Veil (React Bits · simulacion)
  * Capa de privacidad retro: el documento queda tramado y difuminado hasta que un
  * rol con permiso lo desbloquea de forma explicita y justificada.
+ *
+ * Modo Didactico apagado: el velo se reduce a un desenfoque suave sin trama
+ * dither, para que el contenido reservado se lea sin ruido visual.
  */
 export default function DitherVeil({
   revealed = false,
@@ -24,15 +29,18 @@ export default function DitherVeil({
 }) {
   const [open, setOpen] = useState(false)
   const [justification, setJustification] = useState('')
+  const { isDark } = useTheme()
+  const didactic = useAppStore((s) => s.didactic)
 
   const dither = useMemo(
     () =>
       makeDitherTexture({
-        fg: themeToken('--ls-highlight', '173 231 146'),
-        bg: themeToken('--ls-overlay', '9 25 60'),
+        // En claro la trama necesita tinta, no el crema pastel del tema oscuro.
+        fg: isDark ? themeToken('--ls-highlight', '173 231 146') : themeToken('--ls-ink', '16 42 82'),
+        bg: isDark ? themeToken('--ls-overlay', '9 25 60') : themeToken('--ls-bg', '248 250 252'),
         opacity: 0.42,
       }),
-    [],
+    [isDark],
   )
 
   const eligible = allowedRoles.includes(sessionRole)
@@ -57,21 +65,23 @@ export default function DitherVeil({
 
       {!revealed && (
         <>
-          <div
-            className="pointer-events-none absolute inset-0 opacity-90 mix-blend-screen transition-opacity duration-500"
-            style={dither}
-          />
+          {didactic && (
+            <div
+              className="pointer-events-none absolute inset-0 opacity-90 mix-blend-screen transition-opacity duration-500"
+              style={dither}
+            />
+          )}
           <div className="pointer-events-none absolute inset-0 bg-scanlines opacity-20" />
           <div className="absolute inset-0 grid place-items-center bg-bg/25 p-4 backdrop-blur-[2px]">
             <motion.div
               initial={{ opacity: 0, scale: 0.94 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="w-full max-w-xs rounded-xl border border-pastel/40 bg-surface/95 p-3.5 text-center shadow-lift"
+              className="w-full max-w-xs rounded-xl border border-ok/40 bg-surface/95 p-3.5 text-center shadow-lift"
             >
-              <span className="mx-auto mb-2 grid h-9 w-9 place-items-center rounded-full border border-pastel/50 bg-pastel/10 text-pastel">
+              <span className="mx-auto mb-2 grid h-9 w-9 place-items-center rounded-full border border-ok/50 bg-ok/10 text-ok">
                 <Lock className="h-4 w-4" />
               </span>
-              <p className="font-display text-[13px] font-bold text-pastel">Contenido {classification}</p>
+              <p className="font-display text-[13px] font-bold text-ok">Contenido {classification}</p>
               <p className="mt-1 line-clamp-1 font-mono text-[10.5px] text-muted">{docName}</p>
 
               {!open ? (

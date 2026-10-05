@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Check, ShieldCheck, Ticket } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/cn'
 import { formatDateTime } from '@/lib/format'
 
@@ -9,6 +10,9 @@ import { formatDateTime } from '@/lib/format'
  * Comprobante de auditoria / token JWT temporal presentado como boleto con
  * linea de perforacion. Al validarlo, las dos mitades se rasgan y se separan,
  * dejando un talon sellado como evidencia del uso unico.
+ *
+ * Con el Modo Didactico apagado el boleto se valida en el acto (sin separacion
+ * de mitades ni micro shreds) para que la demostracion no pierda el hilo.
  */
 
 /*
@@ -34,9 +38,15 @@ export default function TearTicket({
 }) {
   const [shred, setShred] = useState(false)
   const [torn, setTorn] = useState(status === 'validado')
+  const didactic = useAppStore((s) => s.didactic)
 
   const handleTear = () => {
     if (torn || shred) return
+    if (!didactic) {
+      setTorn(true)
+      onTear?.()
+      return
+    }
     setShred(true)
     setTimeout(() => {
       setTorn(true)
@@ -108,7 +118,7 @@ export default function TearTicket({
                 initial={{ scale: 1.6, opacity: 0, rotate: -14 }}
                 animate={{ scale: 1, opacity: 1, rotate: -8 }}
                 transition={{ type: 'spring', stiffness: 320, damping: 14 }}
-                className="inline-flex items-center gap-1.5 rounded-md border-2 border-pastel px-2 py-0.5 font-mono text-[10px] font-bold tracking-[0.2em] text-pastel"
+                className="inline-flex items-center gap-1.5 rounded-md border-2 border-ok px-2 py-0.5 font-mono text-[10px] font-bold tracking-[0.2em] text-ok"
               >
                 <Check className="h-3 w-3" /> VALIDADO
               </motion.span>

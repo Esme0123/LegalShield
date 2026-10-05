@@ -16,7 +16,7 @@
           var theme = stored === 'light' ? 'light' : 'dark';
           document.documentElement.setAttribute('data-theme', theme);
           var meta = document.querySelector('meta[name="theme-color"]');
-          if (meta) meta.setAttribute('content', theme === 'light' ? '#f3ecb0' : '#112e81');
+          if (meta) meta.setAttribute('content', theme === 'light' ? '#f8fafc' : '#112e81');
         } catch (e) {
           document.documentElement.setAttribute('data-theme', 'dark');
         }

@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { FileText } from 'lucide-react'
+import { Scroll } from 'lucide-react'
+import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/cn'
 
 /**
  * Folder Float (React Bits · simulacion)
  * Carpeta 3D que se despliega al hacer hover (o tap en movil) dejando ver los
  * documentos interiores. Construido sobre CSS 3D, sin motor de escena.
+ *
+ * Con el Modo Didactico apagado la carpeta deja de abrirse sola al pasar el
+ * cursor: el despliegue exige un clic explicito y el texto de ayuda cambia.
  */
 export default function FolderFloat({
   docs = [],
@@ -19,15 +23,16 @@ export default function FolderFloat({
   onTap,
   disabled = false,
 }) {
+  const didactic = useAppStore((s) => s.didactic)
   const [open, setOpen] = useState(false)
   const frame = useRef(null)
   const sheets = docs.slice(0, 4)
 
   useEffect(() => {
     if (!open) return undefined
-    const timer = setTimeout(() => setOpen(false), 2600)
+    const timer = setTimeout(() => setOpen(false), didactic ? 2600 : 1600)
     return () => clearTimeout(timer)
-  }, [open])
+  }, [open, didactic])
 
   const toggle = () => {
     if (disabled) return
@@ -38,7 +43,7 @@ export default function FolderFloat({
   return (
     <div
       className={cn('group relative', className)}
-      onMouseEnter={() => !disabled && setOpen(true)}
+      onMouseEnter={() => !disabled && didactic && setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onClick={toggle}
       onKeyDown={(e) => {
@@ -69,20 +74,22 @@ export default function FolderFloat({
               return (
                 <motion.div
                   key={doc.id ?? doc.name ?? i}
-                  className="absolute inset-x-0 top-0 rounded-md border border-lineSoft/40 bg-[#f3ecb0] px-2.5 py-2 text-navy shadow-lg"
+                  className="absolute inset-x-0 top-0 rounded-md border border-lineSoft/45 bg-surface px-2.5 py-2 text-navy shadow-lg"
                   animate={{ y: lift, rotateZ: open ? (i % 2 === 0 ? -1.6 : 1.6) : 0, opacity: open ? 1 : 0.62 }}
                   transition={{ type: 'spring', stiffness: 260, damping: 22, delay: open ? i * 0.055 : 0 }}
                   style={{ transformOrigin: 'bottom center', zIndex: 10 + i }}
                 >
                   <div className="flex items-center gap-1.5">
-                    <FileText className="h-3 w-3 shrink-0 text-indigo" />
+                    <Scroll className="h-3 w-3 shrink-0 text-indigo" />
                     <span className="truncate font-mono text-[9.5px] leading-tight font-semibold">
                       {doc.name}
                     </span>
                   </div>
                   <div className="mt-1 flex items-center justify-between font-mono text-[8px] text-indigo/70">
                     <span>{doc.pages} pags</span>
-                    <span className="uppercase">{doc.classification?.slice(0, 4)}</span>
+                    <span className="rounded bg-gold px-1 text-goldInk/80 uppercase">
+                      {doc.classification?.slice(0, 4)}
+                    </span>
                   </div>
                   <div className="mt-1 h-px w-full bg-indigo/20" />
                   <div className="mt-1 flex gap-0.5">
@@ -132,7 +139,11 @@ export default function FolderFloat({
       <div className="relative z-20 -mt-1">{children}</div>
 
       <p className={cn('mt-2 text-[10px] font-medium transition-colors', accentClass)}>
-        {open ? 'Desplegando contenido del expediente…' : 'Hover para inspeccionar documentos'}
+        {open
+          ? 'Desplegando contenido del expediente…'
+          : didactic
+            ? 'Hover para inspeccionar documentos'
+            : 'Clic para inspeccionar documentos'}
       </p>
     </div>
   )

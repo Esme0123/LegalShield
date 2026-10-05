@@ -8,6 +8,15 @@
    #344d67 Steel Slate · #6eccaf Mint Teal · #ade792 Pastel Green
    #f3ecb0 Soft Cream · #112e81 Deep Navy · #4647ae Royal Indigo
    #4382df Electric Blue · #aaccd6 Ice Blue
+
+   MODO CLARO (FONDO LIMPIO)
+   Fondo #f8fafc · tarjetas #ffffff · texto #112e81 / #344d67
+   Acentos #4647ae (Royal Indigo) y #6eccaf (Mint Teal)
+   Bordes sutiles: #aaccd6 y #344d67 al 10-25% de opacidad
+
+   USO RESTRINGIDO DE #f3ecb0 (Soft Cream)
+   Solo badges pequenos, alertas de advertencia y highlights secundarios.
+   NUNCA como fondo global ni como fondo de tarjeta.
    ============================================================= */
 
 @layer base {
@@ -28,25 +37,35 @@
     --ls-highlight: 173 231 146; /* #ade792 Pastel   */
     --ls-danger: 224 96 116;
     --ls-on-accent: 9 25 60;
+    --ls-ok: 173 231 146; /* #ade792 Pastel   */
+    --ls-warn: 243 236 176; /* #f3ecb0 Cream    */
+    --ls-gold: 243 236 176; /* #f3ecb0 Cream    */
+    --ls-gold-ink: 17 46 129; /* #112e81 Deep Navy */
     color-scheme: dark;
   }
 
   [data-theme='light'] {
-    --ls-bg: 243 236 176; /* #f3ecb0 Cream    */
-    --ls-bg-deep: 236 226 154;
-    --ls-surface: 255 255 255;
-    --ls-surface-2: 170 204 214; /* #aaccd6 Ice     */
-    --ls-overlay: 226 218 152;
-    --ls-border: 70 71 174; /* #4647ae Indigo   */
-    --ls-border-soft: 52 77 103; /* #344d67 Steel  */
+    /* Fondo blanco slate limpio: el crema deja de ser fondo global. */
+    --ls-bg: 248 250 252; /* #f8fafc Slate    */
+    --ls-bg-deep: 241 245 249; /* #f1f5f9           */
+    --ls-surface: 255 255 255; /* #ffffff tarjeta   */
+    --ls-surface-2: 244 248 250; /* #f4f8fa contenedor */
+    --ls-overlay: 255 255 255;
+    --ls-border: 52 77 103; /* #344d67 Steel (se usa al 10%) */
+    --ls-border-soft: 170 204 214; /* #aaccd6 Ice       */
     --ls-text: 17 46 129; /* #112e81 Deep Navy */
     --ls-text-muted: 52 77 103; /* #344d67 Steel    */
     --ls-accent: 70 71 174; /* #4647ae Indigo   */
     --ls-accent-ink: 255 255 255;
-    --ls-info: 43 96 168;
+    --ls-info: 46 105 199; /* electric legible  */
     --ls-highlight: 110 204 175; /* #6eccaf Mint     */
     --ls-danger: 176 42 66;
     --ls-on-accent: 255 255 255;
+    /* Sobre fondo blanco los tonos claros no alcanzan contraste: se oscurecen. */
+    --ls-ok: 26 122 96;
+    --ls-warn: 133 100 11;
+    --ls-gold: 243 236 176; /* #f3ecb0 Cream (badge) */
+    --ls-gold-ink: 17 46 129; /* #112e81 Deep Navy */
     color-scheme: light;
   }
 
@@ -69,6 +88,13 @@
     transition:
       background-color 300ms cubic-bezier(0.22, 1, 0.36, 1),
       color 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Modo claro: los velos radiales se apagan para no lavar el blanco. */
+  [data-theme='light'] body {
+    background-image:
+      radial-gradient(120% 80% at 50% -12%, rgb(var(--ls-info) / 0.07), transparent 62%),
+      radial-gradient(80% 60% at 100% 100%, rgb(var(--ls-accent) / 0.05), transparent 58%);
   }
 
   ::selection {
@@ -142,8 +168,14 @@
 }
 
 @layer components {
+  /* Contenedor base. El borde y la sombra se suavizan por tema: en modo claro
+     una linea #aaccd6 al 25% basta para separar del #ffffff sin recargar. */
   .ls-card {
-    @apply rounded-2xl border border-line/60 bg-surface/80 shadow-card backdrop-blur-md transition-colors duration-300;
+    @apply rounded-2xl border border-line/45 bg-surface/80 shadow-card backdrop-blur-md transition-colors duration-300;
+  }
+
+  [data-theme='light'] .ls-card {
+    @apply border-lineSoft/25 bg-surface shadow-card-soft backdrop-blur-none;
   }
 
   .ls-card-hover {
@@ -151,11 +183,20 @@
   }
 
   .ls-panel {
-    @apply rounded-xl border border-line/40 bg-surface2/30 p-4;
+    @apply rounded-xl border border-line/35 bg-surface2/30 p-5;
+  }
+
+  [data-theme='light'] .ls-panel {
+    @apply border-lineSoft/20 bg-surface2;
   }
 
   .ls-chip {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-line/50 bg-surface2/60 px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider text-muted transition-colors duration-300;
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line/45 bg-surface2/60 px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider text-muted transition-colors duration-300;
+  }
+
+  /* Badge dorado: uso autorizado del Soft Cream (#f3ecb0) */
+  .ls-chip-gold {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-navy/70 bg-gold px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wider text-goldInk;
   }
 
   .ls-btn {
@@ -167,7 +208,11 @@
   }
 
   .ls-btn-secondary {
-    @apply ls-btn border-line bg-surface2/40 text-ink hover:border-accent/70 hover:bg-surface2/70;
+    @apply ls-btn border-line/60 bg-surface2/40 text-ink hover:border-accent/70 hover:bg-surface2/70;
+  }
+
+  [data-theme='light'] .ls-btn-secondary {
+    @apply border-lineSoft/30 bg-surface;
   }
 
   .ls-btn-ghost {
@@ -180,6 +225,10 @@
 
   .ls-input {
     @apply w-full rounded-lg border border-line/60 bg-surface2/40 px-3.5 py-2.5 text-sm text-ink placeholder:text-muted/60 transition-all duration-300 focus:border-info focus:outline-none focus:ring-4 focus:ring-info/15;
+  }
+
+  [data-theme='light'] .ls-input {
+    @apply border-lineSoft/30 bg-surface;
   }
 
   .ls-label {
@@ -195,14 +244,24 @@
     mask-image: radial-gradient(70% 60% at 50% 30%, #000 20%, transparent 100%);
   }
 
+  [data-theme='light'] .ls-grid-overlay {
+    @apply opacity-30;
+  }
+
   .ls-table {
     @apply w-full border-collapse text-left text-sm;
   }
   .ls-table thead th {
-    @apply sticky top-0 z-10 whitespace-nowrap border-b border-line/60 bg-surface/95 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted backdrop-blur;
+    @apply sticky top-0 z-10 whitespace-nowrap border-b border-line/60 bg-surface/95 px-5 py-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted backdrop-blur;
   }
   .ls-table tbody td {
-    @apply border-b border-line/25 px-4 py-3 align-middle;
+    @apply border-b border-line/20 px-5 py-4 align-middle;
+  }
+  [data-theme='light'] .ls-table thead th {
+    @apply border-lineSoft/25 bg-surface;
+  }
+  [data-theme='light'] .ls-table tbody td {
+    @apply border-lineSoft/15;
   }
   .ls-table tbody tr {
     @apply transition-colors duration-200;

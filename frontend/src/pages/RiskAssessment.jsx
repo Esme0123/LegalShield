@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react'
+﻿import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Gauge, Grid3x3, ShieldAlert, ShieldCheck, Target } from 'lucide-react'
+import { Gauge, Grid3x3, RotateCcw, Scroll, ShieldAlert, ShieldCheck, Target } from 'lucide-react'
+import ClassificationTable from '@/components/matrix/ClassificationTable'
 import { Badge, Progress, SectionTitle } from '@/components/ui/primitives'
+import { useTheme } from '@/context/ThemeContext'
 import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { cn } from '@/lib/cn'
@@ -16,20 +18,34 @@ const SCORE_LABELS = [
   'Optimizado',
 ]
 
-/** Banda cromatica del mapa de calor: pastel (bajo) → indigo (alto). */
+const TABS = [
+  { id: 'controles', label: 'Autoevaluacion ISO', icon: Gauge },
+  { id: 'clasificacion', label: 'Matriz de clasificacion', icon: Scroll },
+  { id: 'riesgos', label: 'Mapa de calor', icon: Grid3x3 },
+]
+
+/** Banda cromatica del mapa de calor: pastel (bajo) â†’ indigo (alto). */
 function heatTone(score) {
-  if (score <= 4) return { bg: 'bg-pastel/25', border: 'border-pastel/70', text: 'text-pastel', label: 'Bajo' }
+  if (score <= 4) return { bg: 'bg-ok/25', border: 'border-ok/70', text: 'text-ok', label: 'Bajo' }
   if (score <= 9) return { bg: 'bg-accent/25', border: 'border-accent/70', text: 'text-accent', label: 'Medio' }
   if (score <= 14) return { bg: 'bg-indigo/35', border: 'border-indigo/80', text: 'text-cream', label: 'Alto' }
   return { bg: 'bg-navy/80', border: 'border-danger/70', text: 'text-cream', label: 'Critico' }
 }
 
 function MaturityRing({ value, size = 120, label, tone = 'pastel' }) {
+  const { isDark } = useTheme()
   const stroke = 9
   const radius = (size - stroke) / 2
   const circumference = 2 * Math.PI * radius
   const offset = circumference * (1 - value / 100)
-  const tones = { pastel: '#ade792', accent: '#6eccaf', info: '#4382df' }
+  /* El anillo debe leerse en ambos temas: verde pastel en oscuro, verde
+     profundo en claro (AA sobre blanco). */
+  const TONES = {
+    pastel: isDark ? '#ade792' : '#1a7a60',
+    accent: isDark ? '#6eccaf' : '#4647ae',
+    info: isDark ? '#4382df' : '#2e69c7',
+  }
+  const color = TONES[tone] ?? TONES.accent
 
   return (
     <div className="flex flex-col items-center gap-1.5">
@@ -48,14 +64,14 @@ function MaturityRing({ value, size = 120, label, tone = 'pastel' }) {
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke={tones[tone]}
+            stroke={color}
             strokeWidth={stroke}
             strokeLinecap="round"
             strokeDasharray={circumference}
             initial={{ strokeDashoffset: circumference }}
             animate={{ strokeDashoffset: offset }}
             transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }}
-            style={{ filter: `drop-shadow(0 0 6px ${tones[tone]}66)` }}
+            style={{ filter: `drop-shadow(0 0 6px ${color}66)` }}
           />
           {/* Marcas de los 5 niveles */}
           {[0, 1, 2, 3, 4].map((i) => {
@@ -75,7 +91,7 @@ function MaturityRing({ value, size = 120, label, tone = 'pastel' }) {
           })}
         </svg>
         <div className="absolute inset-0 grid place-items-center">
-          <span className="font-display text-xl font-bold tabular-nums" style={{ color: tones[tone] }}>
+          <span className="font-display text-xl font-bold tabular-nums" style={{ color }}>
             {value}%
           </span>
         </div>
@@ -88,12 +104,16 @@ function MaturityRing({ value, size = 120, label, tone = 'pastel' }) {
 export default function RiskAssessment() {
   const controls = useAppStore((s) => s.riskControls)
   const risks = useAppStore((s) => s.risks)
+  const infoAssets = useAppStore((s) => s.infoAssets)
   const setControlScore = useAppStore((s) => s.setControlScore)
   const setRiskCell = useAppStore((s) => s.setRiskCell)
+  const setInfoAssetValue = useAppStore((s) => s.setInfoAssetValue)
+  const resetInfoAssets = useAppStore((s) => s.resetInfoAssets)
   const hasPermission = useAppStore((s) => s.hasPermission)
 
   const canEdit = hasPermission('RISK_ASSESS')
   const [activeRisk, setActiveRisk] = useState(risks[0]?.id ?? null)
+  const [tab, setTab] = useState('controles')
 
   const overall = useMemo(() => {
     if (!controls.length) return 0
@@ -133,25 +153,70 @@ export default function RiskAssessment() {
     setRiskCell(selected.id, probability, impact)
   }
 
+  const classifyAsset = (assetId, dimension, value) => {
+    if (!canEdit) {
+      toast.danger('Cambio denegado', 'RISK_ASSESS no esta habilitado para tu rol')
+      return
+    }
+    setInfoAssetValue(assetId, dimension, value)
+  }
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <SectionTitle
         icon={ShieldCheck}
         title="Autoevaluacion ISO/IEC 27001:2022"
-        subtitle="Controles del Anexo A puntuados de 0 a 5 · cada ajuste genera evidencia de auditoria"
+        subtitle="Controles del Anexo A puntuados de 0 a 5 Â· cada ajuste genera evidencia de auditoria"
         actions={
           canEdit ? (
             <Badge tone="accent">
               <Target className="h-3 w-3" /> Evaluacion editable
             </Badge>
           ) : (
-            <Badge tone="danger">Solo lectura · falta RISK_ASSESS</Badge>
+            <Badge tone="danger">Solo lectura Â· falta RISK_ASSESS</Badge>
           )
         }
       />
 
+      {/* Tabs */}
+      <div className="ls-card flex flex-wrap items-center gap-2 p-3">
+        {TABS.map((t) => {
+          const Icon = t.icon
+          const active = tab === t.id
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={cn(
+                'inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-[12.5px] font-semibold transition-all duration-300',
+                active ? 'bg-accent/15 text-accent shadow-glow' : 'text-muted hover:bg-surface2/50 hover:text-ink',
+              )}
+            >
+              <Icon className="h-4 w-4" /> {t.label}
+            </button>
+          )
+        })}
+        {tab === 'clasificacion' && (
+          <button
+            type="button"
+            onClick={() => {
+              resetInfoAssets()
+              toast.info('Matriz restaurada', 'Valores base de clasificacion reaplicados')
+            }}
+            className="ls-btn-ghost ml-auto text-[11px]"
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> Restaurar valores
+          </button>
+        )}
+      </div>
+
+      {tab === 'clasificacion' ? (
+        <ClassificationTable assets={infoAssets} canEdit={canEdit} onChange={classifyAsset} />
+      ) : (
+        <>
       {/* Radar de madurez */}
-      <section className="ls-card p-4 sm:p-5">
+      <section className="ls-card p-6 sm:p-7">
         <div className="grid gap-5 lg:grid-cols-[auto_1fr] lg:items-center">
           <div className="flex justify-center">
             <MaturityRing value={overall} size={148} label="Madurez global" tone="pastel" />
@@ -203,11 +268,11 @@ export default function RiskAssessment() {
 
       <div className="grid gap-4 xl:grid-cols-[1.05fr_1fr]">
         {/* Controles */}
-        <section className="ls-card p-4">
+        <section className="ls-card p-6">
           <SectionTitle
             icon={Gauge}
             title="Autoevaluacion de controles"
-            subtitle="0 Inexistente · 5 Optimizado"
+            subtitle="0 Inexistente Â· 5 Optimizado"
           />
           <div className="space-y-4">
             {controls.map((c) => (
@@ -222,11 +287,11 @@ export default function RiskAssessment() {
                     className={cn(
                       'shrink-0 rounded-md border px-2 py-0.5 font-mono text-[10px]',
                       c.score >= c.target
-                        ? 'border-pastel/60 bg-pastel/12 text-pastel'
+                        ? 'border-ok/60 bg-ok/12 text-ok'
                         : 'border-danger/50 bg-danger/10 text-danger',
                     )}
                   >
-                    {c.score}/5 · {SCORE_LABELS[c.score]}
+                    {c.score}/5 Â· {SCORE_LABELS[c.score]}
                   </span>
                 </div>
 
@@ -253,11 +318,11 @@ export default function RiskAssessment() {
         </section>
 
         {/* Mapa de calor */}
-        <section className="ls-card p-4">
+        <section className="ls-card p-6">
           <SectionTitle
             icon={Grid3x3}
             title="Matriz de calor de riesgos"
-            subtitle="Probabilidad x Impacto · 1 a 5. Seleccione un riesgo y clic en la celda para recolocarlo."
+            subtitle="Probabilidad x Impacto Â· 1 a 5. Seleccione un riesgo y clic en la celda para recolocarlo."
           />
 
           {selected && (
@@ -284,7 +349,7 @@ export default function RiskAssessment() {
                 </div>
               </div>
               <p className="mt-1.5 font-mono text-[10px] text-muted">
-                Tratamiento: {selected.treatment} · celda actual ({selected.impact},{selected.probability})
+                Tratamiento: {selected.treatment} Â· celda actual ({selected.impact},{selected.probability})
               </p>
             </div>
           )}
@@ -342,7 +407,7 @@ export default function RiskAssessment() {
           {/* Leyenda */}
           <div className="mt-4 flex flex-wrap items-center gap-3">
             {[
-              { cls: 'bg-pastel/40 border-pastel', label: 'Bajo 1-4' },
+              { cls: 'bg-ok/40 border-ok', label: 'Bajo 1-4' },
               { cls: 'bg-accent/40 border-accent', label: 'Medio 5-9' },
               { cls: 'bg-indigo/60 border-indigo', label: 'Alto 10-14' },
               { cls: 'bg-navy border-danger', label: 'Critico 15-25' },
@@ -375,7 +440,7 @@ export default function RiskAssessment() {
                         ? 'bg-indigo'
                         : r.probability * r.impact >= 5
                           ? 'bg-accent'
-                          : 'bg-pastel',
+                          : 'bg-ok',
                   )}
                 />
                 <span className="font-mono text-[10px] text-info">{r.id}</span>
@@ -386,12 +451,14 @@ export default function RiskAssessment() {
           </div>
 
           <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-snug text-muted">
-            <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-pastel" />
+            <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ok" />
             El tratamiento sugerido combina reduccion de probabilidad con mitigacion de impacto; los
             riesgos por encima de 14 exigen plan de accion con responsable y fecha.
           </p>
         </section>
       </div>
+        </>
+      )}
     </div>
   )
 }
