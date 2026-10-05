@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#112e81" />
+    <meta
+      name="description"
+      content="LegalShield — Sistema de Gestion Legal con Reingenieria de Seguridad, RBAC granular, auditoria forense y evaluacion ISO 27001."
+    />
+    <title>LegalShield · Seguridad Juridica</title>
+    <script>
+      (function () {
+        try {
+          var stored = JSON.parse(localStorage.getItem('legalshield-theme') || '"dark"');
+          var theme = stored === 'light' ? 'light' : 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', theme === 'light' ? '#f3ecb0' : '#112e81');
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
