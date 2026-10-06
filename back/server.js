@@ -116,15 +116,16 @@ app.use((_req, res) => {
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, _next) => {
-  // Violaciones de restricciones de PostgreSQL que el codigo no anticipa.
-  if (err.code === '23505') {
-    return res.status(409).json({ error: 'El registro ya existe', detail: err.detail })
+  // Violaciones de restricciones de MySQL que el codigo no anticipa.
+  // 1062 = duplicate entry (ER_DUP_ENTRY), 1452 = FK inexistente, 3819 = CHECK.
+  if (err.errno === 1062 || err.code === 'ER_DUP_ENTRY') {
+    return res.status(409).json({ error: 'El registro ya existe', detail: err.sqlMessage })
   }
-  if (err.code === '23503') {
-    return res.status(400).json({ error: 'Referencia invalida a un registro inexistente', detail: err.detail })
+  if (err.errno === 1452 || err.code === 'ER_NO_REFERENCED_ROW_2') {
+    return res.status(400).json({ error: 'Referencia invalida a un registro inexistente', detail: err.sqlMessage })
   }
-  if (err.code === '23514' || err.code === '22P02') {
-    return res.status(422).json({ error: 'Violacion de restriccion de integridad', detail: err.detail })
+  if (err.errno === 3819) {
+    return res.status(422).json({ error: 'Violacion de restriccion de integridad', detail: err.sqlMessage })
   }
 
   const status = err.status || 500

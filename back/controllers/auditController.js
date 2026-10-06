@@ -40,21 +40,18 @@ function assertDate(value, field) {
 async function listLogs(req, res) {
   const where = []
   const params = []
-  let index = 1
 
   const from = assertDate(req.query.from, 'from')
   const to = assertDate(req.query.to, 'to')
   if (from && to && from > to) throw badRequest('El rango from/to es invalido: from es posterior a to')
 
   if (from) {
-    where.push(`timestamp >= $${index}`)
+    where.push('"timestamp" >= ?')
     params.push(from)
-    index += 1
   }
   if (to) {
-    where.push(`timestamp <= $${index}`)
+    where.push('"timestamp" <= ?')
     params.push(to)
-    index += 1
   }
 
   if (req.query.action) {
@@ -63,9 +60,8 @@ async function listLogs(req, res) {
       .map((a) => a.trim().toUpperCase())
       .filter(Boolean)
     if (list.length === 0) throw badRequest('El filtro action quedo vacio')
-    where.push(`action = ANY($${index}::text[])`)
+    where.push('action IN (?)')
     params.push(list)
-    index += 1
   }
 
   if (req.query.status) {
@@ -74,15 +70,13 @@ async function listLogs(req, res) {
       .map((s) => s.trim().toUpperCase())
       .filter((s) => Object.hasOwn(SEVERITY_ORDER, s))
     if (list.length === 0) throw badRequest(`status debe ser uno de: ${Object.keys(SEVERITY_ORDER).join(', ')}`)
-    where.push(`status = ANY($${index}::text[])`)
+    where.push('status IN (?)')
     params.push(list)
-    index += 1
   }
 
   if (req.query.userCode) {
-    where.push(`user_code = $${index}`)
+    where.push('user_code = ?')
     params.push(String(req.query.userCode).trim().toUpperCase())
-    index += 1
   }
 
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
@@ -92,23 +86,23 @@ async function listLogs(req, res) {
   const [items, totalRow, byStatus, byAction] = await Promise.all([
     rows(
       `SELECT id, user_code AS "userCode", action, ip_address AS "ipAddress",
-              status, details, timestamp
+              status, details, "timestamp"
          FROM security_logs
          ${clause}
-        ORDER BY timestamp DESC, id DESC
-        LIMIT ${limit} OFFSET ${offset}`,
-      params,
+        ORDER BY "timestamp" DESC, id DESC
+        LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
     ),
-    one(`SELECT COUNT(*)::int AS total FROM security_logs ${clause}`, params),
-    rows(`SELECT status, COUNT(*)::int AS count FROM security_logs GROUP BY status ORDER BY count DESC`),
+    one(`SELECT COUNT(*) AS total FROM security_logs ${clause}`, params),
+    rows('SELECT status, COUNT(*) AS count FROM security_logs GROUP BY status ORDER BY count DESC'),
     rows(
-      `SELECT action, COUNT(*)::int AS count FROM security_logs
+      `SELECT action, COUNT(*) AS count FROM security_logs
         GROUP BY action ORDER BY count DESC LIMIT 20`,
     ),
   ])
 
   res.json({
-    total: totalRow.total,
+    total: Number(totalRow.total),
     limit,
     offset,
     filters: {
@@ -130,9 +124,9 @@ async function listLogs(req, res) {
 /** Catalogo de eventos consultables, util para poblar los filtros del frontend. */
 async function listEventTypes(_req, res) {
   const result = await rows(
-    `SELECT action, COUNT(*)::int AS occurrences,
-            MAX(timestamp) AS "lastSeen",
-            MIN(timestamp) AS "firstSeen"
+    `SELECT action, COUNT(*) AS occurrences,
+            MAX("timestamp") AS "lastSeen",
+            MIN("timestamp") AS "firstSeen"
        FROM security_logs
       GROUP BY action
       ORDER BY action`,

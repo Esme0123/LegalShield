@@ -1,50 +1,69 @@
 'use strict'
 
 /**
- * Pool de conexiones PostgreSQL + helpers de transaccion.
+ * Pool de conexiones MySQL (XAMPP / phpMyAdmin) + helpers de transaccion.
  *
- * Usa `DATABASE_URL` cuando esta definida y, si no, arma la cadena de conexion
- * con las variables sueltas (DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD).
+ * Usa las variables DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME. La API
+ * expuesta replica a `pg` para no tocar a los llamadores: `query`, `rows`,
+ * `one`, `withTransaction`, `assertConnection`, `closePool` y `pool`.
+ *
+ * `translateSql` convierte los aliases de Postgres (`AS "columna"`) a la
+ * sintaxis de MySQL (backticks). El resto de sentencias ya viven en SQL MySQL.
  */
 
-const { Pool } = require('pg')
+const mysql = require('mysql2/promise')
 const { logger } = require('../utils/logger')
 
-const poolConfig = process.env.DATABASE_URL
-  ? {
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
-    }
-  : {
-      host: process.env.DB_HOST || 'localhost',
-      port: Number(process.env.DB_PORT || 5432),
-      database: process.env.DB_NAME || 'legalshield',
-      user: process.env.DB_USER || 'legalshield',
-      password: process.env.DB_PASSWORD,
-      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
-    }
-
-poolConfig.max = Number(process.env.DB_POOL_MAX || 10)
-poolConfig.idleTimeoutMillis = Number(process.env.DB_IDLE_TIMEOUT_MS || 30000)
-poolConfig.connectionTimeoutMillis = Number(process.env.DB_CONNECT_TIMEOUT_MS || 5000)
-
-const pool = new Pool(poolConfig)
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'legalshield_db',
+  waitForConnections: true,
+  connectionLimit: Number(process.env.DB_POOL_MAX || 10),
+  queueLimit: 0,
+  timezone: 'Z',
+  connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT_MS || 10000),
+  decimalNumbers: true,
+})
 
 // El error 'error' del pool no debe tumbar el proceso: se registra y se deja
 // que la siguiente consulta reintente la conexion.
 pool.on('error', (err) => {
-  logger.error('Pool de PostgreSQL error', { message: err.message })
+  logger.error('Pool de MySQL error', { message: err.message, code: err.code })
 })
 
-/** Ejecuta una consulta y devuelve el resultado de `pg`. */
+/** Convierte aliases entrecomillados de Postgres ("col") a backticks (`col`). */
+function translateSql(sql) {
+  return sql.replace(/"([A-Za-z_][A-Za-z0-9_]*)"/g, '`$1`')
+}
+
+/** Normaliza el resultado de mysql2 a la forma devuelta por `pg`. */
+function normalizeResult(result, sql) {
+  const isSelect = /^\s*(SELECT|SHOW|DESCRIBE|EXPLAIN|WITH)/i.test(sql.trim())
+  if (isSelect) {
+    return { rows: result, rowCount: result.length, insertId: undefined, affectedRows: undefined }
+  }
+  return {
+    rows: [],
+    rowCount: result.affectedRows ?? 0,
+    insertId: result.insertId ?? null,
+    affectedRows: result.affectedRows ?? 0,
+  }
+}
+
+/** Ejecuta una consulta y devuelve el resultado normalizado. */
 async function query(text, params) {
+  const sql = translateSql(text)
   const started = Date.now()
   try {
-    const result = await pool.query(text, params)
-    logger.debug('query', { durationMs: Date.now() - started, rows: result.rowCount })
-    return result
+    const [result] = await pool.query(sql, params ?? [])
+    const payload = normalizeResult(result, sql)
+    logger.debug('query', { durationMs: Date.now() - started, rows: payload.rowCount })
+    return payload
   } catch (err) {
-    logger.error('query fallo', { message: err.message, code: err.code })
+    logger.error('query fallo', { message: err.message, code: err.code, errno: err.errno })
     throw err
   }
 }
@@ -64,26 +83,34 @@ async function one(text, params) {
 /**
  * Envuelve un callback en una transaccion: COMMIT si termina bien, ROLLBACK
  * ante cualquier excepcion y liberacion del cliente en el `finally`.
+ * El callback recibe un `client` con `.query(text, params)` normalizado.
  */
 async function withTransaction(callback) {
-  const client = await pool.connect()
+  const raw = await pool.getConnection()
   try {
-    await client.query('BEGIN')
+    await raw.query('BEGIN')
+    const client = {
+      query: async (text, params) => {
+        const sql = translateSql(text)
+        const [result] = await raw.query(sql, params ?? [])
+        return normalizeResult(result, sql)
+      },
+    }
     const result = await callback(client)
-    await client.query('COMMIT')
+    await raw.query('COMMIT')
     return result
   } catch (err) {
-    await client.query('ROLLBACK')
+    await raw.query('ROLLBACK')
     throw err
   } finally {
-    client.release()
+    raw.release()
   }
 }
 
 /** Verifica la conectividad al arrancar; lanza si no hay respuesta. */
 async function assertConnection() {
-  const { rows: result } = await pool.query('SELECT 1 AS ok')
-  return result[0].ok === 1
+  const result = await one('SELECT 1 AS ok')
+  return result?.ok === 1
 }
 
 async function closePool() {

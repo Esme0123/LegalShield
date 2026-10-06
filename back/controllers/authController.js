@@ -48,22 +48,21 @@ async function register(req, res) {
   }
 
   const username = normalizeUsername(`${firstName} ${lastName}`)
-  const roleRow = await one('SELECT id, code FROM roles WHERE code = $1', [code])
+  const roleRow = await one('SELECT id, code FROM roles WHERE code = ?', [code])
   if (!roleRow) throw unprocessable('El rol solicitado no existe en el catalogo', { role: code })
 
-  const existingEmail = await one('SELECT user_code FROM users WHERE email = $1', [cleanEmail])
+  const existingEmail = await one('SELECT user_code FROM users WHERE email = ?', [cleanEmail])
   if (existingEmail) throw conflict(`El correo ya esta registrado como ${existingEmail.user_code}`)
 
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
 
   const user = await withTransaction(async (client) => {
-    // El correlativo se calcula dentro de la transaccion y con la tabla bloqueada
-    // (FOR UPDATE) para que dos altas simultaneas no emitan el mismo User ID.
+    // El correlativo se calcula dentro de la transaccion y con un lock consultivo
+    // (GET_LOCK) para que dos altas simultaneas no emitan el mismo User ID.
     const userCode = await generateUserCode(client)
-    const { rows: inserted } = await client.query(
+    const { insertId } = await client.query(
       `INSERT INTO users (user_code, username, email, password_hash, role_id, firm, department, phone, password_updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-       RETURNING id, user_code, username, email, role_id, firm, department, phone, password_updated_at`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())`,
       [
         userCode,
         username,
@@ -76,8 +75,15 @@ async function register(req, res) {
       ],
     )
 
+    // MySQL no soporta RETURNING: se recupera la fila por LAST insert id.
+    const { rows: inserted } = await client.query(
+      `SELECT id, user_code, username, email, role_id, firm, department, phone, password_updated_at
+         FROM users WHERE id = ?`,
+      [insertId],
+    )
+
     // El primer registro de contrasena entra al historico (punto 9.3).
-    await client.query('INSERT INTO password_history (user_id, password_hash) VALUES ($1, $2)', [
+    await client.query('INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)', [
       inserted[0].id,
       passwordHash,
     ])
@@ -127,7 +133,7 @@ async function login(req, res) {
             u.failed_attempts, u.is_locked, u.password_updated_at,
             r.code AS role_code, r.name AS role_name
        FROM users u JOIN roles r ON r.id = u.role_id
-      WHERE u.user_code = $1`,
+      WHERE u.user_code = ?`,
     [candidate],
   )
 
@@ -154,15 +160,15 @@ async function login(req, res) {
 
   // 2. Clave incorrecta -> incrementar failed_attempts.
   if (!matches) {
-    const updated = await one(
+    await query(
       `UPDATE users
           SET failed_attempts = failed_attempts + 1,
-              locked_at = CASE WHEN failed_attempts + 1 >= $2 THEN now() ELSE locked_at END,
-              is_locked  = CASE WHEN failed_attempts + 1 >= $2 THEN TRUE  ELSE is_locked  END
-        WHERE id = $1
-      RETURNING failed_attempts, is_locked`,
-      [user.id, MAX_FAILED_ATTEMPTS],
+              locked_at = CASE WHEN failed_attempts + 1 >= ? THEN now() ELSE locked_at END,
+              is_locked  = CASE WHEN failed_attempts + 1 >= ? THEN TRUE  ELSE is_locked  END
+        WHERE id = ?`,
+      [MAX_FAILED_ATTEMPTS, MAX_FAILED_ATTEMPTS, user.id],
     )
+    const updated = await one('SELECT failed_attempts, is_locked FROM users WHERE id = ?', [user.id])
 
     // 3. Al superar el umbral -> AUTH_LOCKED en la bitacora.
     if (updated.is_locked) {
@@ -187,7 +193,7 @@ async function login(req, res) {
   // 4. Credencial correcta -> reinicia el contador y emite sesion.
   await withTransaction(async (client) => {
     await client.query(
-      `UPDATE users SET failed_attempts = 0, is_locked = FALSE, locked_at = NULL WHERE id = $1`,
+      'UPDATE users SET failed_attempts = 0, is_locked = FALSE, locked_at = NULL WHERE id = ?',
       [user.id],
     )
   })
@@ -238,14 +244,14 @@ async function unlock(req, res) {
   }
 
   const user = await one(
-    'SELECT id, user_code, is_locked, failed_attempts FROM users WHERE user_code = $1',
+    'SELECT id, user_code, is_locked, failed_attempts FROM users WHERE user_code = ?',
     [target],
   )
   if (!user) throw notFound(`No existe el User ID ${target}`)
 
   await withTransaction(async (client) => {
     await client.query(
-      'UPDATE users SET is_locked = FALSE, failed_attempts = 0, locked_at = NULL WHERE id = $1',
+      'UPDATE users SET is_locked = FALSE, failed_attempts = 0, locked_at = NULL WHERE id = ?',
       [user.id],
     )
   })
@@ -337,9 +343,9 @@ async function passwordHistory(req, res) {
   const result = await rows(
     `SELECT id, created_at AS "createdAt"
        FROM password_history
-      WHERE user_id = $1
+      WHERE user_id = ?
       ORDER BY created_at DESC
-      LIMIT $2`,
+      LIMIT ?`,
     [req.user.id, PASSWORD_HISTORY_LIMIT],
   )
   res.json({ limit: PASSWORD_HISTORY_LIMIT, entries: result })

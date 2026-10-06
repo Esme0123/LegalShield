@@ -83,8 +83,8 @@ async function updatePermissions(req, res) {
   const permissionCodes = [...new Set(entries.map((g) => g.permission))]
 
   const [existingRoles, existingPermissions] = await Promise.all([
-    rows('SELECT code FROM roles WHERE code = ANY($1::text[])', [roleCodes]),
-    rows('SELECT code FROM permissions WHERE code = ANY($1::text[])', [permissionCodes]),
+    rows('SELECT code FROM roles WHERE code IN (?)', [roleCodes]),
+    rows('SELECT code FROM permissions WHERE code IN (?)', [permissionCodes]),
   ])
 
   const knownRoles = new Set(existingRoles.map((r) => r.code))
@@ -102,19 +102,19 @@ async function updatePermissions(req, res) {
     for (const entry of entries) {
       if (entry.granted) {
         const { rowCount } = await client.query(
-          `INSERT INTO role_permissions (role_id, permission_id, granted_by)
-           SELECT r.id, p.id, $3 FROM roles r, permissions p
-            WHERE r.code = $1 AND p.code = $2
-           ON CONFLICT (role_id, permission_id) DO NOTHING`,
-          [entry.role, entry.permission, req.user.user_code],
+          `INSERT IGNORE INTO role_permissions (role_id, permission_id, granted_by)
+           SELECT r.id, p.id, ?
+             FROM roles r JOIN permissions p ON p.code IN (?)
+            WHERE r.code = ?`,
+          [req.user.user_code, [entry.permission], entry.role],
         )
         if (rowCount > 0) applied.push({ ...entry, effect: 'concedido' })
       } else {
         const { rowCount } = await client.query(
-          `DELETE FROM role_permissions rp
-             USING roles r, permissions p
-            WHERE rp.role_id = r.id AND rp.permission_id = p.id
-              AND r.code = $1 AND p.code = $2`,
+          `DELETE rp FROM role_permissions rp
+             JOIN roles r ON r.id = rp.role_id
+             JOIN permissions p ON p.id = rp.permission_id
+            WHERE r.code = ? AND p.code = ?`,
           [entry.role, entry.permission],
         )
         if (rowCount > 0) applied.push({ ...entry, effect: 'revocado' })
@@ -178,12 +178,11 @@ async function resetMatrix(req, res) {
     await client.query('DELETE FROM role_permissions')
     for (const [role, permissions] of Object.entries(BASELINE)) {
       await client.query(
-        `INSERT INTO role_permissions (role_id, permission_id, granted_by)
-         SELECT r.id, p.id, $3
-           FROM roles r JOIN permissions p ON p.code = ANY($2::text[])
-          WHERE r.code = $1
-         ON CONFLICT DO NOTHING`,
-        [role, permissions, req.user.user_code],
+        `INSERT IGNORE INTO role_permissions (role_id, permission_id, granted_by)
+         SELECT r.id, p.id, ?
+           FROM roles r JOIN permissions p ON p.code IN (?)
+          WHERE r.code = ?`,
+        [req.user.user_code, permissions, role],
       )
     }
   })

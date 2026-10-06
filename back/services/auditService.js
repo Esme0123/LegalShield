@@ -43,7 +43,7 @@ async function record(action, { userCode = null, req = null, details = null, sta
   try {
     await query(
       `INSERT INTO security_logs (user_code, action, ip_address, status, details)
-       VALUES ($1, $2, $3, $4, $5)`,
+       VALUES (?, ?, ?, ?, ?)`,
       [userCode, action, ip, resolvedStatus, details ? JSON.stringify(details) : null],
     )
   } catch (err) {

@@ -28,7 +28,7 @@ async function loadPermissions(userId) {
        FROM role_permissions rp
        JOIN permissions p ON p.id = rp.permission_id
        JOIN roles       r ON r.id = rp.role_id
-      WHERE r.id = $1
+      WHERE r.id = ?
       ORDER BY p.code`,
     [userId],
   )
@@ -85,7 +85,7 @@ async function verifyAccessToken(token) {
             r.code AS role_code, r.name AS role_name
        FROM users u
        JOIN roles r ON r.id = u.role_id
-      WHERE u.id = $1`,
+      WHERE u.id = ?`,
     [Number(payload.sub)],
   )
 
@@ -110,7 +110,7 @@ async function rotateRefreshToken(refreshToken) {
     `SELECT u.id, u.user_code, u.username, u.email, u.role_id, u.is_locked,
             r.code AS role_code, r.name AS role_name
        FROM users u JOIN roles r ON r.id = u.role_id
-      WHERE u.id = $1`,
+      WHERE u.id = ?`,
     [Number(payload.sub)],
   )
   if (!user) throw unauthorized('La cuenta asociada al refresh token ya no existe')

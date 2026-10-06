@@ -29,25 +29,29 @@ function describeUserCodePattern() {
 /**
  * Emite el siguiente User ID correlativo.
  *
- * `MAX(...)` es una funcion de agregado y PostgreSQL no admite FOR UPDATE sobre
- * ella, ademas de que un MAX seguido de un INSERT deja una ventana de carrera
- * entre lecturas. La solucion es un bloqueo consultivo de transaction
- * (`pg_advisory_xact_lock`): serializa a los emisores concurrentes durante toda
- * la transaccion y funciona tambien con la tabla vacia, donde FOR UPDATE no
- * bloquearia ninguna fila. El lock se libera sola al hacer COMMIT o ROLLBACK.
+ * `MAX(...)` es una funcion de agregado y MySQL no admite FOR UPDATE sobre ella,
+ * ademas de que un MAX seguido de un INSERT deja una ventana de carrera entre
+ * lecturas. La solucion es un lock consultivo de sesion (`GET_LOCK`): serializa
+ * a los emisores concurrentes y funciona tambien con la tabla vacia. El lock se
+ * libera explicitamente en el `finally` para no mantenerlo en la sesion del pool.
  */
 async function generateUserCode(client) {
-  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`${PREFIX}-${YEAR}-correlative`])
+  const lockName = `${PREFIX}-${YEAR}-correlative`
+  await client.query('SELECT GET_LOCK(?, 10)', [lockName])
 
-  const { rows: result } = await client.query(
-    `SELECT COALESCE(MAX(NULLIF(regexp_replace(user_code, '\\D', '', 'g'), '')::int), 0) AS serial
-       FROM users
-      WHERE user_code LIKE $1`,
-    [`${PREFIX}-${YEAR}-%`],
-  )
+  try {
+    const { rows: result } = await client.query(
+      `SELECT COALESCE(MAX(CAST(NULLIF(REGEXP_REPLACE(user_code, '[^0-9]', ''), '') AS UNSIGNED)), 0) AS serial
+         FROM users
+        WHERE user_code LIKE ?`,
+      [`${PREFIX}-${YEAR}-%`],
+    )
 
-  const next = Number(result[0].serial) + 1
-  return `${PREFIX}-${YEAR}-${String(next).padStart(4, '0')}`
+    const next = Number(result[0].serial) + 1
+    return `${PREFIX}-${YEAR}-${String(next).padStart(4, '0')}`
+  } finally {
+    await client.query('SELECT RELEASE_LOCK(?)', [lockName])
+  }
 }
 
 /** Normaliza el correo y valida el formato basico. */
@@ -72,8 +76,9 @@ function normalizeUsername(value) {
 
 /** Existe un correo dado, excluyendo un user_id concreto (edicion de perfil). */
 async function emailExists(email, excludeUserId = null) {
-  const found = await one('SELECT id FROM users WHERE email = $1 AND ($2::int IS NULL OR id <> $2)', [
+  const found = await one('SELECT id FROM users WHERE email = ? AND (? IS NULL OR id <> ?)', [
     email,
+    excludeUserId,
     excludeUserId,
   ])
   return Boolean(found)

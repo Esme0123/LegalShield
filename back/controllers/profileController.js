@@ -31,16 +31,16 @@ async function getProfile(req, res) {
             u.password_updated_at AS "passwordUpdatedAt", u.created_at AS "createdAt",
             r.code AS role, r.name AS "roleLabel"
        FROM users u JOIN roles r ON r.id = u.role_id
-      WHERE u.id = $1`,
+      WHERE u.id = ?`,
     [req.user.id],
   )
 
   const history = await rows(
     `SELECT id, created_at AS "createdAt"
        FROM password_history
-      WHERE user_id = $1
+      WHERE user_id = ?
       ORDER BY created_at DESC
-      LIMIT $2`,
+      LIMIT ?`,
     [req.user.id, PASSWORD_HISTORY_LIMIT],
   )
 
@@ -75,20 +75,18 @@ async function updateProfile(req, res) {
 
   const sets = []
   const values = []
-  let index = 1
 
   if (body.email !== undefined) {
     const email = sanitizeEmail(body.email)
     if (!email) throw unprocessable('Correo institucional invalido')
-    const taken = await one('SELECT id FROM users WHERE email = $1 AND id <> $2', [email, req.user.id])
+    const taken = await one('SELECT id FROM users WHERE email = ? AND id <> ?', [email, req.user.id])
     if (taken) throw conflict('El correo ya pertenece a otro usuario')
     values.push(email)
-    sets.push(`email = $${index}`)
-    index += 1
+    sets.push('email = ?')
   }
 
   if (body.firstName !== undefined || body.lastName !== undefined) {
-    const current = await one('SELECT username FROM users WHERE id = $1', [req.user.id])
+    const current = await one('SELECT username FROM users WHERE id = ?', [req.user.id])
     const parts = String(current.username).split('.')
     const currentFirst = parts[0] ?? ''
     const currentLast = parts.slice(1).join('.')
@@ -97,27 +95,25 @@ async function updateProfile(req, res) {
     const last = body.lastName !== undefined ? normalizeUsername(body.lastName) : currentLast
     const username = [first, last].filter(Boolean).join('.')
 
-    const taken = await one('SELECT id FROM users WHERE username = $1 AND id <> $2', [username, req.user.id])
+    const taken = await one('SELECT id FROM users WHERE username = ? AND id <> ?', [username, req.user.id])
     if (taken) throw conflict('Ese nombre de usuario ya esta en uso')
     values.push(username)
-    sets.push(`username = $${index}`)
-    index += 1
+    sets.push('username = ?')
   }
 
   for (const key of ['firm', 'department', 'phone']) {
     if (body[key] === undefined) continue
     const value = String(body[key]).trim()
     values.push(value.length > 0 ? value : null)
-    sets.push(`${PROFILE_FIELDS[key]} = $${index}`)
-    index += 1
+    sets.push(`${PROFILE_FIELDS[key]} = ?`)
   }
 
   const updated = await withTransaction(async (client) => {
-    const { rows: result } = await client.query(
-      `UPDATE users SET ${sets.join(', ')} WHERE id = $${index} RETURNING id`,
+    await client.query(
+      `UPDATE users SET ${sets.join(', ')} WHERE id = ?`,
       [...values, req.user.id],
     )
-    return result[0]
+    return { id: req.user.id }
   })
 
   record('PROFILE_UPDATED', {
@@ -130,7 +126,7 @@ async function updateProfile(req, res) {
     `SELECT u.user_code AS "userCode", u.username, u.email, u.firm, u.department, u.phone,
             u.password_updated_at AS "passwordUpdatedAt", r.code AS role, r.name AS "roleLabel"
        FROM users u JOIN roles r ON r.id = u.role_id
-      WHERE u.id = $1`,
+      WHERE u.id = ?`,
     [updated.id],
   )
 
@@ -153,7 +149,7 @@ async function changePassword(req, res) {
     throw badRequest('Debe enviar currentPassword y newPassword')
   }
 
-  const user = await one('SELECT id, user_code, password_hash FROM users WHERE id = $1', [req.user.id])
+  const user = await one('SELECT id, user_code, password_hash FROM users WHERE id = ?', [req.user.id])
 
   const matches = await bcrypt.compare(currentPassword, user.password_hash)
   if (!matches) {
@@ -178,7 +174,7 @@ async function changePassword(req, res) {
   }
 
   const recent = await rows(
-    'SELECT password_hash FROM password_history WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+    'SELECT password_hash FROM password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
     [user.id, PASSWORD_HISTORY_LIMIT],
   )
 
@@ -197,24 +193,24 @@ async function changePassword(req, res) {
 
   await withTransaction(async (client) => {
     await client.query(
-      'UPDATE users SET password_hash = $1, password_updated_at = now() WHERE id = $2',
+      'UPDATE users SET password_hash = ?, password_updated_at = now() WHERE id = ?',
       [passwordHash, user.id],
     )
-    await client.query('INSERT INTO password_history (user_id, password_hash) VALUES ($1, $2)', [
+    await client.query('INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)', [
       user.id,
       passwordHash,
     ])
     // Poda: conserva solo las N contrasenas mas recientes.
     await client.query(
       `DELETE FROM password_history
-        WHERE user_id = $1
+        WHERE user_id = ?
           AND id NOT IN (
             SELECT id FROM password_history
-             WHERE user_id = $1
+             WHERE user_id = ?
              ORDER BY created_at DESC
-             LIMIT $2
+             LIMIT ?
           )`,
-      [user.id, PASSWORD_HISTORY_LIMIT],
+      [user.id, user.id, PASSWORD_HISTORY_LIMIT],
     )
   })
 

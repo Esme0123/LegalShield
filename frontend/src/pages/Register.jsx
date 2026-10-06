@@ -76,7 +76,7 @@ export default function Register() {
     form.firm.trim().length > 3 &&
     strength.score >= 2
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault()
     if (busy || !canSubmit) {
       if (!canSubmit) {

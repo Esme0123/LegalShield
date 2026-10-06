@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "init-db": "node scripts/initDb.js",
     "db:setup": "node scripts/setupDatabase.js",
     "db:seed": "node scripts/seedDatabase.js"
   },
@@ -29,6 +30,7 @@
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.24.5",
     "pg": "^8.13.1"
   }
 }

@@ -35,12 +35,10 @@ const SELECT_CASE = `
 function buildFilters(req) {
   const where = []
   const params = []
-  let index = 1
 
   if (!req.scope.all) {
-    where.push(`c.assigned_lawyer_id = $${index}`)
+    where.push('c.assigned_lawyer_id = ?')
     params.push(req.scope.userId)
-    index += 1
   }
 
   const { status, riskLevel, owner, search } = req.query
@@ -48,29 +46,25 @@ function buildFilters(req) {
   if (status) {
     const list = String(status).split(',').map((s) => s.trim()).filter((s) => CASE_STATUSES.includes(s))
     if (list.length === 0) throw badRequest(`status debe ser uno de: ${CASE_STATUSES.join(', ')}`)
-    where.push(`c.status = ANY($${index}::text[])`)
+    where.push('c.status IN (?)')
     params.push(list)
-    index += 1
   }
 
   if (riskLevel) {
     const list = String(riskLevel).split(',').map((s) => s.trim()).filter((s) => RISK_LEVELS.includes(s))
     if (list.length === 0) throw badRequest(`riskLevel debe ser uno de: ${RISK_LEVELS.join(', ')}`)
-    where.push(`c.risk_level = ANY($${index}::text[])`)
+    where.push('c.risk_level IN (?)')
     params.push(list)
-    index += 1
   }
 
   if (owner) {
-    where.push(`u.user_code = $${index}`)
+    where.push('u.user_code = ?')
     params.push(String(owner).trim().toUpperCase())
-    index += 1
   }
 
   if (search) {
-    where.push(`(c.title ILIKE $${index} OR c.client_name ILIKE $${index} OR c.case_number ILIKE $${index})`)
-    params.push(`%${String(search).trim()}%`)
-    index += 1
+    where.push('(c.title LIKE ? OR c.client_name LIKE ? OR c.case_number LIKE ?)')
+    params.push(`%${String(search).trim()}%`, `%${String(search).trim()}%`, `%${String(search).trim()}%`)
   }
 
   return { where, params }
@@ -111,7 +105,7 @@ async function listCases(req, res) {
 async function getCase(req, res) {
   const { params, scope } = findOneOr404(req)
 
-  const found = await one(`${SELECT_CASE} WHERE c.id = $1`, params)
+  const found = await one(`${SELECT_CASE} WHERE c.id = ?`, params)
   if (!found) throw notFound(`No existe el expediente con id ${params[0]}`)
 
   // Un expediente sin titular solo lo abre la direccion del despacho.
@@ -150,41 +144,50 @@ async function createCase(req, res) {
   const ownerUserCode = req.scope.all ? req.body?.ownerUserCode : req.user.user_code
 
   const created = await withTransaction(async (client) => {
-    // Mismo criterio que el correlativo de User ID: pg_advisory_xact_lock
-    // serializa a los emisores concurrentes (MAX es un agregado y no admite
-    // FOR UPDATE) y no depende de que exista alguna fila que bloquear.
-    await client.query("SELECT pg_advisory_xact_lock(hashtext('legal-cases-correlative'))")
+    // Mismo criterio que el correlativo de User ID: GET_LOCK serializa a los
+    // emisores concurrentes (MAX es un agregado y no admite FOR UPDATE) y no
+    // depende de que exista alguna fila que bloquear.
+    const lockName = 'legal-cases-correlative'
+    await client.query('SELECT GET_LOCK(?, 10)', [lockName])
 
-    const { rows: seq } = await client.query(
-      `SELECT COALESCE(MAX(NULLIF(regexp_replace(case_number, '\\D', '', 'g'), '')::int), 0) AS serial
-         FROM legal_cases`,
-    )
-    const caseNumber = `EXP-${new Date().getFullYear()}-${String(Number(seq[0].serial) + 1).padStart(4, '0')}`
+    try {
+      const { rows: seq } = await client.query(
+        `SELECT COALESCE(MAX(CAST(NULLIF(REGEXP_REPLACE(case_number, '[^0-9]', ''), '') AS UNSIGNED)), 0) AS serial
+           FROM legal_cases`,
+      )
+      const caseNumber = `EXP-${new Date().getFullYear()}-${String(Number(seq[0].serial) + 1).padStart(4, '0')}`
 
-    const { rows: inserted } = await client.query(
-      `INSERT INTO legal_cases
-         (case_number, title, client_name, assigned_lawyer_id, status, matter, court, stage, risk_level, progress, deadline, is_privileged)
-       VALUES ($1, $2, $3,
-               (SELECT id FROM users WHERE user_code = $4),
-               $5, $6, $7, $8, $9, $10, $11, $12)
-       RETURNING id, case_number`,
-      [
-        caseNumber,
-        String(title).trim(),
-        String(clientName).trim(),
-        ownerUserCode ?? null,
-        status,
-        String(matter ?? '').trim() || null,
-        String(court ?? '').trim() || null,
-        String(stage ?? '').trim() || null,
-        riskLevel,
-        progressNum,
-        deadline || null,
-        Boolean(isPrivileged),
-      ],
-    )
+      const { insertId } = await client.query(
+        `INSERT INTO legal_cases
+           (case_number, title, client_name, assigned_lawyer_id, status, matter, court, stage, risk_level, progress, deadline, is_privileged)
+         VALUES (?, ?, ?,
+                 (SELECT id FROM users WHERE user_code = ?),
+                 ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          caseNumber,
+          String(title).trim(),
+          String(clientName).trim(),
+          ownerUserCode ?? null,
+          status,
+          String(matter ?? '').trim() || null,
+          String(court ?? '').trim() || null,
+          String(stage ?? '').trim() || null,
+          riskLevel,
+          progressNum,
+          deadline || null,
+          Boolean(isPrivileged),
+        ],
+      )
 
-    return inserted[0]
+      // MySQL no soporta RETURNING: se recupera el correlativo por LAST insert id.
+      const { rows: inserted } = await client.query(
+        'SELECT id, case_number FROM legal_cases WHERE id = ?',
+        [insertId],
+      )
+      return inserted[0]
+    } finally {
+      await client.query('SELECT RELEASE_LOCK(?)', [lockName])
+    }
   })
 
   record('CASE_CREATED', {
@@ -193,7 +196,7 @@ async function createCase(req, res) {
     details: { caseNumber: created.case_number, title: String(title).trim(), riskLevel },
   })
 
-  const detail = await one(`${SELECT_CASE} WHERE c.id = $1`, [created.id])
+  const detail = await one(`${SELECT_CASE} WHERE c.id = ?`, [created.id])
   res.status(201).json({ message: 'Expediente creado', case: detail })
 }
 
@@ -216,7 +219,7 @@ const UPDATABLE = {
 
 async function updateCase(req, res) {
   const { params, scope } = findOneOr404(req)
-  const existing = await one('SELECT id, assigned_lawyer_id FROM legal_cases WHERE id = $1', params)
+  const existing = await one('SELECT id, assigned_lawyer_id, case_number FROM legal_cases WHERE id = ?', params)
   if (!existing) throw notFound(`No existe el expediente con id ${params[0]}`)
 
   if (!scope.all && existing.assigned_lawyer_id !== scope.userId) {
@@ -224,7 +227,7 @@ async function updateCase(req, res) {
   }
 
   const sets = []
-  const values = [...params]
+  const values = []
 
   for (const [key, column] of Object.entries(UPDATABLE)) {
     if (!(key in req.body)) continue
@@ -235,19 +238,18 @@ async function updateCase(req, res) {
       throw badRequest(`riskLevel debe ser uno de: ${RISK_LEVELS.join(', ')}`)
     }
     values.push(req.body[key])
-    sets.push(`${column} = $${values.length}`)
+    sets.push(`${column} = ?`)
   }
 
   if (sets.length === 0) throw badRequest('No se envio ningun campo actualizable')
 
   const updated = await withTransaction(async (client) => {
-    const { rows: result } = await client.query(
-      `UPDATE legal_cases SET ${sets.join(', ')}
-        WHERE id = $1
-      RETURNING id, case_number`,
-      values,
+    await client.query(
+      `UPDATE legal_cases SET ${sets.join(', ')} WHERE id = ?`,
+      [...values, existing.id],
     )
-    return result[0]
+    // MySQL no soporta RETURNING: se reutiliza la fila leida al validar.
+    return { id: existing.id, case_number: existing.case_number }
   })
 
   record('CASE_UPDATED', {
@@ -256,7 +258,7 @@ async function updateCase(req, res) {
     details: { caseNumber: updated.case_number, fields: Object.keys(req.body).filter((k) => k in UPDATABLE) },
   })
 
-  const detail = await one(`${SELECT_CASE} WHERE c.id = $1`, [params[0]])
+  const detail = await one(`${SELECT_CASE} WHERE c.id = ?`, [params[0]])
   res.json({ message: 'Expediente actualizado', case: detail })
 }
 
@@ -270,7 +272,7 @@ async function updateCase(req, res) {
  */
 async function archiveCase(req, res) {
   const { params, scope } = findOneOr404(req)
-  const existing = await one('SELECT id, assigned_lawyer_id, status FROM legal_cases WHERE id = $1', params)
+  const existing = await one('SELECT id, assigned_lawyer_id, status FROM legal_cases WHERE id = ?', params)
   if (!existing) throw notFound(`No existe el expediente con id ${params[0]}`)
 
   if (!scope.all && existing.assigned_lawyer_id !== scope.userId) {
@@ -282,7 +284,7 @@ async function archiveCase(req, res) {
     await client.query(
       `UPDATE legal_cases
           SET status = 'archivado', archived_at = now()
-        WHERE id = $1`,
+        WHERE id = ?`,
       params,
     )
   })
@@ -293,7 +295,7 @@ async function archiveCase(req, res) {
     details: { caseId: params[0] },
   })
 
-  const detail = await one(`${SELECT_CASE} WHERE c.id = $1`, params)
+  const detail = await one(`${SELECT_CASE} WHERE c.id = ?`, params)
   res.json({ message: 'Expediente archivado (retencion de evidencia)', case: detail })
 }
 
