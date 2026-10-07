@@ -140,6 +140,7 @@ export async function request(path, { method = 'GET', body, signal, auth = true,
 const get = (path, options) => request(path, { ...options, method: 'GET' })
 const post = (path, body, options) => request(path, { ...options, method: 'POST', body })
 const put = (path, body, options) => request(path, { ...options, method: 'PUT', body })
+const patch = (path, body, options) => request(path, { ...options, method: 'PATCH', body })
 const del = (path, options) => request(path, { ...options, method: 'DELETE' })
 
 /* -------------------------------------------------------------------------- */
@@ -189,6 +190,18 @@ export const rolesApi = {
   matrix: () => get('/roles/matrix'),
   updatePermissions: (grants) => post('/roles/permissions', { grants }),
   reset: () => post('/roles/reset'),
+}
+
+/* -------------------------------------------------------------------------- */
+/* USERS (ABM granular)                                                        */
+/* -------------------------------------------------------------------------- */
+
+export const usersApi = {
+  list: (params, options) => get(`/users${qs(params)}`, options),
+  create: (payload) => post('/users', payload),
+  update: (id, payload) => put(`/users/${id}`, payload),
+  status: (id, payload) => patch(`/users/${id}/status`, payload),
+  unlock: (id, payload) => post(`/users/${id}/unlock`, payload),
 }
 
 /* -------------------------------------------------------------------------- */

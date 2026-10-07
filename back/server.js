@@ -14,6 +14,7 @@ const { logger } = require('./utils/logger')
 const errors = require('./utils/errors')
 
 const authRoutes = require('./routes/authRoutes')
+const usersRoutes = require('./routes/usersRoutes')
 const casesRoutes = require('./routes/casesRoutes')
 const rolesRoutes = require('./routes/rolesRoutes')
 const auditRoutes = require('./routes/auditRoutes')
@@ -90,7 +91,7 @@ app.get(`${API_PREFIX}`, (_req, res) => {
   res.json({
     name: 'LegalShield API',
     version: '1.0.0',
-    docs: `${API_PREFIX}/auth, ${API_PREFIX}/cases, ${API_PREFIX}/roles, ${API_PREFIX}/audit`,
+    docs: `${API_PREFIX}/auth, ${API_PREFIX}/users, ${API_PREFIX}/cases, ${API_PREFIX}/roles, ${API_PREFIX}/audit`,
   })
 })
 
@@ -99,6 +100,7 @@ app.get(`${API_PREFIX}`, (_req, res) => {
 /* -------------------------------------------------------------------------- */
 
 app.use(`${API_PREFIX}/auth`, authRoutes)
+app.use(`${API_PREFIX}/users`, usersRoutes)
 app.use(`${API_PREFIX}/cases`, casesRoutes)
 app.use(`${API_PREFIX}/roles`, rolesRoutes)
 app.use(`${API_PREFIX}/audit`, auditRoutes)

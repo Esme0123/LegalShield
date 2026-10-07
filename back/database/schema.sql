@@ -75,12 +75,15 @@ CREATE TABLE IF NOT EXISTS users (
   failed_attempts     INT NOT NULL DEFAULT 0,
   is_locked           BOOLEAN NOT NULL DEFAULT FALSE,
   locked_at           DATETIME,
+  is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+  deactivated_at      DATETIME,
   password_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT,
   CONSTRAINT chk_failed_attempts CHECK (failed_attempts >= 0),
-  INDEX idx_users_role (role_id)
+  INDEX idx_users_role (role_id),
+  INDEX idx_users_active (is_active)
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
@@ -208,4 +211,9 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('AUDIT_RECEIPT', 'Emitir comprobantes'),
   ('RBAC_MANAGE',   'Administrar matriz RBAC'),
   ('TOKEN_RESET',   'Emitir tokens de reseteo'),
-  ('RISK_ASSESS',   'Modificar evaluacion de riesgo');
+  ('RISK_ASSESS',   'Modificar evaluacion de riesgo'),
+  ('USERS_READ',    'Ver lista y detalles de usuarios'),
+  ('USERS_CREATE',  'Registrar usuarios (User ID nombre.apellido)'),
+  ('USERS_UPDATE',  'Editar datos, rol o estado de usuarios'),
+  ('USERS_DELETE',  'Dar de baja (desactivar) usuarios'),
+  ('USERS_UNLOCK',  'Desbloquear usuarios y resetear clave');

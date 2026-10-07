@@ -10,6 +10,7 @@ import {
   UserCheck,
 } from 'lucide-react'
 import Sis321Matrix, { RESOURCE_COUNT } from '@/components/matrix/Sis321Matrix'
+import RbacPermissionMatrix from '@/components/matrix/RbacPermissionMatrix'
 import { Badge, SectionTitle } from '@/components/ui/primitives'
 import { SIS321_ROLES, SIS321_SYSTEMS } from '@/data/seed'
 import { useAppStore } from '@/store/useAppStore'
@@ -185,6 +186,8 @@ export default function Roles() {
         onToggle={handleToggle}
         onToggleColumn={handleColumn}
       />
+
+      <RbacPermissionMatrix />
 
       <p className="flex items-start gap-2 text-[11.5px] leading-snug text-muted">
         <Scale className="mt-0.5 h-4 w-4 shrink-0 text-accent" />

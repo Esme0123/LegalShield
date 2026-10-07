@@ -12,7 +12,7 @@ import {
   Scroll,
   ShieldCheck,
   UserCheck,
-  Users2,
+  Users,
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
@@ -23,6 +23,7 @@ import EffectsToggle from '@/components/ui/EffectsToggle'
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, hint: 'Panorama operativo' },
+  { to: '/users', label: 'Gestión de Usuarios', icon: Users, hint: 'ABM granular · 9.1' },
   { to: '/roles', label: 'Matriz SIS-321', icon: UserCheck, hint: 'Permisos por rol' },
   { to: '/cases', label: 'Expedientes', icon: FileStack, hint: 'Juicios y documentos' },
   { to: '/audit', label: 'Auditoria', icon: Scroll, hint: 'Logs forenses en vivo' },
@@ -98,6 +99,7 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
 
   const roleMeta = ROLES.find((r) => r.id === session?.role)
   const permissionMap = {
+    '/users': 'USERS_READ',
     '/roles': 'RBAC_MANAGE',
     '/audit': 'LOGS_VIEW',
     '/risk-assessment': 'RISK_ASSESS',

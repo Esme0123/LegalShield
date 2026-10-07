@@ -14,7 +14,7 @@ import AeroShards from '@/components/reactbits/AeroShards'
 import FolderFloat from '@/components/reactbits/FolderFloat'
 import { Badge, Progress, RiskBadge, SectionTitle, StatCard } from '@/components/ui/primitives'
 import { useAppStore } from '@/store/useAppStore'
-import { ROLES } from '@/data/seed'
+import { PERMISSIONS, ROLES } from '@/data/seed'
 import { timeAgo, relativePercent } from '@/lib/format'
 import { cn } from '@/lib/cn'
 
@@ -36,7 +36,7 @@ export default function Dashboard() {
   const critical = useMemo(() => logs.filter((l) => l.severity === 'critico').length, [logs])
   const maturity = maturityScore(riskControls)
   const granted = Object.values(rbac).reduce((acc, list) => acc + list.length, 0)
-  const totalPossible = Object.keys(rbac).length * 12
+  const totalPossible = Object.keys(rbac).length * PERMISSIONS.length
   const role = ROLES.find((r) => r.id === session?.role)
 
   return (

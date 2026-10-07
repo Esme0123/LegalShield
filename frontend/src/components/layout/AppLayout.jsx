@@ -13,6 +13,7 @@ import { timeAgo } from '@/lib/format'
 const TITLES = {
   '/dashboard': ['Panel de control', 'Estado operativo del despacho en tiempo real'],
   '/roles': ['Matriz de accesos SIS-321', 'Permisos por sistema, recurso y rol'],
+  '/users': ['Gestión de Usuarios (ABM)', 'Alta, edicion, baja logica y desbloqueo granular'],
   '/cases': ['Expedientes judiciales', 'Gestion de prueba documental restringida'],
   '/audit': ['Logs de auditoria', 'Flujo forense en vivo · linterna de inspeccion activa'],
   '/risk-assessment': ['Evaluacion ISO 27001', 'Autoevaluacion, clasificacion y mapa de calor'],

@@ -11,7 +11,14 @@ const { record } = require('../services/auditService')
 const { getClientIp } = require('../utils/helpers')
 const { badRequest, conflict, forbidden, notFound, unauthorized, unprocessable } = require('../utils/errors')
 const { evaluatePassword, PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
-const { USER_CODE_RE, normalizeUserCode, generateUserCode, sanitizeEmail, normalizeUsername } = require('../utils/identity')
+const {
+  USER_CODE_RE,
+  normalizeUserCode,
+  generateUserCode,
+  sanitizeEmail,
+  buildUsername,
+  findAvailableUsername,
+} = require('../utils/identity')
 
 const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12)
 const MAX_FAILED_ATTEMPTS = Number(process.env.MAX_FAILED_ATTEMPTS || 3)
@@ -47,7 +54,10 @@ async function register(req, res) {
     })
   }
 
-  const username = normalizeUsername(`${firstName} ${lastName}`)
+  // User ID estandarizado (punto 9.1): primer nombre + primer apellido, en
+  // minusculas y sin acentos. La disponibilidad se confirma dentro de la
+  // transaccion (marta.perez, marta.perez1, ...) para no pisar un duplicado.
+  const baseUsername = buildUsername(firstName, lastName)
   const roleRow = await one('SELECT id, code FROM roles WHERE code = ?', [code])
   if (!roleRow) throw unprocessable('El rol solicitado no existe en el catalogo', { role: code })
 
@@ -60,6 +70,7 @@ async function register(req, res) {
     // El correlativo se calcula dentro de la transaccion y con un lock consultivo
     // (GET_LOCK) para que dos altas simultaneas no emitan el mismo User ID.
     const userCode = await generateUserCode(client)
+    const username = await findAvailableUsername(client, baseUsername)
     const { insertId } = await client.query(
       `INSERT INTO users (user_code, username, email, password_hash, role_id, firm, department, phone, password_updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())`,
@@ -130,7 +141,7 @@ async function login(req, res) {
 
   const user = await one(
     `SELECT u.id, u.user_code, u.username, u.email, u.role_id, u.password_hash,
-            u.failed_attempts, u.is_locked, u.password_updated_at,
+            u.failed_attempts, u.is_locked, u.is_active, u.password_updated_at,
             r.code AS role_code, r.name AS role_name
        FROM users u JOIN roles r ON r.id = u.role_id
       WHERE u.user_code = ?`,
@@ -144,6 +155,16 @@ async function login(req, res) {
   if (!user) {
     record('AUTH_FAILED', { userCode: candidate, req, details: { reason: 'usuario_no_existe', ip } })
     throw genericError
+  }
+
+  // 0. Baja logica: la cuenta fue desactivada por un administrador (ABM /users).
+  if (!user.is_active) {
+    record('AUTH_DISABLED', {
+      userCode: user.user_code,
+      req,
+      details: { reason: 'usuario_desactivado', ip },
+    })
+    throw forbidden('La cuenta esta desactivada. Contacte al administrador del despacho')
   }
 
   // 1. Cuenta bloqueada -> 403 antes de comparar la clave.
@@ -332,7 +353,7 @@ async function directory(_req, res) {
     `SELECT u.user_code AS "userCode", u.username AS name, u.email,
             u.department, r.code AS role
        FROM users u JOIN roles r ON r.id = u.role_id
-      WHERE u.is_locked = FALSE
+      WHERE u.is_active = TRUE AND u.is_locked = FALSE
       ORDER BY u.user_code`,
   )
   res.json({ users: result })

@@ -4,6 +4,7 @@ import Login from '@/pages/Login'
 import Register from '@/pages/Register'
 import Dashboard from '@/pages/Dashboard'
 import Roles from '@/pages/Roles'
+import UsersManagement from '@/pages/UsersManagement'
 import Cases from '@/pages/Cases'
 import Audit from '@/pages/Audit'
 import RiskAssessment from '@/pages/RiskAssessment'
@@ -36,6 +37,7 @@ export default function App() {
       >
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/roles" element={<Roles />} />
+        <Route path="/users" element={<UsersManagement />} />
         <Route path="/cases" element={<Cases />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/risk-assessment" element={<RiskAssessment />} />

@@ -16,7 +16,7 @@ INSERT IGNORE INTO roles (code, name, description) VALUES
   ('cliente',    'Cliente',    'Acceso externo limitado al seguimiento de su propio expediente.');
 
 -- ---------------------------------------------------------------------------
--- Permisos atomicos (12 permisos, alineados con PERMISSIONS del frontend)
+-- Permisos atomicos (17 permisos, alineados con PERMISSIONS del frontend)
 -- ---------------------------------------------------------------------------
 INSERT IGNORE INTO permissions (code, description) VALUES
   ('CASES_CREATE',  'Crear expedientes'),
@@ -30,7 +30,12 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('AUDIT_RECEIPT', 'Emitir comprobantes'),
   ('RBAC_MANAGE',   'Administrar matriz RBAC'),
   ('TOKEN_RESET',   'Emitir tokens de reseteo'),
-  ('RISK_ASSESS',   'Modificar evaluacion de riesgo');
+  ('RISK_ASSESS',   'Modificar evaluacion de riesgo'),
+  ('USERS_READ',    'Ver lista y detalles de usuarios'),
+  ('USERS_CREATE',  'Registrar usuarios (User ID nombre.apellido)'),
+  ('USERS_UPDATE',  'Editar datos, rol o estado de usuarios'),
+  ('USERS_DELETE',  'Dar de baja (desactivar) usuarios'),
+  ('USERS_UNLOCK',  'Desbloquear usuarios y resetear clave');
 
 -- ---------------------------------------------------------------------------
 -- Matriz inicial rol -> permisos (INITIAL_RBAC del frontend)
@@ -42,11 +47,12 @@ JOIN permissions p ON 1 = 1
 WHERE (r.code = 'socio' AND p.code IN (
   'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'DOCS_REVEAL',
   'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RBAC_MANAGE',
-  'TOKEN_RESET', 'RISK_ASSESS'
+  'TOKEN_RESET', 'RISK_ASSESS', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE',
+  'USERS_DELETE', 'USERS_UNLOCK'
 ))
    OR (r.code = 'abogado' AND p.code IN (
   'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW',
-  'AUDIT_RECEIPT', 'RISK_ASSESS'
+  'AUDIT_RECEIPT', 'RISK_ASSESS', 'USERS_READ'
 ))
    OR (r.code = 'asistente' AND p.code IN (
   'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'
@@ -60,31 +66,31 @@ WHERE (r.code = 'socio' AND p.code IN (
 -- ---------------------------------------------------------------------------
 INSERT IGNORE INTO users (user_code, username, email, password_hash, role_id, firm, department, phone)
 VALUES
-  ('LEG-2026-0001', 'Mariana Solis',
+  ('LEG-2026-0001', 'mariana.solis',
    'mariana.solis@vidalpenalto.co',
    '$2a$12$demo.hashed.placeholder.replace.in.setup.script.0000000000000000000000',
    (SELECT id FROM roles WHERE code = 'socio'),
    'Vidal & Penalto Bufetes', 'Direccion Juridica', '+57 601 742 1180'),
 
-  ('LEG-2026-0142', 'Diego Ferrer',
+  ('LEG-2026-0142', 'diego.ferrer',
    'diego.ferrer@vidalpenalto.co',
    '$2a$12$demo.hashed.placeholder.replace.in.setup.script.0000000000000000000000',
    (SELECT id FROM roles WHERE code = 'abogado'),
    'Vidal & Penalto Bufetes', 'Litigacion', '+57 300 552 8841'),
 
-  ('LEG-2026-0277', 'Lucia Ampara',
+  ('LEG-2026-0277', 'lucia.ampara',
    'lucia.ampara@vidalpenalto.co',
    '$2a$12$demo.hashed.placeholder.replace.in.setup.script.0000000000000000000000',
    (SELECT id FROM roles WHERE code = 'asistente'),
    'Vidal & Penalto Bufetes', 'Tramitacion', '+57 315 409 2277'),
 
-  ('LEG-2026-0390', 'Andres Quintero',
+  ('LEG-2026-0390', 'andres.quintero',
    'andres.quintero@metalurgiaandes.co',
    '$2a$12$demo.hashed.placeholder.replace.in.setup.script.0000000000000000000000',
    (SELECT id FROM roles WHERE code = 'cliente'),
    'Metalurgia Andes S.A.S.', 'Externo', '+57 310 228 4419'),
 
-  ('LEG-2026-0411', 'Paula Sandoval',
+  ('LEG-2026-0411', 'paula.sandoval',
    'paula.sandoval@vidalpenalto.co',
    '$2a$12$demo.hashed.placeholder.replace.in.setup.script.0000000000000000000000',
    (SELECT id FROM roles WHERE code = 'asistente'),

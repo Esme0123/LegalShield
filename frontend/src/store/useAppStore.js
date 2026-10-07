@@ -27,8 +27,10 @@ import {
   probeApi,
   rolesApi,
   setTokens,
+  usersApi,
 } from '@/lib/apiClient'
 import { cryptoId, nowIso, toggleInList } from '@/lib/format'
+import { previewUsername } from '@/lib/identity'
 import { scorePassword } from '@/lib/security'
 
 const MAX_ATTEMPTS = 3
@@ -43,22 +45,81 @@ const PASSWORD_HISTORY_LIMIT = 5
  */
 
 /** Ficha completa de un usuario del directorio: identidad + credencial. */
-const buildUser = (entry, profile = {}) => ({
-  ...entry,
-  firstName: profile.firstName ?? entry.name.split(' ')[0] ?? entry.name,
-  lastName: profile.lastName ?? entry.name.split(' ').slice(1).join(' '),
-  email: profile.email ?? '',
-  phone: profile.phone ?? '',
-  firm: profile.firm ?? 'Vidal & Penalto Bufetes',
-  roleLabel: profile.roleLabel ?? ROLES.find((r) => r.id === entry.role)?.label ?? entry.role,
-  title: profile.title ?? ROLES.find((r) => r.id === entry.role)?.label ?? entry.role,
-  joinedAt: profile.joinedAt ?? nowIso(),
-  password: DEMO_PASSWORD,
-  passwordHistory: [],
-})
+const buildUser = (entry, profile = {}) => {
+  const name = entry.name ?? ''
+  // El username institucional vive en formato nombre.apellido (punto 9.1);
+  // tambien puede traer espacios en el simulador, se normaliza aca.
+  const nameParts = name.includes('.') ? name.split('.') : name.split(/\s+/)
+  return {
+    ...entry,
+    firstName: profile.firstName ?? nameParts[0] ?? name,
+    lastName: profile.lastName ?? nameParts.slice(1).join(' '),
+    email: profile.email ?? '',
+    phone: profile.phone ?? '',
+    firm: profile.firm ?? 'Vidal & Penalto Bufetes',
+    roleLabel: profile.roleLabel ?? ROLES.find((r) => r.id === entry.role)?.label ?? entry.role,
+    title: profile.title ?? ROLES.find((r) => r.id === entry.role)?.label ?? entry.role,
+    joinedAt: profile.joinedAt ?? nowIso(),
+    password: DEMO_PASSWORD,
+    passwordHistory: [],
+  }
+}
 
 const seedDirectory = () =>
   DIRECTORY.map((entry) => buildUser(entry, USER_PROFILES[entry.userId]))
+
+/** Directorio del ABM: entrada con username 9.1, estado y baja logica. */
+const seedUsers = () => {
+  const used = new Set()
+  return seedDirectory().map((entry, i) => {
+    const profile = USER_PROFILES[entry.userId]
+    const firstName = profile.firstName ?? entry.name.split(/\s+/)[0]
+    const lastName = profile.lastName ?? entry.name.split(/\s+/).slice(1).join(' ')
+    const username = previewUsername(firstName, lastName, [...used])
+    used.add(username)
+    return {
+      id: i + 1,
+      userCode: entry.userId,
+      username,
+      firstName,
+      lastName,
+      email: profile.email ?? '',
+      phone: profile.phone ?? '',
+      firm: profile.firm ?? 'Vidal & Penalto Bufetes',
+      department: entry.department ?? '',
+      role: entry.role,
+      roleLabel: ROLES.find((r) => r.id === entry.role)?.label ?? entry.role,
+      isActive: true,
+      isLocked: false,
+      failedAttempts: 0,
+      lockedAt: null,
+      createdAt: profile.joinedAt ?? nowIso(),
+    }
+  })
+}
+
+/** Fila de GET /api/users -> entrada del ABM en la UI. */
+const apiUserToAdminUser = (row) => {
+  const parts = String(row.username ?? '').split('.')
+  return {
+    id: row.id,
+    userCode: row.userCode,
+    username: row.username,
+    firstName: row.firstName ?? parts[0] ?? '',
+    lastName: row.lastName ?? parts.slice(1).join('.') ?? '',
+    email: row.email ?? '',
+    phone: row.phone ?? '',
+    firm: row.firm ?? '',
+    department: row.department ?? '',
+    role: row.role,
+    roleLabel: row.roleLabel,
+    isActive: row.isActive,
+    isLocked: row.isLocked,
+    failedAttempts: row.failedAttempts,
+    lockedAt: row.lockedAt,
+    createdAt: row.createdAt,
+  }
+}
 
 /**
  * Siguiente User ID estandarizado libre: LEG-AAAA-NNNN, correlativo ascendente.
@@ -66,7 +127,7 @@ const seedDirectory = () =>
  */
 const nextUserId = (directory, year = new Date().getFullYear()) => {
   const serial = directory.reduce((max, user) => {
-    const tail = user.userId.split('-')[2]
+    const tail = String(user.userId ?? user.userCode ?? '').split('-')[2]
     const value = Number(tail)
     return Number.isFinite(value) ? Math.max(max, value) : max
   }, 0)
@@ -81,6 +142,7 @@ const initialState = () => ({
   didactic: true,
   apiMode: isApiEnabled() ? 'probeando' : 'simulador',
   directory: seedDirectory(),
+  users: seedUsers(),
   rbac: structuredClone(INITIAL_RBAC),
   sis321: structuredClone(SIS321_MATRIX),
   infoAssets: structuredClone(INFO_ASSETS),
@@ -450,6 +512,262 @@ export const useAppStore = create((set, get) => ({
       message: `Alta en simulador (sin API) · User ID ${userId} · rol solicitado ${String(requested.label).toUpperCase()}`,
     })
     return user
+  },
+
+  /* ------------------------------- ABM /USERS --------------------------- */
+
+  /** Carga la lista del ABM; sin API se queda con el directorio local. */
+  loadUsers: async () => {
+    try {
+      const data = await usersApi.list({ limit: 200 })
+      set({ users: data.users.map(apiUserToAdminUser), apiMode: 'en linea' })
+      return data.users.length
+    } catch (error) {
+      if (error instanceof ApiError && error.isNetwork) {
+        set({ apiMode: 'simulador' })
+      } else {
+        noteApiFailure(set, error, 'users')
+      }
+      return get().users.length
+    }
+  },
+
+  /**
+   * Alta granular (USERS_CREATE). Con API, el User ID lo estandariza el
+   * servidor en una transaccion (nombre.apellido + correlativo LEG-AAAA-NNNN);
+   * sin API, la regla 9.1 se replica en memoria.
+   */
+  createUserAdmin: async ({ firstName, lastName, email, role, firm, department, phone, password }) => {
+    try {
+      const data = await usersApi.create({ firstName, lastName, email, role, firm, department, phone, password })
+      const user = apiUserToAdminUser(data.user)
+      set((s) => ({
+        users: [user, ...s.users],
+        apiMode: 'en linea',
+      }))
+      get().pushLog({
+        type: 'USER_CREATED',
+        severity: 'info',
+        actor: get().session?.userId,
+        target: `usuario:${user.username}`,
+        message: `Alta granular persistiada en la API · User ID ${user.username} · codigo ${user.userCode} · rol ${String(user.role).toUpperCase()}`,
+      })
+      return { user, tempPassword: data.tempPassword }
+    } catch (error) {
+      if (error instanceof ApiError && error.isNetwork) {
+        set({ apiMode: 'simulador' })
+        return get().createUserAdminLocal({ firstName, lastName, email, role, firm, department, phone, password })
+      }
+      throw error
+    }
+  },
+
+  createUserAdminLocal: ({ firstName, lastName, email, role, firm, department, phone, password }) => {
+    const state = get()
+    const requested = ROLES.find((r) => r.id === role) ?? ROLES[0]
+    const username = previewUsername(firstName, lastName, state.users.map((u) => u.username))
+    const userCode = nextUserId(state.users)
+
+    const entry = {
+      id: Date.now(),
+      userCode,
+      username,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email,
+      phone,
+      firm: firm.trim() || 'Vidal & Penalto Bufetes',
+      department: department?.trim() ?? '',
+      role: requested.id,
+      roleLabel: requested.label,
+      isActive: true,
+      isLocked: false,
+      failedAttempts: 0,
+      lockedAt: null,
+      createdAt: nowIso(),
+    }
+
+    const dirEntry = buildUser(
+      { userId: userCode, name: username, role: requested.id, department: entry.department },
+      {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email,
+        firm: entry.firm,
+        phone,
+        roleLabel: requested.label,
+        title: `${requested.label} · ${entry.department}`,
+      },
+    )
+    dirEntry.password = password || DEMO_PASSWORD
+
+    set({ users: [entry, ...state.users], directory: [...state.directory, dirEntry] })
+    get().pushLog({
+      type: 'USER_CREATED',
+      severity: 'info',
+      actor: state.session?.userId,
+      target: `usuario:${username}`,
+      message: `Alta granular en simulador (sin API) · User ID ${username} · codigo ${userCode} (regla 9.1)`,
+    })
+    return { user: entry, tempPassword: null }
+  },
+
+  /** Edicion granular (USERS_UPDATE): datos personales, rol o estado. */
+  updateUserAdmin: async (id, payload) => {
+    try {
+      const data = await usersApi.update(id, payload)
+      const updated = apiUserToAdminUser(data.user)
+      set((s) => ({
+        users: s.users.map((u) => (u.id === id ? updated : u)),
+        apiMode: 'en linea',
+      }))
+      get().pushLog({
+        type: 'USER_UPDATED',
+        severity: 'warn',
+        actor: get().session?.userId,
+        target: `usuario:${updated.username}`,
+        message: `Edicion granular persistida · User ID ${updated.username} · campos ${Object.keys(payload).join(', ')}`,
+      })
+      return updated
+    } catch (error) {
+      if (error instanceof ApiError && error.isNetwork) {
+        set({ apiMode: 'simulador' })
+        return get().updateUserAdminLocal(id, payload)
+      }
+      throw error
+    }
+  },
+
+  updateUserAdminLocal: (id, payload) => {
+    const state = get()
+    const current = state.users.find((u) => u.id === id)
+    if (!current) throw new Error('Usuario no encontrado en el directorio')
+
+    const firstName = payload.firstName ?? current.firstName
+    const lastName = payload.lastName ?? current.lastName
+    const username = previewUsername(
+      firstName,
+      lastName,
+      state.users.filter((u) => u.id !== id).map((u) => u.username),
+    )
+    const requested = ROLES.find((r) => r.id === (payload.role ?? current.role)) ?? ROLES[0]
+
+    const updated = {
+      ...current,
+      firstName,
+      lastName,
+      username,
+      email: payload.email ?? current.email,
+      phone: payload.phone ?? current.phone,
+      firm: payload.firm ?? current.firm,
+      department: payload.department ?? current.department,
+      role: requested.id,
+      roleLabel: requested.label,
+    }
+
+    set((s) => ({
+      users: s.users.map((u) => (u.id === id ? updated : u)),
+      directory: s.directory.map((d) =>
+        d.userId === current.userCode ? { ...d, name: username, role: requested.id, department: updated.department } : d,
+      ),
+    }))
+    get().pushLog({
+      type: 'USER_UPDATED',
+      severity: 'warn',
+      actor: state.session?.userId,
+      target: `usuario:${username}`,
+      message: `Edicion granular en simulador · User ID ${username}`,
+    })
+    return updated
+  },
+
+  /** Baja logica / reactivacion (USERS_DELETE). */
+  setUserStatusAdmin: async (id, active) => {
+    try {
+      await usersApi.status(id, { active })
+      set((s) => ({
+        users: s.users.map((u) => (u.id === id ? { ...u, isActive: active } : u)),
+        apiMode: 'en linea',
+      }))
+    } catch (error) {
+      if (error instanceof ApiError && error.isNetwork) {
+        set({ apiMode: 'simulador' })
+        return get().setUserStatusAdminLocal(id, active)
+      }
+      throw error
+    }
+    get().pushLog({
+      type: active ? 'USER_REACTIVATED' : 'USER_DEACTIVATED',
+      severity: active ? 'info' : 'warn',
+      actor: get().session?.userId,
+      target: `usuario:${id}`,
+      message: active ? 'Cuenta reactivada (baja logica revertida)' : 'Cuenta desactivada (baja logica)',
+    })
+    return true
+  },
+
+  setUserStatusAdminLocal: (id, active) => {
+    const state = get()
+    set({
+      users: state.users.map((u) => (u.id === id ? { ...u, isActive: active } : u)),
+      directory: state.directory.map((d) =>
+        d.userId === state.users.find((u) => u.id === id)?.userCode ? { ...d, isActive: active } : d,
+      ),
+    })
+    get().pushLog({
+      type: active ? 'USER_REACTIVATED' : 'USER_DEACTIVATED',
+      severity: active ? 'info' : 'warn',
+      actor: state.session?.userId,
+      target: `usuario:${id}`,
+      message: active ? 'Cuenta reactivada (baja logica revertida)' : 'Cuenta desactivada (baja logica)',
+    })
+    return true
+  },
+
+  /** Desbloqueo + reset de clave (USERS_UNLOCK). */
+  unlockUserAdmin: async (id, tempPassword) => {
+    try {
+      const data = await usersApi.unlock(id, { tempPassword })
+      set((s) => ({
+        users: s.users.map((u) => (u.id === id ? { ...u, isLocked: false, failedAttempts: 0 } : u)),
+        apiMode: 'en linea',
+      }))
+      get().pushLog({
+        type: 'USER_UNLOCKED',
+        severity: 'info',
+        actor: get().session?.userId,
+        target: `usuario:${id}`,
+        message: 'Cuenta desbloqueada y clave reiniciada por el administrador',
+      })
+      return { data, tempPassword: data.tempPassword }
+    } catch (error) {
+      if (error instanceof ApiError && error.isNetwork) {
+        set({ apiMode: 'simulador' })
+        return get().unlockUserAdminLocal(id, tempPassword)
+      }
+      throw error
+    }
+  },
+
+  unlockUserAdminLocal: (id, tempPassword) => {
+    const state = get()
+    const generated = tempPassword || 'Temp!' + Math.random().toString(36).slice(2, 8)
+    set({
+      users: state.users.map((u) => (u.id === id ? { ...u, isLocked: false, failedAttempts: 0 } : u)),
+      directory: state.directory.map((d) =>
+        d.userId === state.users.find((u) => u.id === id)?.userCode
+          ? { ...d, isLocked: false, failedAttempts: 0 }
+          : d,
+      ),
+    })
+    get().pushLog({
+      type: 'USER_UNLOCKED',
+      severity: 'info',
+      actor: state.session?.userId,
+      target: `usuario:${id}`,
+      message: 'Cuenta desbloqueada y clave reiniciada en el simulador',
+    })
+    return { data: null, tempPassword: generated }
   },
 
   /* -------------------------------- PERFIL ------------------------------- */

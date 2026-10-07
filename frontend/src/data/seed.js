@@ -13,6 +13,11 @@ export const PERMISSIONS = [
   { id: 'RBAC_MANAGE', label: 'Administrar matriz RBAC', group: 'Seguridad', severity: 'critica' },
   { id: 'TOKEN_RESET', label: 'Emitir tokens de reseteo', group: 'Seguridad', severity: 'critica' },
   { id: 'RISK_ASSESS', label: 'Modificar evaluacion de riesgo', group: 'Seguridad', severity: 'media' },
+  { id: 'USERS_READ', label: 'Ver lista y detalles de usuarios', group: 'Usuarios', severity: 'media' },
+  { id: 'USERS_CREATE', label: 'Registrar usuarios', group: 'Usuarios', severity: 'alta' },
+  { id: 'USERS_UPDATE', label: 'Editar datos, rol o estado', group: 'Usuarios', severity: 'alta' },
+  { id: 'USERS_DELETE', label: 'Dar de baja (desactivar) usuarios', group: 'Usuarios', severity: 'critica' },
+  { id: 'USERS_UNLOCK', label: 'Desbloquear usuarios y resetear clave', group: 'Usuarios', severity: 'critica' },
 ]
 
 export const ROLES = [
@@ -56,6 +61,7 @@ export const INITIAL_RBAC = {
     'LOGS_VIEW',
     'AUDIT_RECEIPT',
     'RISK_ASSESS',
+    'USERS_READ',
   ],
   asistente: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'],
   cliente: ['CASES_READ'],

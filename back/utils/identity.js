@@ -74,6 +74,39 @@ function normalizeUsername(value) {
     .join('.')
 }
 
+/**
+ * User ID estandarizado (punto 9.1): primer nombre + primer apellido.
+ * "Marta Jose Perez" -> "marta.perez"; "Marta" + "Jose Perez" -> "marta.perez".
+ * Se descartan segundos nombres para que el identificador sea estable y corto.
+ */
+function buildUsername(firstName, lastName) {
+  const firstTokens = normalizeUsername(firstName).split('.').filter(Boolean)
+  const lastTokens = normalizeUsername(lastName).split('.').filter(Boolean)
+  const first = firstTokens[0] ?? ''
+  const last = lastTokens[lastTokens.length - 1] ?? ''
+  return [first, last].filter(Boolean).join('.')
+}
+
+/**
+ * Reserva (consulta) el siguiente User ID estandarizado libre para un base ya
+ * normalizado: si "marta.perez" existe, itera "marta.perez1", "marta.perez2"...
+ * hasta encontrar un valor no tomado (punto 9.1).
+ *
+ * `excludeId` se usa al editar: permite que el titular conserve su propio
+ * username sin que cuente como colision.
+ */
+async function findAvailableUsername(client, baseUsername, excludeId = null) {
+  for (let suffix = 0; suffix <= 1000; suffix += 1) {
+    const candidate = suffix === 0 ? baseUsername : `${baseUsername}${suffix}`
+    const { rows: found } = await client.query(
+      'SELECT 1 AS taken FROM users WHERE username = ? AND (? IS NULL OR id <> ?)',
+      [candidate, excludeId, excludeId],
+    )
+    if (found.length === 0) return candidate
+  }
+  throw new Error(`No se encontro un User ID disponible para ${baseUsername}`)
+}
+
 /** Existe un correo dado, excluyendo un user_id concreto (edicion de perfil). */
 async function emailExists(email, excludeUserId = null) {
   const found = await one('SELECT id FROM users WHERE email = ? AND (? IS NULL OR id <> ?)', [
@@ -105,6 +138,8 @@ module.exports = {
   generateUserCode,
   sanitizeEmail,
   normalizeUsername,
+  buildUsername,
+  findAvailableUsername,
   emailExists,
   assertEmailAvailable,
   normalizeRole,
