@@ -9,7 +9,7 @@
  *
  *   1. CREATE DATABASE IF NOT EXISTS legalshield_db (utf8mb4 / unicode_ci)
  *   2. USE legalshield_db
- *   3. CREATE TABLE IF NOT EXISTS de las 7 tablas relacionales
+ *   3. CREATE TABLE IF NOT EXISTS de las 8 tablas relacionales
  *   4. Triggers + vista de conveniencia (idempotentes)
  *   5. Seed: roles, permisos, matriz rol x permiso y usuario Admin
  *   6. Mensaje final + process.exit(0) para no dejar el terminal colgado
@@ -81,12 +81,15 @@ const TABLES = [
      failed_attempts     INT NOT NULL DEFAULT 0,
      is_locked           BOOLEAN NOT NULL DEFAULT FALSE,
      locked_at           DATETIME,
+     is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+     deactivated_at      DATETIME,
      password_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT,
      CONSTRAINT chk_failed_attempts CHECK (failed_attempts >= 0),
-     INDEX idx_users_role (role_id)
+     INDEX idx_users_role (role_id),
+     INDEX idx_users_active (is_active)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
   // 3.5 password_history
@@ -180,39 +183,157 @@ const ROLES = [
 ]
 
 const PERMISSIONS = [
+  // Catalogo atomico (17) replicando PERMISSIONS del frontend (seed.js).
   ['CASES_CREATE', 'Crear expedientes'],
   ['CASES_READ', 'Leer expedientes'],
-  ['CASES_UPDATE', 'Actualizar expedientes'],
-  ['ROLES_MANAGE', 'Administrar roles y permisos'],
-  ['LOGS_VIEW', 'Ver logs de auditoria'],
-  // Catalogo completo que exige la API (rbacMiddleware / casesRoutes).
   ['CASES_WRITE', 'Editar expedientes'],
   ['CASES_ARCHIVE', 'Archivar expedientes'],
   ['DOCS_REVEAL', 'Revelar documentos restringidos'],
   ['DOCS_DOWNLOAD', 'Descargar documentos'],
+  ['LOGS_VIEW', 'Ver logs de auditoria'],
   ['LOGS_EXPORT', 'Exportar logs'],
   ['AUDIT_RECEIPT', 'Emitir comprobantes'],
   ['RBAC_MANAGE', 'Administrar matriz RBAC'],
   ['TOKEN_RESET', 'Emitir tokens de reseteo'],
   ['RISK_ASSESS', 'Modificar evaluacion de riesgo'],
+  ['USERS_READ', 'Ver lista y detalles de usuarios'],
+  ['USERS_CREATE', 'Registrar usuarios (User ID nombre.apellido)'],
+  ['USERS_UPDATE', 'Editar datos, rol o estado de usuarios'],
+  ['USERS_DELETE', 'Dar de baja (desactivar) usuarios'],
+  ['USERS_UNLOCK', 'Desbloquear usuarios y resetear clave'],
 ]
 
 const RBAC_MATRIX = {
-  socio: [
-    'CASES_CREATE', 'CASES_READ', 'CASES_UPDATE', 'CASES_WRITE', 'CASES_ARCHIVE',
-    'DOCS_REVEAL', 'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT',
-    'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET', 'RISK_ASSESS',
-  ],
-  abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_UPDATE', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT', 'RISK_ASSESS'],
-  asistente: ['CASES_CREATE', 'CASES_READ', 'CASES_UPDATE', 'CASES_WRITE', 'AUDIT_RECEIPT'],
+  socio: PERMISSIONS.map(([code]) => code),
+  abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT', 'RISK_ASSESS', 'USERS_READ'],
+  asistente: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'],
   cliente: ['CASES_READ'],
 }
 
-const ADMIN = {
-  userCode: 'LEG-2026-0001',
-  username: 'admin',
-  email: 'admin@legalshield.local',
-}
+/** Catalogos obsoletos del seed previo: se limpian para alinear la matriz. */
+const OBSOLETE_PERMISSIONS = ['CASES_UPDATE', 'ROLES_MANAGE']
+
+/** Personas civiles de demostracion: replican DIRECTORY/USER_PROFILES (seed.js). */
+const DEMO_USERS = [
+  {
+    userCode: 'LEG-2026-0001',
+    username: 'mariana.solis',
+    email: 'mariana.solis@vidalpenalto.co',
+    role: 'socio',
+    firm: 'Vidal & Penalto Bufetes',
+    department: 'Direccion Juridica',
+    phone: '+57 601 742 1180',
+  },
+  {
+    userCode: 'LEG-2026-0142',
+    username: 'diego.ferrer',
+    email: 'diego.ferrer@vidalpenalto.co',
+    role: 'abogado',
+    firm: 'Vidal & Penalto Bufetes',
+    department: 'Litigacion',
+    phone: '+57 300 552 8841',
+  },
+  {
+    userCode: 'LEG-2026-0277',
+    username: 'lucia.ampara',
+    email: 'lucia.ampara@vidalpenalto.co',
+    role: 'asistente',
+    firm: 'Vidal & Penalto Bufetes',
+    department: 'Tramitacion',
+    phone: '+57 315 409 2277',
+  },
+  {
+    userCode: 'LEG-2026-0390',
+    username: 'andres.quintero',
+    email: 'andres.quintero@metalurgiaandes.co',
+    role: 'cliente',
+    firm: 'Metalurgia Andes S.A.S.',
+    department: 'Externo',
+    phone: '+57 310 228 4419',
+  },
+  {
+    userCode: 'LEG-2026-0411',
+    username: 'paula.sandoval',
+    email: 'paula.sandoval@vidalpenalto.co',
+    role: 'asistente',
+    firm: 'Vidal & Penalto Bufetes',
+    department: 'Archivo',
+    phone: '+57 320 771 3390',
+  },
+]
+
+const DEMO_CASES = [
+  {
+    caseNumber: 'EXP-2026-0014',
+    title: 'Despido disciplinario · Metalurgia Andes',
+    clientName: 'Metalurgia Andes S.A.S.',
+    lawyerCode: 'LEG-2026-0142',
+    status: 'en_tramite',
+    matter: 'Laboral',
+    court: 'Juzgado 12 Laboral de Bogota',
+    stage: 'Prueba',
+    riskLevel: 'alta',
+    progress: 62,
+    deadline: '2026-10-21',
+    isPrivileged: true,
+  },
+  {
+    caseNumber: 'EXP-2026-0021',
+    title: 'Nulidad contractual · Consorcion Vento',
+    clientName: 'Consorcion Vento S.A.',
+    lawyerCode: 'LEG-2026-0001',
+    status: 'abierto',
+    matter: 'Civil',
+    court: 'Tribunal Superior',
+    stage: 'Contestacion',
+    riskLevel: 'critica',
+    progress: 38,
+    deadline: '2026-10-09',
+    isPrivileged: false,
+  },
+  {
+    caseNumber: 'EXP-2026-0033',
+    title: 'Derecho de peticion · Ministerio de Salud',
+    clientName: 'Redaccion Norte (periodista)',
+    lawyerCode: 'LEG-2026-0277',
+    status: 'en_tramite',
+    matter: 'Administrativo',
+    court: 'Ministerio de Salud',
+    stage: 'Seguimiento',
+    riskLevel: 'media',
+    progress: 84,
+    deadline: '2026-11-02',
+    isPrivileged: false,
+  },
+  {
+    caseNumber: 'EXP-2026-0047',
+    title: 'Sucesion intestada · Familia Ortegas',
+    clientName: 'Familia Ortega Medina',
+    lawyerCode: 'LEG-2026-0001',
+    status: 'abierto',
+    matter: 'Familia',
+    court: 'Juzgado 3 de Sucesiones',
+    stage: 'Peritaje',
+    riskLevel: 'baja',
+    progress: 47,
+    deadline: '2026-11-18',
+    isPrivileged: true,
+  },
+  {
+    caseNumber: 'EXP-2026-0058',
+    title: 'Propiedad industrial · Trademark Falcon',
+    clientName: 'Falcon Studio SAS',
+    lawyerCode: 'LEG-2026-0142',
+    status: 'en_tramite',
+    matter: 'Comercial',
+    court: 'SIC - Decision 3',
+    stage: 'Ejecucion',
+    riskLevel: 'alta',
+    progress: 71,
+    deadline: '2026-10-27',
+    isPrivileged: false,
+  },
+]
 
 /* -------------------------------------------------------------------------- */
 /* Ejecucion                                                                   */
@@ -230,6 +351,23 @@ async function triggerExists(name) {
     [DB_NAME, name],
   )
   return Number(rowsResult[0].total) > 0
+}
+
+/** Migracion idempotente: ADD COLUMN IF NOT EXISTS no existe en MySQL 8. */
+async function columnExists(table, column) {
+  const [rows] = await conn.query(
+    'SELECT COUNT(*) AS total FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+    [DB_NAME, table, column],
+  )
+  return Number(rows[0].total) > 0
+}
+
+async function indexExists(table, index) {
+  const [rows] = await conn.query(
+    'SELECT COUNT(*) AS total FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ?',
+    [DB_NAME, table, index],
+  )
+  return Number(rows[0].total) > 0
 }
 
 async function main() {
@@ -271,6 +409,21 @@ async function main() {
   await run(VIEW)
   logger.info('Vista vw_role_permission_matrix creada/actualizada')
 
+  // 4b. Migracion idempotente: bases creadas por seeds previos no tienen baja
+  //     logica (is_active / deactivated_at). Se agrega columna por columna.
+  if (!(await columnExists('users', 'is_active'))) {
+    await run('ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE AFTER locked_at')
+    logger.info('Columna agregada: users.is_active')
+  }
+  if (!(await columnExists('users', 'deactivated_at'))) {
+    await run('ALTER TABLE users ADD COLUMN deactivated_at DATETIME AFTER is_active')
+    logger.info('Columna agregada: users.deactivated_at')
+  }
+  if (!(await indexExists('users', 'idx_users_active'))) {
+    await run('CREATE INDEX idx_users_active ON users (is_active)')
+    logger.info('Indice agregado: users.idx_users_active')
+  }
+
   // 5. Seed data.
   for (const [code, name, description] of ROLES) {
     await run(
@@ -286,6 +439,11 @@ async function main() {
       [code, description],
     )
   }
+  // Catalogo previo desalineado con el frontend: se retira para mantener la
+  // matriz rol x permiso exacta (17 permisos atomicos de seed.js / seed.sql).
+  for (const code of OBSOLETE_PERMISSIONS) {
+    await run('DELETE FROM permissions WHERE code = ?', [code])
+  }
   logger.info(`Permisos insertados: ${PERMISSIONS.length}`)
 
   for (const [roleCode, codes] of Object.entries(RBAC_MATRIX)) {
@@ -300,32 +458,61 @@ async function main() {
   }
   logger.info('Matriz rol x permiso aplicada')
 
-  // Usuario Admin por defecto (hash bcrypt real, nunca texto plano).
+  // Personas civiles de demostracion (mismas cuentas que DIRECTORY en el
+  // frontend). El usuario previo "admin" colisiona en LEG-2026-0001, asi que
+  // ON DUPLICATE KEY UPDATE lo transforma en mariana.solis (socio).
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, BCRYPT_ROUNDS)
-  await run(
-    `INSERT INTO users (user_code, username, email, password_hash, role_id, firm, department, failed_attempts, is_locked, password_updated_at)
-     VALUES (?, ?, ?, ?, (SELECT id FROM roles WHERE code = 'socio'), 'LegalShield Bufetes', 'Direccion Juridica', 0, FALSE, NOW())
-     ON DUPLICATE KEY UPDATE
-       username = VALUES(username),
-       email = VALUES(email),
-       password_hash = VALUES(password_hash),
-       role_id = VALUES(role_id),
-       failed_attempts = 0,
-       is_locked = FALSE,
-       locked_at = NULL,
-       password_updated_at = NOW()`,
-    [ADMIN.userCode, ADMIN.username, ADMIN.email, passwordHash],
-  )
-  await run(
-    `INSERT INTO password_history (user_id, password_hash)
-     SELECT u.id, ? FROM users u
-      WHERE u.user_code = ?
-        AND NOT EXISTS (SELECT 1 FROM password_history ph WHERE ph.user_id = u.id)`,
-    [passwordHash, ADMIN.userCode],
-  )
-  logger.info(`Usuario Admin creado: ${ADMIN.userCode} / ${ADMIN.username}`)
+  for (const user of DEMO_USERS) {
+    await run(
+      `INSERT INTO users
+         (user_code, username, email, password_hash, role_id, firm, department, phone, password_updated_at)
+       VALUES (?, ?, ?, ?, (SELECT id FROM roles WHERE code = ?), ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE
+         username = VALUES(username),
+         email = VALUES(email),
+         password_hash = VALUES(password_hash),
+         role_id = VALUES(role_id),
+         firm = VALUES(firm),
+         department = VALUES(department),
+         phone = VALUES(phone),
+         failed_attempts = 0,
+         is_locked = FALSE,
+         locked_at = NULL,
+         is_active = TRUE,
+         deactivated_at = NULL,
+         password_updated_at = NOW()`,
+      [user.userCode, user.username, user.email, passwordHash, user.role, user.firm, user.department, user.phone],
+    )
+    await run(
+      `INSERT INTO password_history (user_id, password_hash)
+       SELECT u.id, ? FROM users u
+        WHERE u.user_code = ?
+          AND NOT EXISTS (SELECT 1 FROM password_history ph WHERE ph.user_id = u.id)`,
+      [passwordHash, user.userCode],
+    )
+    logger.info(`Usuario de demostracion listo: ${user.userCode} / ${user.username} (${user.role})`)
+  }
 
-  // 6. Verificacion final: 7 tablas visibles en phpMyAdmin.
+  // Expedientes de demostracion (CASES del frontend), idempotentes.
+  for (const c of DEMO_CASES) {
+    await run(
+      `INSERT INTO legal_cases
+         (case_number, title, client_name, assigned_lawyer_id, status, matter, court, stage, risk_level, progress, deadline, is_privileged)
+       VALUES (?, ?, ?, (SELECT id FROM users WHERE user_code = ?), ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         title = VALUES(title),
+         status = VALUES(status),
+         progress = VALUES(progress),
+         deadline = VALUES(deadline)`,
+      [
+        c.caseNumber, c.title, c.clientName, c.lawyerCode, c.status, c.matter, c.court,
+        c.stage, c.riskLevel, c.progress, c.deadline, c.isPrivileged,
+      ],
+    )
+  }
+  logger.info(`Expedientes de demostracion listos: ${DEMO_CASES.length}`)
+
+  // 6. Verificacion final: 8 tablas visibles en phpMyAdmin.
   const [tables] = await conn.query(
     'SELECT table_name AS nombre FROM information_schema.tables WHERE table_schema = ? ORDER BY table_name',
     [DB_NAME],
