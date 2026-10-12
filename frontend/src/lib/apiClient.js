@@ -1,16 +1,12 @@
-import { toast } from '@/store/toastStore'
-
 /**
  * Cliente HTTP de LegalShield.
  *
- * Habla con la API REST (`/back`) y cae de forma explicita al simulador en
- * memoria cuando el backend no esta disponible. La distincion importa: la UI
- * nunca debe quedar en blanco porque la API este caida, pero tampoco debe
- * fingir que un cambio quedo persistido.
+ * Habla con la API REST (`/back`), que persiste en MySQL. No existe simulador:
+ * si la API no responde, la UI muestra el error o un estado vacio, nunca datos
+ * ficticios.
  *
  * Variables de entorno (Vite):
  *   VITE_API_BASE_URL   base de la API   (por defecto http://localhost:4000/api)
- *   VITE_API_ENABLED    'false' fuerza el modo simulador
  */
 
 const RAW_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api'
@@ -18,20 +14,45 @@ const API_ENABLED = import.meta.env.VITE_API_ENABLED !== 'false'
 
 export const API_BASE = RAW_BASE.replace(/\/$/, '')
 
-/** Tokens en memoria: no se guardan en localStorage para reducir exposicion XSS. */
+/** Claves de persistencia de la sesion en el navegador. */
+const ACCESS_TOKEN_KEY = 'legalshield.access'
+const REFRESH_TOKEN_KEY = 'legalshield.refresh'
+
+function readStorage(key) {
+  try {
+    return window.localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStorage(key, value) {
+  try {
+    if (value) window.localStorage.setItem(key, value)
+    else window.localStorage.removeItem(key)
+  } catch {
+    /* almacenamiento no disponible (modo privado): la sesion vive en memoria */
+  }
+}
+
+/** Tokens persistidos en localStorage para sobrevivir recargas de pagina. */
 const tokens = {
-  access: null,
-  refresh: null,
+  access: readStorage(ACCESS_TOKEN_KEY),
+  refresh: readStorage(REFRESH_TOKEN_KEY),
 }
 
 export function setTokens({ access, refresh }) {
   tokens.access = access ?? null
   tokens.refresh = refresh ?? null
+  writeStorage(ACCESS_TOKEN_KEY, tokens.access)
+  writeStorage(REFRESH_TOKEN_KEY, tokens.refresh)
 }
 
 export function clearTokens() {
   tokens.access = null
   tokens.refresh = null
+  writeStorage(ACCESS_TOKEN_KEY, null)
+  writeStorage(REFRESH_TOKEN_KEY, null)
 }
 
 export function isAuthenticated() {
@@ -219,8 +240,7 @@ export const auditApi = {
 
 /**
  * Prueba la API una sola vez al arrancar. Devuelve 'online' | 'offline' |
- * 'disabled' y notifica con un toast cuando cae al simulador, para que la
- * diferencia entre datos reales y datos de demostracion sea visible.
+ * 'disabled'. Cuando esta caida la UI muestra el error; no hay datos simulados.
  */
 export async function probeApi({ notify = true } = {}) {
   if (!API_ENABLED) return 'disabled'
@@ -234,10 +254,13 @@ export async function probeApi({ notify = true } = {}) {
   }
 
   if (notify) {
-    toast.info(
-      'API REST no disponible',
-      'LegalShield opera con el simulador en memoria · los cambios no se persisten',
-    )
+    // Import perezoso: evita dependencia circular con el store de toasts.
+    import('@/store/toastStore').then(({ toast }) => {
+      toast.info(
+        'API REST no disponible',
+        'No hay conexion con el servidor MySQL · verifique que el backend este en marcha',
+      )
+    })
   }
   return 'offline'
 }

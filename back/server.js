@@ -43,12 +43,17 @@ const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .map((o) => o.trim())
   .filter(Boolean)
 
+/** En desarrollo se acepta cualquier puerto local (Vite cambia 5173 -> 5174...). */
+const isDevelopment = process.env.NODE_ENV !== 'production'
+const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
+
 app.use(
   cors({
     origin(origin, callback) {
       // Sin Origin = curl, Postman o server-to-server.
       if (!origin) return callback(null, true)
       if (corsOrigins.includes('*') || corsOrigins.includes(origin)) return callback(null, true)
+      if (isDevelopment && LOCAL_ORIGIN_RE.test(origin)) return callback(null, true)
       return callback(new errors.HttpError(403, `Origen no permitido por CORS: ${origin}`))
     },
     credentials: true,
