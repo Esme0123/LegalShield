@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import AeroShards from '@/components/reactbits/AeroShards'
 import FolderFloat from '@/components/reactbits/FolderFloat'
+import ConnectionError from '@/components/ui/ConnectionError'
 import { Badge, Progress, RiskBadge, SectionTitle, StatCard } from '@/components/ui/primitives'
 import { useAppStore } from '@/store/useAppStore'
 import { PERMISSIONS, ROLES } from '@/data/seed'
@@ -31,8 +32,23 @@ export default function Dashboard() {
   const riskControls = useAppStore((s) => s.riskControls)
   const rbac = useAppStore((s) => s.rbac)
   const session = useAppStore((s) => s.session)
+  const loadCases = useAppStore((s) => s.loadCases)
+  const loadLogs = useAppStore((s) => s.loadLogs)
+  const loadMatrix = useAppStore((s) => s.loadMatrix)
 
-  const blocked = useMemo(() => logs.filter((l) => l.type.includes('INTRUSION') || l.type === 'LOGIN_LOCKED').length, [logs])
+  useEffect(() => {
+    loadCases()
+    loadLogs()
+    loadMatrix()
+  }, [loadCases, loadLogs, loadMatrix])
+
+  const blocked = useMemo(
+    () =>
+      logs.filter(
+        (l) => l.type.includes('INTRUSION') || l.type === 'AUTH_LOCKED' || l.type === 'RATE_LIMITED',
+      ).length,
+    [logs],
+  )
   const critical = useMemo(() => logs.filter((l) => l.severity === 'critico').length, [logs])
   const maturity = maturityScore(riskControls)
   const granted = Object.values(rbac).reduce((acc, list) => acc + list.length, 0)
@@ -41,6 +57,8 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      <ConnectionError />
+
       {/* Hero */}
       <section className="relative overflow-hidden rounded-2xl border border-line/60 bg-surface/60 p-5 shadow-card backdrop-blur-md sm:p-7">
         <AeroShards density={0.00016} className="opacity-60" />

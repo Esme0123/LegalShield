@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AppLayout from '@/components/layout/AppLayout'
 import Login from '@/pages/Login'
@@ -23,6 +24,11 @@ function RequireSession({ children }) {
 
 export default function App() {
   const session = useAppStore((s) => s.session)
+  const bootstrap = useAppStore((s) => s.bootstrap)
+
+  useEffect(() => {
+    bootstrap()
+  }, [bootstrap])
 
   return (
     <Routes>

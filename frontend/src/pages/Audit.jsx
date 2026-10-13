@@ -46,7 +46,7 @@ export default function Audit() {
   const logs = useAppStore((s) => s.logs)
   const liveFeedOn = useAppStore((s) => s.liveFeedOn)
   const setLiveFeed = useAppStore((s) => s.setLiveFeed)
-  const tickLiveFeed = useAppStore((s) => s.tickLiveFeed)
+  const loadLogs = useAppStore((s) => s.loadLogs)
   const receipts = useAppStore((s) => s.receipts)
   const tokens = useAppStore((s) => s.tokens)
   const issueReceipt = useAppStore((s) => s.issueReceipt)
@@ -64,10 +64,14 @@ export default function Audit() {
   const canTokens = hasPermission('TOKEN_RESET')
 
   useEffect(() => {
+    loadLogs()
+  }, [loadLogs])
+
+  useEffect(() => {
     if (!liveFeedOn) return undefined
-    const timer = setInterval(tickLiveFeed, 4200)
+    const timer = setInterval(() => loadLogs(), 8000)
     return () => clearInterval(timer)
-  }, [liveFeedOn, tickLiveFeed])
+  }, [liveFeedOn, loadLogs])
 
   useEffect(() => {
     const timer = setInterval(() => setTick((t) => t + 1), 30000)
@@ -312,7 +316,11 @@ export default function Audit() {
                     <button
                       type="button"
                       onClick={() => {
-                        const target = logs.find((l) => l.type === 'LOGIN_LOCKED')?.actor ?? 'LEG-2026-0411'
+                        const target = logs.find((l) => l.type === 'AUTH_LOCKED')?.actor
+                        if (!target) {
+                          toast.info('Sin cuentas bloqueadas', 'No hay bloqueos recientes que requieran token')
+                          return
+                        }
                         const tk = issueResetToken(target)
                         toast.danger('Token emitido', `${tk.id} para ${tk.userId} · TTL 900 s`)
                       }}

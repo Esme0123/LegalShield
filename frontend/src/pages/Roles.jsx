@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Building2,
@@ -40,8 +40,13 @@ export default function Roles() {
   const toggleMatrixAccess = useAppStore((s) => s.toggleMatrixAccess)
   const setSystemColumn = useAppStore((s) => s.setSystemColumn)
   const resetSis321 = useAppStore((s) => s.resetSis321)
+  const loadMatrix = useAppStore((s) => s.loadMatrix)
 
   const [filter, setFilter] = useState('all')
+
+  useEffect(() => {
+    loadMatrix()
+  }, [loadMatrix])
 
   const canEdit = hasPermission('RBAC_MANAGE') || session?.role === 'socio'
 

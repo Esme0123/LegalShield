@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Archive,
@@ -55,7 +55,7 @@ function DocumentPreview({ doc }) {
 export default function Cases() {
   const cases = useAppStore((s) => s.cases)
   const archiveCase = useAppStore((s) => s.archiveCase)
-  const restoreCases = useAppStore((s) => s.restoreCases)
+  const loadCases = useAppStore((s) => s.loadCases)
   const revealedDocs = useAppStore((s) => s.revealedDocs)
   const revealDocument = useAppStore((s) => s.revealDocument)
   const concealDocument = useAppStore((s) => s.concealDocument)
@@ -63,8 +63,12 @@ export default function Cases() {
   const session = useAppStore((s) => s.session)
   const pushLog = useAppStore((s) => s.pushLog)
 
-  const [selectedId, setSelectedId] = useState(cases[0]?.id ?? null)
+  const [selectedId, setSelectedId] = useState(null)
   const [crumpling, setCrumpling] = useState(null)
+
+  useEffect(() => {
+    loadCases()
+  }, [loadCases])
 
   const selected = cases.find((c) => c.id === selectedId) ?? cases[0]
   const canArchive = hasPermission('CASES_ARCHIVE')
@@ -106,19 +110,19 @@ export default function Cases() {
         actions={
           <button
             type="button"
-            onClick={() => {
-              restoreCases()
+            onClick={async () => {
+              await loadCases()
               pushLog({
-                type: 'ARCHIVE_ROLLBACK',
+                type: 'CASE_READ',
                 severity: 'info',
-                target: 'archivo',
-                message: 'Restauracion del conjunto de expedientes en ambiente de demostracion',
+                target: 'expedientes',
+                message: 'Expedientes recargados desde MySQL',
               })
-              toast.mint('Expedientes restaurados', 'El archivo de prueba vuelve a su estado inicial')
+              toast.mint('Expedientes recargados', 'La lista refleja el estado persistido en la base de datos')
             }}
             className="ls-btn-secondary text-xs"
           >
-            <RotateCcw className="h-3.5 w-3.5" /> Restaurar archivados
+            <RotateCcw className="h-3.5 w-3.5" /> Recargar expedientes
           </button>
         }
       />
@@ -130,7 +134,7 @@ export default function Cases() {
             <EmptyState
               icon={Archive}
               title="Sin expedientes activos"
-              description="Todos los folders fueron archivados. Restaura el archivo para continuar."
+              description="No hay expedientes visibles para su rol. Use Recargar expedientes para consultar la base de datos."
             />
           )}
 

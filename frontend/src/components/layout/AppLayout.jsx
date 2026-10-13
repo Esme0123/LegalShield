@@ -5,6 +5,7 @@ import { Bell, Menu, RefreshCcw, Scale, Search, ShieldAlert } from 'lucide-react
 import Sidebar from './Sidebar'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 import EffectsToggle from '@/components/ui/EffectsToggle'
+import ConnectionError from '@/components/ui/ConnectionError'
 import AeroShards from '@/components/reactbits/AeroShards'
 import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/cn'
@@ -28,7 +29,7 @@ export default function AppLayout() {
   const logs = useAppStore((s) => s.logs)
   const session = useAppStore((s) => s.session)
   const didactic = useAppStore((s) => s.didactic)
-  const resetSimulation = useAppStore((s) => s.resetSimulation)
+  const refreshAll = useAppStore((s) => s.refreshAll)
 
   const [title, subtitle] = TITLES[location.pathname] ?? ['LegalShield', '']
   const critical = logs.filter((l) => l.severity === 'critico').slice(0, 6)
@@ -83,10 +84,10 @@ export default function AppLayout() {
             <button
               type="button"
               onClick={() => {
-                resetSimulation()
+                refreshAll()
                 setBellOpen(false)
               }}
-              title="Reiniciar simulacion"
+              title="Recargar datos del servidor"
               className="hidden h-9 w-9 place-items-center rounded-lg border border-line/60 text-muted transition hover:border-accent/60 hover:text-ink sm:grid"
             >
               <RefreshCcw className="h-4 w-4" />
@@ -169,6 +170,7 @@ export default function AppLayout() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             >
+              <ConnectionError />
               <Outlet />
             </motion.div>
           </AnimatePresence>
@@ -177,7 +179,7 @@ export default function AppLayout() {
         <footer className="border-t border-line/40 px-4 py-4 text-center sm:px-6">
           <p className="flex items-center justify-center gap-2 text-[11px] text-muted">
             <ShieldAlert className="h-3.5 w-3.5" />
-            Entorno de demostracion · datos ficticios · los logs se generan en memoria
+            Datos persistidos en MySQL · los eventos de auditoria son inmutables
           </p>
         </footer>
       </div>

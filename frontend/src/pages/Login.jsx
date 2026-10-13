@@ -13,7 +13,6 @@ import {
   ScanFace,
   ShieldCheck,
   Undo2,
-  UserRound,
 } from 'lucide-react'
 import AeroShards from '@/components/reactbits/AeroShards'
 import PasswordStrength, { LockCounter } from '@/components/auth/PasswordStrength'
@@ -23,7 +22,6 @@ import { MAX_ATTEMPTS, useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { USER_ID_RE, validateUserId } from '@/lib/security'
 import { cn } from '@/lib/cn'
-import { DEMO_PASSWORD } from '@/data/seed'
 
 const SIGNAL_STEPS = ['Analisis de User ID…', 'Verificacion de politica…', 'MFA · passkey', 'Emision de sesion']
 
@@ -33,14 +31,13 @@ export default function Login() {
   const lockedUntil = useAppStore((s) => s.lockedUntil)
   const unlockRequest = useAppStore((s) => s.unlockRequest)
   const session = useAppStore((s) => s.session)
-  const directory = useAppStore((s) => s.directory)
   const didactic = useAppStore((s) => s.didactic)
   const login = useAppStore((s) => s.login)
   const requestUnlock = useAppStore((s) => s.requestUnlock)
   const unlockAccount = useAppStore((s) => s.unlockAccount)
 
   const [userId, setUserId] = useState('LEG-2026-0001')
-  const [password, setPassword] = useState(DEMO_PASSWORD)
+  const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [busy, setBusy] = useState(false)
   const [step, setStep] = useState(-1)
@@ -112,11 +109,6 @@ export default function Login() {
     }
   }
 
-  const pickDirectory = (id) => {
-    setUserId(id)
-    setPassword(DEMO_PASSWORD)
-  }
-
   return (
     <div className="relative min-h-screen overflow-hidden">
       <AeroShards density={didactic ? 0.0001 : 0.00003} className={didactic ? '' : 'opacity-40'} />
@@ -180,24 +172,6 @@ export default function Login() {
               ))}
             </div>
 
-            <div className="mt-5 rounded-xl border border-line/50 bg-surface/50 p-3.5 backdrop-blur">
-              <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-                Directorio de demostracion
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {directory.map((d) => (
-                  <button
-                    key={d.userId}
-                    type="button"
-                    onClick={() => pickDirectory(d.userId)}
-                    className="ls-chip hover:border-accent/70 hover:text-accent"
-                  >
-                    <UserRound className="h-3 w-3" />
-                    {d.userId} · {d.role}
-                  </button>
-                ))}
-              </div>
-            </div>
           </motion.div>
         </section>
 
@@ -427,8 +401,7 @@ export default function Login() {
                 </AnimatePresence>
 
                 <p className="text-center font-mono text-[10px] text-muted">
-                  Ejercitese: tres contrasenas cortas bloquean la cuenta ·{' '}
-                  <span className="text-info">demo: {DEMO_PASSWORD}</span>
+                  Tres contrasenas incorrectas bloquean la cuenta · el desbloqueo requiere al administrador
                 </p>
 
                 <p className="text-center text-[11.5px] text-muted">

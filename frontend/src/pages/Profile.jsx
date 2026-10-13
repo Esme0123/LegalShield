@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   AlertTriangle,
@@ -203,21 +203,19 @@ function PasswordModule({ user, onChange }) {
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const history = useMemo(() => user?.passwordHistory ?? [], [user?.passwordHistory])
   const matches = next.length > 0 && next === confirm
-  const reused = useMemo(() => history.includes(next), [history, next])
-  const blocked = reused || !matches || next === current
+  const blocked = !next || !current || !matches || next === current
 
   const reason = !next
     ? null
-    : reused
-      ? 'La contrasena coincide con una de las ultimas 5 claves del usuario (punto 9.3).'
-      : next === current
-        ? 'La nueva contrasena debe ser distinta de la actual.'
-        : !matches
-          ? 'La confirmacion no coincide con la nueva contrasena.'
-          : null
+    : next === current
+      ? 'La nueva contrasena debe ser distinta de la actual.'
+      : !matches
+        ? 'La confirmacion no coincide con la nueva contrasena.'
+        : null
 
   return (
     <section className="ls-card p-7">
@@ -253,7 +251,7 @@ function PasswordModule({ user, onChange }) {
               value={next}
               onChange={(e) => setNext(e.target.value)}
               autoComplete="new-password"
-              className={cn('ls-input', reused && 'border-danger/70 focus:border-danger')}
+              className="ls-input"
             />
           </div>
 
@@ -275,14 +273,7 @@ function PasswordModule({ user, onChange }) {
         <div>
           <PasswordStrength value={next} />
           {reason ? (
-            <p
-              className={cn(
-                'mt-3 flex items-start gap-1.5 rounded-lg border px-3 py-2 text-[11.5px] leading-snug',
-                reused
-                  ? 'border-danger/50 bg-danger/10 text-danger'
-                  : 'border-warn/50 bg-gold/25 text-warn',
-              )}
-            >
+            <p className="mt-3 flex items-start gap-1.5 rounded-lg border border-warn/50 bg-gold/25 px-3 py-2 text-[11.5px] leading-snug text-warn">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               {reason}
             </p>
@@ -293,9 +284,11 @@ function PasswordModule({ user, onChange }) {
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
           type="button"
-          disabled={blocked || !current}
-          onClick={() => {
-            const result = onChange({ current, next })
+          disabled={blocked || busy}
+          onClick={async () => {
+            setBusy(true)
+            const result = await onChange({ current, next })
+            setBusy(false)
             if (result?.ok) {
               setCurrent('')
               setNext('')
@@ -304,7 +297,7 @@ function PasswordModule({ user, onChange }) {
           }}
           className="ls-btn-primary text-xs"
         >
-          <Key className="h-3.5 w-3.5" /> Rotar contrasena
+          <Key className="h-3.5 w-3.5" /> {busy ? 'Rotando…' : 'Rotar contrasena'}
         </button>
         <span className="font-mono text-[10.5px] text-muted">
           la clave anterior se conserva en el historial y queda bloqueada para siempre
@@ -322,13 +315,13 @@ function PasswordModule({ user, onChange }) {
           </p>
         ) : (
           <ul className="mt-2.5 grid gap-1.5 sm:grid-cols-2">
-            {history.map((pass, i) => (
+            {history.map((entry, i) => (
               <li
-                key={`${pass.slice(-4)}-${i}`}
+                key={entry.id ?? i}
                 className="flex items-center justify-between gap-2 rounded-lg border border-line/35 bg-surface2/40 px-3 py-2"
               >
-                <span className="font-mono text-[11.5px] tracking-widest text-muted">
-                  {'*'.repeat(Math.max(6, pass.length - 2))}
+                <span className="font-mono text-[10.5px] text-muted">
+                  {formatDateTime(entry.createdAt).full}
                 </span>
                 <span className="font-mono text-[9.5px] uppercase tracking-wider text-danger">
                   #{i + 1} bloqueada
@@ -343,21 +336,35 @@ function PasswordModule({ user, onChange }) {
 }
 
 export default function Profile() {
-  const user = useAppStore((s) => s.session)
+  const session = useAppStore((s) => s.session)
+  const profile = useAppStore((s) => s.profile)
+  const loadProfile = useAppStore((s) => s.loadProfile)
   const updateProfile = useAppStore((s) => s.updateProfile)
   const changePassword = useAppStore((s) => s.changePassword)
 
+  useEffect(() => {
+    loadProfile()
+  }, [loadProfile])
+
+  const user = { ...session, ...profile }
   const roleMeta = ROLES.find((r) => r.id === user?.role)
 
-  const handleSave = (payload) => {
-    updateProfile({ userId: user.userId, ...payload })
-    toast.mint('Ficha actualizada', `${user.userId} · evento PROFILE_UPDATED sellado en auditoria`)
+  const handleSave = async (payload) => {
+    try {
+      await updateProfile(payload)
+      toast.mint('Ficha actualizada', `${user.userId} · evento PROFILE_UPDATED sellado en auditoria`)
+    } catch (error) {
+      toast.danger('No se pudo guardar', error.message ?? 'Revise los datos e intente nuevamente')
+    }
   }
 
-  const handleChange = ({ current: currentPass, next: nextPass }) => {
-    const result = changePassword({ userId: user.userId, current: currentPass, next: nextPass })
+  const handleChange = async ({ current: currentPass, next: nextPass }) => {
+    const result = await changePassword({ current: currentPass, next: nextPass })
     if (result.ok) {
-      toast.mint('Contrasena rotada', `Historial actualizado (${result.history.length}/${PASSWORD_HISTORY_LIMIT}) · evento PASSWORD_CHANGED`)
+      toast.mint(
+        'Contrasena rotada',
+        `Historial actualizado (${user.passwordHistory?.length ?? 0}/${PASSWORD_HISTORY_LIMIT}) · evento PASSWORD_CHANGED`,
+      )
       return result
     }
     const messages = {

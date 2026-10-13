@@ -1,7 +1,7 @@
 'use strict'
 
 const bcrypt = require('bcryptjs')
-const { one, rows, withTransaction } = require('../config/db')
+const { one, rows, query, withTransaction } = require('../config/db')
 const {
   loadPermissions,
   signAccessToken,

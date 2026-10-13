@@ -1,102 +1,84 @@
 import { create } from 'zustand'
 import {
-  CASES,
-  DEMO_PASSWORD,
-  DIRECTORY,
   INFO_ASSETS,
-  INITIAL_RBAC,
-  LIVESTREAM_TEMPLATES,
   PERMISSIONS,
   REGISTER_ROLES,
   ROLES,
   RISK_CONTROLS,
   RISK_HEATMAP,
-  SEED_LOGS,
   SIS321_MATRIX,
   SIS321_ROLES,
   SIS321_SYSTEMS,
-  USER_PROFILES,
 } from '@/data/seed'
 import {
   ApiError,
-  authApi,
   auditApi,
+  authApi,
   casesApi,
   clearTokens,
   isApiEnabled,
+  isAuthenticated,
   probeApi,
   rolesApi,
   setTokens,
   usersApi,
 } from '@/lib/apiClient'
 import { cryptoId, nowIso, toggleInList } from '@/lib/format'
-import { previewUsername } from '@/lib/identity'
-import { scorePassword } from '@/lib/security'
 
 const MAX_ATTEMPTS = 3
 const PASSWORD_HISTORY_LIMIT = 5
 
 /**
- * Estado de conexion con la API REST (`/back`).
- *   'probeando'  al arrancar
- *   'en linea'   la API responde y persiste en PostgreSQL
- *   'degradado'  la API fallo en una operacion concreta
- *   'simulador'  sin API: todo vive en memoria y no se persiste
+ * Estado de conexion con la API REST (`/back`), que persiste en MySQL.
+ *
+ *   'probeando'  verificacion inicial de disponibilidad
+ *   'en linea'   la API responde y los datos vienen de MySQL
+ *   'degradado'  una operacion concreta devolvio 4xx/5xx
+ *   'error'      sin conexion con el servidor MySQL
+ *
+ * No existe simulador ni dato de respaldo: si la API no responde, las vistas
+ * muestran un estado de error o una tabla vacia, nunca informacion inventada.
  */
 
-/** Ficha completa de un usuario del directorio: identidad + credencial. */
-const buildUser = (entry, profile = {}) => {
-  const name = entry.name ?? ''
-  // El username institucional vive en formato nombre.apellido (punto 9.1);
-  // tambien puede traer espacios en el simulador, se normaliza aca.
-  const nameParts = name.includes('.') ? name.split('.') : name.split(/\s+/)
+/* -------------------------------------------------------------------------- */
+/* Traductores API <-> estado de la UI                                         */
+/* -------------------------------------------------------------------------- */
+
+/** Respuesta de POST /auth/login o GET /auth/me -> forma de sesion esperada. */
+const apiUserToSession = (user) => ({
+  userId: user.userCode,
+  name: user.username,
+  email: user.email,
+  role: user.role,
+  roleLabel: user.roleLabel ?? ROLES.find((r) => r.id === user.role)?.label ?? user.role,
+  permissions: user.permissions ?? [],
+  loginAt: nowIso(),
+})
+
+/** Respuesta de GET /auth/profile -> ficha editable + historial de claves. */
+const apiProfileToUser = (data) => {
+  const p = data.profile ?? {}
+  const parts = String(p.username ?? '').split('.')
   return {
-    ...entry,
-    firstName: profile.firstName ?? nameParts[0] ?? name,
-    lastName: profile.lastName ?? nameParts.slice(1).join(' '),
-    email: profile.email ?? '',
-    phone: profile.phone ?? '',
-    firm: profile.firm ?? 'Vidal & Penalto Bufetes',
-    roleLabel: profile.roleLabel ?? ROLES.find((r) => r.id === entry.role)?.label ?? entry.role,
-    title: profile.title ?? ROLES.find((r) => r.id === entry.role)?.label ?? entry.role,
-    joinedAt: profile.joinedAt ?? nowIso(),
-    password: DEMO_PASSWORD,
-    passwordHistory: [],
+    ...p,
+    userId: p.userCode,
+    name: p.username,
+    firstName: parts[0] ?? '',
+    lastName: parts.slice(1).join('.'),
+    roleLabel: p.roleLabel ?? p.role,
+    passwordHistory: data.passwordHistory ?? [],
+    passwordHistoryLimit: data.passwordHistoryLimit ?? PASSWORD_HISTORY_LIMIT,
   }
 }
 
-const seedDirectory = () =>
-  DIRECTORY.map((entry) => buildUser(entry, USER_PROFILES[entry.userId]))
-
-/** Directorio del ABM: entrada con username 9.1, estado y baja logica. */
-const seedUsers = () => {
-  const used = new Set()
-  return seedDirectory().map((entry, i) => {
-    const profile = USER_PROFILES[entry.userId]
-    const firstName = profile.firstName ?? entry.name.split(/\s+/)[0]
-    const lastName = profile.lastName ?? entry.name.split(/\s+/).slice(1).join(' ')
-    const username = previewUsername(firstName, lastName, [...used])
-    used.add(username)
-    return {
-      id: i + 1,
-      userCode: entry.userId,
-      username,
-      firstName,
-      lastName,
-      email: profile.email ?? '',
-      phone: profile.phone ?? '',
-      firm: profile.firm ?? 'Vidal & Penalto Bufetes',
-      department: entry.department ?? '',
-      role: entry.role,
-      roleLabel: ROLES.find((r) => r.id === entry.role)?.label ?? entry.role,
-      isActive: true,
-      isLocked: false,
-      failedAttempts: 0,
-      lockedAt: null,
-      createdAt: profile.joinedAt ?? nowIso(),
-    }
-  })
-}
+/** Fila de GET /auth/directory -> entrada del directorio de login. */
+const apiDirectoryToEntry = (row) => ({
+  userId: row.userCode,
+  name: row.name ?? row.userCode,
+  role: row.role,
+  department: row.department ?? '',
+  email: row.email ?? '',
+})
 
 /** Fila de GET /api/users -> entrada del ABM en la UI. */
 const apiUserToAdminUser = (row) => {
@@ -121,74 +103,6 @@ const apiUserToAdminUser = (row) => {
   }
 }
 
-/**
- * Siguiente User ID estandarizado libre: LEG-AAAA-NNNN, correlativo ascendente.
- * El correlativo se toma del maximo existente para no reutilizar identificadores.
- */
-const nextUserId = (directory, year = new Date().getFullYear()) => {
-  const serial = directory.reduce((max, user) => {
-    const tail = String(user.userId ?? user.userCode ?? '').split('-')[2]
-    const value = Number(tail)
-    return Number.isFinite(value) ? Math.max(max, value) : max
-  }, 0)
-  return `LEG-${year}-${String(serial + 1).padStart(4, '0')}`
-}
-
-const initialState = () => ({
-  session: null,
-  attempts: 0,
-  lockedUntil: null,
-  unlockRequest: null,
-  didactic: true,
-  apiMode: isApiEnabled() ? 'probeando' : 'simulador',
-  directory: seedDirectory(),
-  users: seedUsers(),
-  rbac: structuredClone(INITIAL_RBAC),
-  sis321: structuredClone(SIS321_MATRIX),
-  infoAssets: structuredClone(INFO_ASSETS),
-  cases: structuredClone(CASES),
-  revealedDocs: [],
-  logs: structuredClone(SEED_LOGS),
-  receipts: [
-    {
-      id: 'RC-4417',
-      serial: '0001',
-      title: 'Certificado de integridad',
-      subject: 'Cierre del ciclo de logs del 05/10/2026',
-      hash: '9f3c8a1d77b0e542',
-      signer: 'Mariana Solis R.',
-      issuedAt: '2026-10-05T07:45:00.000Z',
-      status: 'disponible',
-    },
-  ],
-  tokens: [
-    {
-      id: 'TK-7c21',
-      userId: 'LEG-2026-0411',
-      ttl: 900,
-      issuedAt: '2026-10-05T09:47:00.000Z',
-      status: 'activo',
-    },
-  ],
-  riskControls: structuredClone(RISK_CONTROLS),
-  risks: structuredClone(RISK_HEATMAP),
-})
-
-/* -------------------------------------------------------------------------- */
-/* Traductores API <-> estado local                                            */
-/* -------------------------------------------------------------------------- */
-
-/** Respuesta de POST /auth/login -> forma de sesion que ya consume la UI. */
-const apiUserToSession = (user) => ({
-  userId: user.userCode,
-  name: user.username,
-  email: user.email,
-  role: user.role,
-  roleLabel: user.roleLabel ?? ROLES.find((r) => r.id === user.role)?.label ?? user.role,
-  permissions: user.permissions ?? [],
-  loginAt: nowIso(),
-})
-
 /** Fila de legal_cases -> expediente del frontend. */
 const apiCaseToCase = (row) => ({
   id: row.caseNumber,
@@ -197,8 +111,8 @@ const apiCaseToCase = (row) => ({
   court: row.court ?? '',
   matter: row.matter ?? '',
   stage: row.stage ?? '',
-  risk: row.riskLevel,
-  deadline: row.deadline,
+  risk: row.riskLevel === 'critica' ? 'critico' : row.riskLevel,
+  deadline: row.deadline ? String(row.deadline).slice(0, 10) : null,
   progress: row.progress,
   owner: row.ownerUserCode ?? '',
   privileged: row.isPrivileged,
@@ -219,23 +133,52 @@ const apiLogToLog = (row) => ({
       : `${row.action} · registrado desde ${row.ipAddress ?? 'origen desconocido'}`,
 })
 
+const CONNECTION_ERROR = 'Error de conexión con el servidor MySQL'
+
 /**
- * Clasifica un fallo de API.
- * Los 4xx de validacion (salvo 401/403) son respuestas esperadas del negocio, no
- * averias: no deben marcar el modo como degradado.
+ * Clasifica un fallo de API. Los 4xx de validacion (salvo 401/403) son
+ * respuestas de negocio esperadas; el resto marcan el estado de conexion.
  */
 function noteApiFailure(set, error, context) {
-  if (!(error instanceof ApiError)) return
-  if (error.status === 0) {
-    set({ apiMode: 'simulador' })
+  if (error instanceof ApiError && error.status === 0) {
+    set({ apiStatus: 'error', apiError: `${CONNECTION_ERROR} · verifique que el backend este en marcha` })
     return
   }
-  if (error.status >= 400 && error.status < 500 && error.status !== 401 && error.status !== 403) {
+  if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 401 && error.status !== 403) {
     return
   }
-  set({ apiMode: 'degradado' })
-  console.warn(`[api:${context}]`, error.status, error.message)
+  if (error instanceof ApiError) {
+    set({ apiStatus: 'degradado', apiError: error.message })
+    console.warn(`[api:${context}]`, error.status, error.message)
+    return
+  }
+  set({ apiStatus: 'error', apiError: CONNECTION_ERROR })
 }
+
+const ok = (set) => set({ apiStatus: 'en linea', apiError: null })
+
+const initialState = () => ({
+  session: null,
+  profile: null,
+  attempts: 0,
+  lockedUntil: null,
+  unlockRequest: null,
+  didactic: true,
+  apiStatus: isApiEnabled() ? 'probeando' : 'error',
+  apiError: isApiEnabled() ? null : 'API REST deshabilitada por configuracion (VITE_API_ENABLED=false)',
+  directory: [],
+  users: [],
+  rbac: {},
+  cases: [],
+  logs: [],
+  revealedDocs: [],
+  sis321: structuredClone(SIS321_MATRIX),
+  infoAssets: structuredClone(INFO_ASSETS),
+  riskControls: structuredClone(RISK_CONTROLS),
+  risks: structuredClone(RISK_HEATMAP),
+  receipts: [],
+  tokens: [],
+})
 
 export const useAppStore = create((set, get) => ({
   ...initialState(),
@@ -260,71 +203,39 @@ export const useAppStore = create((set, get) => ({
 
   setLiveFeed: (value) => set({ liveFeedOn: value }),
 
-  tickLiveFeed: () => {
-    if (!get().liveFeedOn) return
-    const tpl = LIVESTREAM_TEMPLATES[Math.floor(Math.random() * LIVESTREAM_TEMPLATES.length)]
-    set((s) => ({
-      logs: [
-        {
-          id: cryptoId('LG').toUpperCase(),
-          ts: nowIso(),
-          type: tpl.type,
-          severity: tpl.severity,
-          actor: tpl.actor,
-          target: 'stream:vivo',
-          message: tpl.message,
-        },
-        ...s.logs,
-      ].slice(0, 140),
-    }))
-  },
-
   /* -------------------------------- AUTH --------------------------------- */
 
   /**
-   * Comprueba la API al arrancar y rehidrata directorio, matriz y bitacora desde
-   * PostgreSQL. Si no responde, la app sigue operativa con el simulador.
+   * Comprueba la API al arrancar y, si hay un token persistido, rehidrata la
+   * sesion desde MySQL. No hay fallback: sin API la app muestra el error.
    */
   bootstrap: async () => {
-    const status = await probeApi()
-    set({ apiMode: status === 'online' ? 'en linea' : 'simulador' })
-    if (status !== 'online') return status
-
-    const [directory, matrix, logs] = await Promise.allSettled([
-      authApi.directory(),
-      rolesApi.matrix(),
-      auditApi.logs({ limit: 80 }),
-    ])
-
-    const patch = {}
-
-    if (directory.status === 'fulfilled') {
-      patch.directory = directory.value.users.map((u) =>
-        buildUser(
-          { userId: u.userCode, name: u.name, role: u.role, department: u.department },
-          { email: u.email },
-        ),
-      )
+    const status = await probeApi({ notify: false })
+    if (status !== 'online') {
+      set({
+        apiStatus: 'error',
+        apiError: `${CONNECTION_ERROR} · verifique que XAMPP MySQL y el backend esten en marcha`,
+      })
+      return status
     }
-    if (matrix.status === 'fulfilled') {
-      patch.rbac = structuredClone(matrix.value.assignments)
-    }
-    if (logs.status === 'fulfilled') {
-      patch.logs = logs.value.logs.map(apiLogToLog)
-    }
+    ok(set)
 
-    set(patch)
+    if (isAuthenticated()) {
+      try {
+        const data = await authApi.me()
+        set({ session: apiUserToSession(data.user) })
+        await get().loadProfile()
+      } catch {
+        clearTokens()
+        set({ session: null })
+      }
+    }
     return 'online'
   },
 
   /**
-   * Login contra la API. Mantiene el contrato { ok, locked, attempts, user } para
-   * que `Login.jsx` no cambie.
-   *
-   * Aqui la diferencia entre API y simulador NO se oculta: solo se recurre al
-   * simulador ante un fallo de red, no cuando la API responde "credencial
-   * invalida" o "cuenta bloqueada". falsechar una sesion simuladaaria deja
-   * credenciales sin persistir como si fueran reales.
+   * Login contra la API. El contrato { ok, locked, attempts, user } se preserva
+   * para que `Login.jsx` no cambie. Nunca inventa una sesion local.
    */
   login: async ({ userId, password }) => {
     const code = String(userId ?? '').trim().toUpperCase()
@@ -332,642 +243,204 @@ export const useAppStore = create((set, get) => ({
     try {
       const data = await authApi.login(code, password)
       setTokens({ access: data.token, refresh: data.refreshToken })
+      ok(set)
 
       const user = apiUserToSession(data.user)
-      set({ session: user, attempts: 0, lockedUntil: null, apiMode: 'en linea' })
-      get().pushLog({
-        type: 'AUTH_SUCCESS',
-        severity: 'info',
-        actor: user.userId,
-        target: 'Portal LegalShield',
-        message: `Inicio de sesion validado por la API · rol asignado: ${String(user.roleLabel).toUpperCase()}`,
-      })
+      set({ session: user, attempts: 0, lockedUntil: null })
+      get().loadDirectory().catch(() => {})
       return { ok: true, user }
     } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-        return get().loginLocal({ userId: code, password })
+      if (error instanceof ApiError && error.status === 0) {
+        noteApiFailure(set, error, 'login')
+        return { ok: false, locked: false, attempts: get().attempts, error: `${CONNECTION_ERROR}` }
       }
 
-      // 403 = cuenta bloqueada por la politica anti-fuerza bruta del servidor.
+      // 403 = cuenta bloqueada o desactivada por el servidor.
       if (error instanceof ApiError && error.isForbidden) {
         const locked = /bloqueada/i.test(error.message)
         set({
           lockedUntil: locked ? Date.now() + 120000 : null,
-          unlockRequest: locked ? null : get().unlockRequest,
+          unlockRequest: locked ? get().unlockRequest : null,
         })
-        get().pushLog({
-          type: 'LOGIN_LOCKED',
-          severity: 'critico',
-          actor: code,
-          target: 'sistema:auth',
-          message: error.message,
-        })
-        return { ok: false, locked, attempts: MAX_ATTEMPTS }
+        return { ok: false, locked, attempts: MAX_ATTEMPTS, error: error.message }
       }
 
-      // 401: la API respondio, la credencial es incorrecta. El contador real vive
-      // en PostgreSQL; aqui solo se refleja para la UI.
+      // 401: la API respondio, la credencial es incorrecta.
       if (error instanceof ApiError && error.isAuth) {
         const attempts = get().attempts + 1
         set({ attempts })
-        get().pushLog({
-          type: 'AUTH_FAILED',
-          severity: 'warn',
-          actor: code,
-          target: 'sistema:auth',
-          message: `Credencial invalida · intento ${attempts} de ${MAX_ATTEMPTS} · validado por la API`,
-        })
-        return { ok: false, locked: false, attempts }
+        return { ok: false, locked: false, attempts, error: error.message }
       }
 
       noteApiFailure(set, error, 'login')
-      return { ok: false, locked: false, attempts: get().attempts }
+      return { ok: false, locked: false, attempts: get().attempts, error: error.message }
     }
   },
 
-  /** Login contra el simulador en memoria (fallback de red y modo sin API). */
-  loginLocal: ({ userId, password }) => {
-    const state = get()
-    const user = state.directory.find((d) => d.userId === userId)
-    const ok = Boolean(user) && password === user.password
-
-    if (!ok) {
-      const attempts = state.attempts + 1
-      const locked = attempts >= MAX_ATTEMPTS
-      set({
-        attempts,
-        lockedUntil: locked ? Date.now() + 120000 : null,
-        unlockRequest: locked ? null : state.unlockRequest,
-      })
-      get().pushLog({
-        type: locked ? 'LOGIN_LOCKED' : 'AUTH_FAILED',
-        severity: locked ? 'critico' : 'warn',
-        actor: userId || 'ANONIMO',
-        target: 'sistema:auth',
-        message: locked
-          ? 'Cuenta bloqueada tras 3 intentos fallidos (simulador en memoria)'
-          : user
-            ? `Credencial invalida · intento ${attempts} de ${MAX_ATTEMPTS}`
-            : `User ID no registrado en el directorio · intento ${attempts} de ${MAX_ATTEMPTS}`,
-      })
-      return { ok: false, locked, attempts }
+  /** Directorio de usuarios para la pantalla de login (requiere sesion). */
+  loadDirectory: async () => {
+    try {
+      const data = await authApi.directory()
+      set({ directory: (data.users ?? []).map(apiDirectoryToEntry) })
+      return data.users?.length ?? 0
+    } catch (error) {
+      noteApiFailure(set, error, 'directory')
+      return 0
     }
-
-    set({ session: { ...user, loginAt: nowIso() }, attempts: 0, lockedUntil: null })
-    get().pushLog({
-      type: 'AUTH_SUCCESS',
-      severity: 'info',
-      actor: user.userId,
-      target: 'Portal LegalShield',
-      message: `Inicio de sesion verificado · rol asignado: ${String(user.roleLabel).toUpperCase()}`,
-    })
-    return { ok: true, user }
   },
 
-  /* ------------------------------- ALTA /REGISTER ----------------------- */
+  /* ------------------------------- ALTA / REGISTER ----------------------- */
 
-  /**
-   * Alta de usuario. Con API conectada el User ID lo emite el servidor dentro de
-   * una transaccion (correlativo sin colisiones); sin API se usa el correlativo
-   * local del simulador.
-   */
+  /** Alta de usuario. El User ID lo emite el servidor en una transaccion. */
   registerUser: async ({ firstName, lastName, email, firm, role, password, department }) => {
     const requested = REGISTER_ROLES.find((r) => r.id === role) ?? REGISTER_ROLES[0]
-    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim()
 
-    try {
-      const data = await authApi.register({
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email.trim(),
-        password,
-        role: requested.id,
-        firm: firm.trim(),
-        department: department?.trim() || requested.department,
-      })
-
-      const user = buildUser(
-        { userId: data.user.userCode, name: fullName, role: data.user.role, department: data.user.department },
-        {
-          firstName,
-          lastName,
-          email: data.user.email,
-          firm: data.user.firm,
-          phone: data.user.phone ?? '',
-          roleLabel: data.user.role,
-          title: `${data.user.role} · ${data.user.department ?? ''}`,
-        },
-      )
-      user.password = password
-
-      set((s) => ({ directory: [...s.directory, user], apiMode: 'en linea' }))
-      get().pushLog({
-        type: 'USER_REGISTERED',
-        severity: 'warn',
-        actor: user.userId,
-        target: 'Portal LegalShield',
-        message: `Alta persistida en PostgreSQL · User ID ${user.userId} emitido por la API · rol ${String(requested.label).toUpperCase()} · hash bcrypt registrado en password_history`,
-      })
-      return user
-    } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-        return get().registerUserLocal({ firstName, lastName, email, firm, role, password, department })
-      }
-      throw error
+    const data = await authApi.register({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.trim(),
+      password,
+      role: requested.id,
+      firm: firm.trim(),
+      department: department?.trim() || requested.department,
+    })
+    ok(set)
+    return {
+      userId: data.user.userCode,
+      userCode: data.user.userCode,
+      username: data.user.username,
+      name: data.user.username,
+      email: data.user.email,
+      role: data.user.role,
     }
   },
 
-  registerUserLocal: ({ firstName, lastName, email, firm, role, password, department }) => {
-    const state = get()
-    const requested = REGISTER_ROLES.find((r) => r.id === role) ?? REGISTER_ROLES[0]
-    const userId = nextUserId(state.directory)
+  /* ------------------------------- ABM / USERS --------------------------- */
 
-    const user = buildUser(
-      {
-        userId,
-        name: `${firstName.trim()} ${lastName.trim()}`.trim(),
-        role: requested.id,
-        department: department ?? requested.department,
-      },
-      {
-        firstName,
-        lastName,
-        email,
-        firm,
-        roleLabel: requested.label,
-        title: `${requested.label} · ${requested.department}`,
-      },
-    )
-    user.password = password
-    user.passwordHistory = []
-
-    set({ directory: [...state.directory, user] })
-    get().pushLog({
-      type: 'USER_REGISTERED',
-      severity: 'warn',
-      actor: userId,
-      target: 'Portal LegalShield',
-      message: `Alta en simulador (sin API) · User ID ${userId} · rol solicitado ${String(requested.label).toUpperCase()}`,
-    })
-    return user
-  },
-
-  /* ------------------------------- ABM /USERS --------------------------- */
-
-  /** Carga la lista del ABM; sin API se queda con el directorio local. */
+  /** Carga la lista del ABM desde MySQL. */
   loadUsers: async () => {
     try {
       const data = await usersApi.list({ limit: 200 })
-      set({ users: data.users.map(apiUserToAdminUser), apiMode: 'en linea' })
+      set({ users: data.users.map(apiUserToAdminUser) })
+      ok(set)
       return data.users.length
     } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-      } else {
-        noteApiFailure(set, error, 'users')
-      }
-      return get().users.length
+      noteApiFailure(set, error, 'users')
+      return 0
     }
   },
 
-  /**
-   * Alta granular (USERS_CREATE). Con API, el User ID lo estandariza el
-   * servidor en una transaccion (nombre.apellido + correlativo LEG-AAAA-NNNN);
-   * sin API, la regla 9.1 se replica en memoria.
-   */
+  /** Alta granular (USERS_CREATE): User ID nombre.apellido emitido por el backend. */
   createUserAdmin: async ({ firstName, lastName, email, role, firm, department, phone, password }) => {
-    try {
-      const data = await usersApi.create({ firstName, lastName, email, role, firm, department, phone, password })
-      const user = apiUserToAdminUser(data.user)
-      set((s) => ({
-        users: [user, ...s.users],
-        apiMode: 'en linea',
-      }))
-      get().pushLog({
-        type: 'USER_CREATED',
-        severity: 'info',
-        actor: get().session?.userId,
-        target: `usuario:${user.username}`,
-        message: `Alta granular persistiada en la API · User ID ${user.username} · codigo ${user.userCode} · rol ${String(user.role).toUpperCase()}`,
-      })
-      return { user, tempPassword: data.tempPassword }
-    } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-        return get().createUserAdminLocal({ firstName, lastName, email, role, firm, department, phone, password })
-      }
-      throw error
-    }
-  },
-
-  createUserAdminLocal: ({ firstName, lastName, email, role, firm, department, phone, password }) => {
-    const state = get()
-    const requested = ROLES.find((r) => r.id === role) ?? ROLES[0]
-    const username = previewUsername(firstName, lastName, state.users.map((u) => u.username))
-    const userCode = nextUserId(state.users)
-
-    const entry = {
-      id: Date.now(),
-      userCode,
-      username,
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email,
-      phone,
-      firm: firm.trim() || 'Vidal & Penalto Bufetes',
-      department: department?.trim() ?? '',
-      role: requested.id,
-      roleLabel: requested.label,
-      isActive: true,
-      isLocked: false,
-      failedAttempts: 0,
-      lockedAt: null,
-      createdAt: nowIso(),
-    }
-
-    const dirEntry = buildUser(
-      { userId: userCode, name: username, role: requested.id, department: entry.department },
-      {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email,
-        firm: entry.firm,
-        phone,
-        roleLabel: requested.label,
-        title: `${requested.label} · ${entry.department}`,
-      },
-    )
-    dirEntry.password = password || DEMO_PASSWORD
-
-    set({ users: [entry, ...state.users], directory: [...state.directory, dirEntry] })
-    get().pushLog({
-      type: 'USER_CREATED',
-      severity: 'info',
-      actor: state.session?.userId,
-      target: `usuario:${username}`,
-      message: `Alta granular en simulador (sin API) · User ID ${username} · codigo ${userCode} (regla 9.1)`,
-    })
-    return { user: entry, tempPassword: null }
+    const data = await usersApi.create({ firstName, lastName, email, role, firm, department, phone, password })
+    const user = apiUserToAdminUser(data.user)
+    set((s) => ({ users: [user, ...s.users] }))
+    ok(set)
+    return { user, tempPassword: data.tempPassword }
   },
 
   /** Edicion granular (USERS_UPDATE): datos personales, rol o estado. */
   updateUserAdmin: async (id, payload) => {
-    try {
-      const data = await usersApi.update(id, payload)
-      const updated = apiUserToAdminUser(data.user)
-      set((s) => ({
-        users: s.users.map((u) => (u.id === id ? updated : u)),
-        apiMode: 'en linea',
-      }))
-      get().pushLog({
-        type: 'USER_UPDATED',
-        severity: 'warn',
-        actor: get().session?.userId,
-        target: `usuario:${updated.username}`,
-        message: `Edicion granular persistida · User ID ${updated.username} · campos ${Object.keys(payload).join(', ')}`,
-      })
-      return updated
-    } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-        return get().updateUserAdminLocal(id, payload)
-      }
-      throw error
-    }
-  },
-
-  updateUserAdminLocal: (id, payload) => {
-    const state = get()
-    const current = state.users.find((u) => u.id === id)
-    if (!current) throw new Error('Usuario no encontrado en el directorio')
-
-    const firstName = payload.firstName ?? current.firstName
-    const lastName = payload.lastName ?? current.lastName
-    const username = previewUsername(
-      firstName,
-      lastName,
-      state.users.filter((u) => u.id !== id).map((u) => u.username),
-    )
-    const requested = ROLES.find((r) => r.id === (payload.role ?? current.role)) ?? ROLES[0]
-
-    const updated = {
-      ...current,
-      firstName,
-      lastName,
-      username,
-      email: payload.email ?? current.email,
-      phone: payload.phone ?? current.phone,
-      firm: payload.firm ?? current.firm,
-      department: payload.department ?? current.department,
-      role: requested.id,
-      roleLabel: requested.label,
-    }
-
-    set((s) => ({
-      users: s.users.map((u) => (u.id === id ? updated : u)),
-      directory: s.directory.map((d) =>
-        d.userId === current.userCode ? { ...d, name: username, role: requested.id, department: updated.department } : d,
-      ),
-    }))
-    get().pushLog({
-      type: 'USER_UPDATED',
-      severity: 'warn',
-      actor: state.session?.userId,
-      target: `usuario:${username}`,
-      message: `Edicion granular en simulador · User ID ${username}`,
-    })
+    const data = await usersApi.update(id, payload)
+    const updated = apiUserToAdminUser(data.user)
+    set((s) => ({ users: s.users.map((u) => (u.id === id ? updated : u)) }))
+    ok(set)
     return updated
   },
 
   /** Baja logica / reactivacion (USERS_DELETE). */
   setUserStatusAdmin: async (id, active) => {
-    try {
-      await usersApi.status(id, { active })
-      set((s) => ({
-        users: s.users.map((u) => (u.id === id ? { ...u, isActive: active } : u)),
-        apiMode: 'en linea',
-      }))
-    } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-        return get().setUserStatusAdminLocal(id, active)
-      }
-      throw error
-    }
-    get().pushLog({
-      type: active ? 'USER_REACTIVATED' : 'USER_DEACTIVATED',
-      severity: active ? 'info' : 'warn',
-      actor: get().session?.userId,
-      target: `usuario:${id}`,
-      message: active ? 'Cuenta reactivada (baja logica revertida)' : 'Cuenta desactivada (baja logica)',
-    })
-    return true
-  },
-
-  setUserStatusAdminLocal: (id, active) => {
-    const state = get()
-    set({
-      users: state.users.map((u) => (u.id === id ? { ...u, isActive: active } : u)),
-      directory: state.directory.map((d) =>
-        d.userId === state.users.find((u) => u.id === id)?.userCode ? { ...d, isActive: active } : d,
-      ),
-    })
-    get().pushLog({
-      type: active ? 'USER_REACTIVATED' : 'USER_DEACTIVATED',
-      severity: active ? 'info' : 'warn',
-      actor: state.session?.userId,
-      target: `usuario:${id}`,
-      message: active ? 'Cuenta reactivada (baja logica revertida)' : 'Cuenta desactivada (baja logica)',
-    })
+    await usersApi.status(id, { active })
+    set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, isActive: active } : u)) }))
+    ok(set)
     return true
   },
 
   /** Desbloqueo + reset de clave (USERS_UNLOCK). */
   unlockUserAdmin: async (id, tempPassword) => {
-    try {
-      const data = await usersApi.unlock(id, { tempPassword })
-      set((s) => ({
-        users: s.users.map((u) => (u.id === id ? { ...u, isLocked: false, failedAttempts: 0 } : u)),
-        apiMode: 'en linea',
-      }))
-      get().pushLog({
-        type: 'USER_UNLOCKED',
-        severity: 'info',
-        actor: get().session?.userId,
-        target: `usuario:${id}`,
-        message: 'Cuenta desbloqueada y clave reiniciada por el administrador',
-      })
-      return { data, tempPassword: data.tempPassword }
-    } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-        return get().unlockUserAdminLocal(id, tempPassword)
-      }
-      throw error
-    }
-  },
-
-  unlockUserAdminLocal: (id, tempPassword) => {
-    const state = get()
-    const generated = tempPassword || 'Temp!' + Math.random().toString(36).slice(2, 8)
-    set({
-      users: state.users.map((u) => (u.id === id ? { ...u, isLocked: false, failedAttempts: 0 } : u)),
-      directory: state.directory.map((d) =>
-        d.userId === state.users.find((u) => u.id === id)?.userCode
-          ? { ...d, isLocked: false, failedAttempts: 0 }
-          : d,
-      ),
-    })
-    get().pushLog({
-      type: 'USER_UNLOCKED',
-      severity: 'info',
-      actor: state.session?.userId,
-      target: `usuario:${id}`,
-      message: 'Cuenta desbloqueada y clave reiniciada en el simulador',
-    })
-    return { data: null, tempPassword: generated }
+    const data = await usersApi.unlock(id, { tempPassword })
+    set((s) => ({
+      users: s.users.map((u) => (u.id === id ? { ...u, isLocked: false, failedAttempts: 0 } : u)),
+    }))
+    ok(set)
+    return { data, tempPassword: data.tempPassword }
   },
 
   /* -------------------------------- PERFIL ------------------------------- */
 
-  /** Edicion autoexigible de datos. El servidor normaliza nombre y correo. */
-  updateProfile: async ({ firstName, lastName, phone, email }) => {
-    const userId = get().session?.userId
-
+  /** Ficha completa del titular (incluye telefono, despacho e historial). */
+  loadProfile: async () => {
     try {
-      const data = await authApi.updateProfile({ firstName, lastName, phone, email })
-      const username = data.profile.username
-      set((s) => ({
-        directory: s.directory.map((u) =>
-          u.userId === userId ? { ...u, firstName, lastName, name: username, phone, email } : u,
-        ),
-        session: s.session ? { ...s.session, name: username, email } : null,
-        apiMode: 'en linea',
-      }))
-      get().pushLog({
-        type: 'PROFILE_UPDATED',
-        severity: 'info',
-        actor: userId,
-        target: 'perfil:usuario',
-        message: `Ficha personal persistida en PostgreSQL · contacto ${email}`,
-      })
+      const data = await authApi.profile()
+      set({ profile: apiProfileToUser(data) })
+      ok(set)
       return data.profile
     } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-        return get().updateProfileLocal({ firstName, lastName, phone, email })
-      }
-      throw error
+      noteApiFailure(set, error, 'profile')
+      return null
     }
   },
 
-  updateProfileLocal: ({ firstName, lastName, phone, email }) => {
-    const state = get()
-    const userId = state.session?.userId
-    const name = `${firstName.trim()} ${lastName.trim()}`.trim()
-
-    set({
-      directory: state.directory.map((u) =>
-        u.userId === userId ? { ...u, firstName, lastName, name, phone, email } : u,
+  /** Edicion autoexigible de datos. El servidor normaliza nombre y correo. */
+  updateProfile: async ({ firstName, lastName, phone, email }) => {
+    const userId = get().session?.userId
+    const data = await authApi.updateProfile({ firstName, lastName, phone, email })
+    const username = data.profile.username
+    set((s) => ({
+      directory: s.directory.map((u) =>
+        u.userId === userId ? { ...u, name: username, phone, email } : u,
       ),
-      session: state.session?.userId === userId ? { ...state.session, name, email } : state.session,
-    })
-    get().pushLog({
-      type: 'PROFILE_UPDATED',
-      severity: 'info',
-      actor: userId,
-      target: 'perfil:usuario',
-      message: `Ficha personal actualizada en el simulador · contacto ${email}`,
-    })
-    return { userCode: userId, username: name, email }
+      session: s.session ? { ...s.session, name: username, email } : null,
+    }))
+    await get().loadProfile()
+    ok(set)
+    return data.profile
   },
 
   /**
-   * Cambio de clave con las reglas del punto 9.3: se valida la clave actual y no
-   * se admiten las ultimas 5 contrasenas del usuario. La comprobacion de
-   * reutilizacion la hace el servidor con `bcrypt.compare` sobre cada hash previo.
+   * Cambio de clave (punto 9.3): valida la clave actual y no admite las ultimas
+   * 5 contrasenas. La comprobacion la ejecuta el servidor con bcrypt.
    */
   changePassword: async ({ current, next }) => {
-    const userId = get().session?.userId
-
     try {
       await authApi.changePassword(current, next)
-      set((s) => ({
-        directory: s.directory.map((u) =>
-          u.userId === userId
-            ? {
-                ...u,
-                password: next,
-                passwordHistory: [current, ...(u.passwordHistory ?? [])].slice(0, PASSWORD_HISTORY_LIMIT),
-              }
-            : u,
-        ),
-        session: s.session ? { ...s.session, password: next } : null,
-        apiMode: 'en linea',
-      }))
-      get().pushLog({
-        type: 'PASSWORD_CHANGED',
-        severity: 'critico',
-        actor: userId,
-        target: 'perfil:credencial',
-        message: `Contrasena rotada y persistida · historial acotado a ${PASSWORD_HISTORY_LIMIT} entradas (punto 9.3)`,
-      })
+      await get().loadProfile()
+      ok(set)
       return { ok: true }
     } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-        return get().changePasswordLocal({ current, next })
-      }
-      // 401 = clave actual incorrecta. 422 = politica o reutilizacion.
       if (error instanceof ApiError && error.isAuth) {
-        get().pushLog({
-          type: 'PASSWORD_CHANGE_DENIED',
-          severity: 'warn',
-          actor: userId,
-          target: 'perfil:credencial',
-          message: 'Cambio de clave rechazado · la contrasena actual no coincide',
-        })
         return { ok: false, reason: 'current' }
       }
       if (error instanceof ApiError && error.status === 422) {
         return { ok: false, reason: error.details?.reuseBlocked ? 'reused' : 'weak' }
       }
-      throw error
+      noteApiFailure(set, error, 'password')
+      return { ok: false, reason: 'error' }
     }
-  },
-
-  changePasswordLocal: ({ current, next }) => {
-    const state = get()
-    const userId = state.session?.userId
-    const user = state.directory.find((u) => u.userId === userId)
-
-    if (!user) return { ok: false, reason: 'unknown' }
-    if (current !== user.password) {
-      get().pushLog({
-        type: 'PASSWORD_CHANGE_DENIED',
-        severity: 'warn',
-        actor: userId,
-        target: 'perfil:credencial',
-        message: 'Cambio de clave rechazado · la contrasena actual no coincide',
-      })
-      return { ok: false, reason: 'current' }
-    }
-    if (next === current) return { ok: false, reason: 'same' }
-    if ((user.passwordHistory ?? []).includes(next)) {
-      get().pushLog({
-        type: 'PASSWORD_CHANGE_DENIED',
-        severity: 'critico',
-        actor: userId,
-        target: 'perfil:credencial',
-        message: `Cambio de clave rechazado · reutilizacion de clave previa (punto 9.3 · historial de ${PASSWORD_HISTORY_LIMIT})`,
-      })
-      return { ok: false, reason: 'reused' }
-    }
-    if (scorePassword(next).score < 2) return { ok: false, reason: 'weak' }
-
-    const history = [current, ...(user.passwordHistory ?? [])].slice(0, PASSWORD_HISTORY_LIMIT)
-    set({
-      directory: state.directory.map((u) =>
-        u.userId === userId ? { ...u, password: next, passwordHistory: history } : u,
-      ),
-      session:
-        state.session?.userId === userId
-          ? { ...state.session, password: next, passwordHistory: history }
-          : state.session,
-    })
-    get().pushLog({
-      type: 'PASSWORD_CHANGED',
-      severity: 'critico',
-      actor: userId,
-      target: 'perfil:credencial',
-      message: `Contrasena rotada en el simulador · historial ${history.length}/${PASSWORD_HISTORY_LIMIT}`,
-    })
-    return { ok: true, history }
-  },
-
-  /** Pronostico de reutilizacion: usado por el formulario de clave. */
-  isReusedPassword: (userId, candidate) => {
-    const user = get().directory.find((u) => u.userId === userId)
-    if (!user) return false
-    return user.passwordHistory.includes(candidate)
   },
 
   requestUnlock: async (userCode) => {
     set({ unlockRequest: { ts: nowIso(), ticket: `UNB-${userCode ?? 'ANONIMO'}` } })
-    get().pushLog({
-      type: 'UNLOCK_REQUESTED',
-      severity: 'warn',
-      actor: userCode ?? 'ANONIMO',
-      target: 'admin:seguridad',
-      message: 'Solicitud de desbloqueo de cuenta elevada al administrador del despacho',
-    })
   },
 
   /**
-   * Desbloqueo real contra la API. Exige el permiso TOKEN_RESET, por eso el
-   * backend lo restringe al socio: no es una autoayuda del titular bloqueado.
+   * Desbloqueo real contra la API. Exige el permiso TOKEN_RESET: lo restringe al
+   * socio; no es una autoayuda del titular bloqueado.
    */
   unlockAccount: async (userCode) => {
     try {
       const data = await authApi.unlock(userCode)
-      set({ attempts: 0, lockedUntil: null, unlockRequest: null, apiMode: 'en linea' })
+      set({ attempts: 0, lockedUntil: null, unlockRequest: null })
+      ok(set)
       return { ok: true, message: data.message }
     } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-        get().resetLock()
-        return { ok: true, message: 'Desbloqueado en el simulador (API no disponible)' }
-      }
       if (error instanceof ApiError && error.isForbidden) return { ok: false, reason: 'forbidden' }
       noteApiFailure(set, error, 'unlock')
       return { ok: false, reason: 'error' }
     }
   },
 
-  resetLock: () =>
-    set({ attempts: 0, lockedUntil: null, unlockRequest: null }),
+  resetLock: () => set({ attempts: 0, lockedUntil: null, unlockRequest: null }),
 
   logout: async () => {
     const user = get().session
@@ -977,26 +450,17 @@ export const useAppStore = create((set, get) => ({
       /* el cierre local no depende de la respuesta del servidor */
     }
     clearTokens()
-    if (user) {
-      get().pushLog({
-        type: 'AUTH_LOGOUT',
-        severity: 'info',
-        actor: user.userId,
-        target: 'Portal LegalShield',
-        message: 'Cierre de sesion y revocacion del token de acceso',
-      })
-    }
-    set({ session: null })
+    set({ session: null, profile: null, directory: [], users: [], logs: [], cases: [] })
   },
-/* -------------------------------- RBAC --------------------------------- */
+
+  /* -------------------------------- RBAC --------------------------------- */
 
   hasPermission: (permissionId, roleId) => {
     const state = get()
     const role = roleId ?? state.session?.role
     if (!role) return false
 
-    // Con sesion autenticada contra la API, los permisos los resuelvio el servidor
-    // (y los revalida en cada peticion): mandan sobre la copia local de la matriz.
+    // Con sesion autenticada manda la lista de permisos que resolvio el servidor.
     if (!roleId && state.session?.permissions?.length) {
       return state.session.permissions.includes(permissionId)
     }
@@ -1015,43 +479,24 @@ export const useAppStore = create((set, get) => ({
 
     try {
       const data = await rolesApi.updatePermissions([{ role: roleId, permission: permissionId, granted: granting }])
-      set({ rbac: structuredClone(data.assignments), apiMode: 'en linea' })
+      set({ rbac: structuredClone(data.assignments) })
+      ok(set)
     } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-      } else if (error instanceof ApiError) {
-        noteApiFailure(set, error, 'rbac')
-        // La API rechazo el cambio: se revierte el estado optimista para no
-        // mostrar en la UI unaMatrix que la base de datos no tiene.
-        set((s) => ({ rbac: { ...s.rbac, [roleId]: current } }))
-        throw error
-      }
+      // La API rechazo el cambio: se revierte el estado optimista.
+      set((s) => ({ rbac: { ...s.rbac, [roleId]: current } }))
+      noteApiFailure(set, error, 'rbac')
+      throw error
     }
 
-    const roleLabel = ROLES.find((r) => r.id === roleId)?.label ?? roleId
-    const perm = PERMISSIONS.find((p) => p.id === permissionId)
-    get().pushLog({
-      type: 'PERMISSION_CHANGED',
-      severity: 'critico',
-      target: `rol:${roleId}`,
-      message: `${granting ? 'Concesion' : 'Retiro'} de ${permissionId} al rol ${roleLabel}${
-        perm ? ` (${perm.label})` : ''
-      } · ajuste aplicado sin reiniciar el servidor`,
-    })
-
-    // La sesion en curso puede perder capacidades: se refleja de inmediato.
-    const session = get().session
-    if (session?.role === roleId) {
-      set({ session: { ...session, permissionsRevalidatedAt: nowIso() } })
-    }
-    return { granting, roleLabel }
+    return { granting }
   },
 
-  /** Carga la matriz rol x permiso desde la API. */
+  /** Carga la matriz rol x permiso desde MySQL. */
   loadMatrix: async () => {
     try {
       const data = await rolesApi.matrix()
-      set({ rbac: structuredClone(data.assignments), apiMode: 'en linea' })
+      set({ rbac: structuredClone(data.assignments) })
+      ok(set)
       return data
     } catch (error) {
       noteApiFailure(set, error, 'matrix')
@@ -1061,24 +506,16 @@ export const useAppStore = create((set, get) => ({
 
   /** Restaura la matriz base delegando en el backend. */
   resetRbac: async () => {
-    try {
-      await rolesApi.reset()
-      set({ rbac: structuredClone(INITIAL_RBAC), apiMode: 'en linea' })
-      return true
-    } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador', rbac: structuredClone(INITIAL_RBAC) })
-        return false
-      }
-      throw error
-    }
+    await rolesApi.reset()
+    return get().loadMatrix()
   },
 
-  /** Recarga la bitacora inmutable desde PostgreSQL con filtros opcionales. */
+  /** Recarga la bitacora inmutable desde MySQL con filtros opcionales. */
   loadLogs: async (filters = {}) => {
     try {
       const data = await auditApi.logs({ limit: 80, ...filters })
-      set({ logs: data.logs.map(apiLogToLog), apiMode: 'en linea' })
+      set({ logs: data.logs.map(apiLogToLog) })
+      ok(set)
       return data.logs.length
     } catch (error) {
       noteApiFailure(set, error, 'logs')
@@ -1086,20 +523,15 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
-  /* ------------------- SIS-321 · Matriz rol x sistema/recurso --------------- */
+  /* ------------------- SIS-321 · Matriz rol x sistema/recurso ---------------
+   * Planilla didactica de referencia (UCB): vive en memoria y no persiste.
+   * ------------------------------------------------------------------------ */
   toggleMatrixAccess: (roleId, resourceId) => {
     set((s) => ({ sis321: { ...s.sis321, [roleId]: toggleInList(s.sis321[roleId] ?? [], resourceId) } }))
-
     const roleLabel = SIS321_ROLES.find((r) => r.id === roleId)?.label ?? roleId
     const resource = SIS321_SYSTEMS.flatMap((system) => system.resources).find((r) => r.id === resourceId)
     const granted = (get().sis321[roleId] ?? []).includes(resourceId)
-
-    get().pushLog({
-      type: 'MATRIX_ACCESS_CHANGED',
-      severity: 'critico',
-      target: `${roleId}/${resourceId}`,
-      message: `${granted ? 'Concesion' : 'Retiro'} de ${resourceId} (${resource?.label ?? resourceId}) al rol ${roleLabel} · matriz SIS-321 en memoria`,
-    })
+    return { granting: granted, roleLabel, resourceLabel: resource?.label ?? resourceId }
   },
 
   /** Marca o desmarca un recurso para los nueve roles de una vez. */
@@ -1113,14 +545,6 @@ export const useAppStore = create((set, get) => ({
         : list.filter((id) => id !== resourceId)
     })
     set({ sis321 })
-
-    const resource = SIS321_SYSTEMS.flatMap((system) => system.resources).find((r) => r.id === resourceId)
-    get().pushLog({
-      type: 'MATRIX_BULK_CHANGED',
-      severity: 'critico',
-      target: resourceId,
-      message: `${granted ? 'Habilitacion' : 'Deshabilitacion'} masiva de ${resourceId} (${resource?.label ?? resourceId}) en los ${SIS321_ROLES.length} roles de la matriz SIS-321`,
-    })
   },
 
   resetSis321: () => set({ sis321: structuredClone(SIS321_MATRIX) }),
@@ -1131,73 +555,32 @@ export const useAppStore = create((set, get) => ({
     set((s) => ({
       infoAssets: s.infoAssets.map((a) => (a.id === assetId ? { ...a, [dimension]: next } : a)),
     }))
-    const asset = get().infoAssets.find((a) => a.id === assetId)
-    get().pushLog({
-      type: 'INFO_CLASSIFIED',
-      severity: 'info',
-      target: assetId,
-      message: `Clasificacion actualizada · ${asset?.name ?? assetId} · ${dimension} = ${next}/3`,
-    })
   },
 
   resetInfoAssets: () => set({ infoAssets: structuredClone(INFO_ASSETS) }),
 
   /* --------------------- EFECTOS DIDACTICOS (React Bits) ------------------ */
-  setDidactic: (value) =>
-    set((s) => ({
-      didactic: Boolean(value),
-      logs: [
-        {
-          id: cryptoId('LG').toUpperCase(),
-          ts: nowIso(),
-          type: 'DIDACTIC_TOGGLE',
-          severity: 'info',
-          actor: s.session?.userId ?? 'SISTEMA',
-          target: 'ux:react-bits',
-          message: `Modo didactico ${value ? 'activado' : 'desactivado'} · efectos React Bits en modo ${value ? 'explicativo' : 'funcional sutil'}`,
-        },
-        ...s.logs,
-      ].slice(0, 140),
-    })),
+  setDidactic: (value) => set({ didactic: Boolean(value) }),
 
   /* ------------------------------ EXPEDIENTES ---------------------------- */
   /**
-   * Archivo logico contra la API (el servidor no borra: marca `archivado` y sella
-   * la fecha para conservar la evidencia). El indice de la lista local se usa solo
-   * como id numerico; si el backend no responde, se aplica el mismo archivo local.
+   * Archivo logico contra la API (el servidor no borra: marca `archivado`). El
+   * indice de la lista local se usa solo como id del recurso.
    */
   archiveCase: async (caseId) => {
     const index = get().cases.findIndex((c) => c.id === caseId)
     if (index === -1) return
-    const found = get().cases[index]
-
-    try {
-      await casesApi.archive(index + 1)
-      set({ apiMode: 'en linea' })
-    } catch (error) {
-      if (error instanceof ApiError && error.isNetwork) {
-        set({ apiMode: 'simulador' })
-      } else if (error instanceof ApiError) {
-        noteApiFailure(set, error, 'archiveCase')
-        // 403 (otro abogado) o 404: la UI no debe mostrar un archivo que no ocurrio.
-        if (error.isForbidden || error.status === 404) return
-      }
-    }
-
+    await casesApi.archive(index + 1)
     set((s) => ({ cases: s.cases.filter((c) => c.id !== caseId) }))
-    get().pushLog({
-      type: 'CASE_ARCHIVED',
-      severity: 'warn',
-      target: caseId,
-      message: `Expediente "${found.title}" archivado con sello de integridad (retencion de evidencia, sin borrado fisico)`,
-    })
+    ok(set)
   },
 
   /** Carga los expedientes respetando el alcance por ambito del servidor. */
   loadCases: async (filters = {}) => {
     try {
       const data = await casesApi.list({ limit: 60, ...filters })
-      set({ cases: data.cases.map(apiCaseToCase), apiMode: 'en linea' })
+      set({ cases: data.cases.map(apiCaseToCase) })
+      ok(set)
       return data.cases.length
     } catch (error) {
       noteApiFailure(set, error, 'cases')
@@ -1205,20 +588,10 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
-  restoreCases: () => set({ cases: structuredClone(CASES) }),
-
   /* --------------------------- DOCUMENTOS RESTRINGIDOS -------------------- */
-  revealDocument: (docId, { roleId, justification }) => {
+  revealDocument: (docId) => {
     if (!get().revealedDocs.includes(docId)) {
       set((s) => ({ revealedDocs: [...s.revealedDocs, docId] }))
-      get().pushLog({
-        type: 'DOC_REVEALED',
-        severity: 'warn',
-        target: docId,
-        message: `Revelacion autorizada bajo rol ${String(roleId).toUpperCase()} · justificacion: ${
-          justification || 'no registrada'
-        }`,
-      })
     }
   },
 
@@ -1239,12 +612,6 @@ export const useAppStore = create((set, get) => ({
       status: 'disponible',
     }
     set((s) => ({ receipts: [receipt, ...s.receipts] }))
-    get().pushLog({
-      type: 'AUDIT_RECEIPT',
-      severity: 'info',
-      target: receipt.id,
-      message: `Comprobante ${receipt.id} emitido · hash ${receipt.hash}`,
-    })
     return receipt
   },
 
@@ -1254,20 +621,8 @@ export const useAppStore = create((set, get) => ({
     })),
 
   issueResetToken: (userId) => {
-    const token = {
-      id: cryptoId('TK'),
-      userId,
-      ttl: 900,
-      issuedAt: nowIso(),
-      status: 'activo',
-    }
+    const token = { id: cryptoId('TK'), userId, ttl: 900, issuedAt: nowIso(), status: 'activo' }
     set((s) => ({ tokens: [token, ...s.tokens] }))
-    get().pushLog({
-      type: 'TOKEN_ISSUED',
-      severity: 'critico',
-      target: userId,
-      message: `Token JWT temporal ${token.id} emitido · TTL ${token.ttl}s · uso unico`,
-    })
     return token
   },
 
@@ -1279,33 +634,24 @@ export const useAppStore = create((set, get) => ({
     set((s) => ({
       riskControls: s.riskControls.map((c) => (c.id === controlId ? { ...c, score } : c)),
     }))
-    const control = RISK_CONTROLS.find((c) => c.id === controlId)
-    get().pushLog({
-      type: 'CONTROL_ASSESSED',
-      severity: 'info',
-      target: controlId,
-      message: `Autoevaluacion ${control?.name ?? controlId}: ${score}/5 · evidencia registrada`,
-    })
   },
 
   setRiskCell: (riskId, probability, impact) => {
     set((s) => ({
       risks: s.risks.map((r) => (r.id === riskId ? { ...r, probability, impact } : r)),
     }))
-    const risk = get().risks.find((r) => r.id === riskId)
-    get().pushLog({
-      type: 'RISK_REVIEWED',
-      severity: 'warn',
-      target: riskId,
-      message: `Matriz de calor actualizada: ${risk?.name ?? riskId} · P${probability} x I${impact} = ${
-        probability * impact
-      }`,
-    })
   },
 
   /* --------------------------------- RESET ------------------------------- */
-  resetSimulation: () =>
-    set({ ...initialState(), liveFeedOn: get().liveFeedOn, didactic: get().didactic }),
+  /** Recarga desde MySQL todos los conjuntos de negocio. */
+  refreshAll: async () => {
+    await Promise.allSettled([
+      get().loadCases(),
+      get().loadLogs(),
+      get().loadMatrix(),
+      get().loadUsers(),
+    ])
+  },
 }))
 
-export { MAX_ATTEMPTS, PASSWORD_HISTORY_LIMIT }
+export { MAX_ATTEMPTS, PASSWORD_HISTORY_LIMIT, PERMISSIONS, ROLES }
