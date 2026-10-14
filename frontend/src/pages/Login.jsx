@@ -36,7 +36,7 @@ export default function Login() {
   const requestUnlock = useAppStore((s) => s.requestUnlock)
   const unlockAccount = useAppStore((s) => s.unlockAccount)
 
-  const [userId, setUserId] = useState('LEG-2026-0001')
+  const [userId, setUserId] = useState('mariana.solis')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -197,15 +197,15 @@ export default function Login() {
 
               <form onSubmit={submit} className="mt-5 space-y-4">
                 <div>
-                  <label className="ls-label" htmlFor="userId">
-                    User ID estandarizado
-                  </label>
+                    <label className="ls-label" htmlFor="userId">
+                      USER ID / USUARIO
+                    </label>
                   <div className="relative">
                     <input
                       id="userId"
                       value={userId}
-                      onChange={(e) => setUserId(e.target.value.toUpperCase())}
-                      placeholder="LEG-2026-0001"
+                      onChange={(e) => setUserId(e.target.value)}
+                      placeholder="ej. mariana.solis"
                       disabled={locked}
                       autoComplete="off"
                       spellCheck={false}
@@ -215,27 +215,22 @@ export default function Login() {
                         idCheck.valid && userId && 'border-accent/60',
                       )}
                     />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2">
-                      {idCheck.valid ? (
-                        <span className="grid h-5 w-5 place-items-center rounded-full bg-accent/20 text-accent">
-                          <ScanFace className="h-3.5 w-3.5" />
-                        </span>
-                      ) : (
-                        <span className="ls-kbd">LEG-</span>
-                      )}
-                    </span>
+                     <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                       {idCheck.valid && (
+                         <span className="grid h-5 w-5 place-items-center rounded-full bg-accent/20 text-accent">
+                           <ScanFace className="h-3.5 w-3.5" />
+                         </span>
+                       )}
+                     </span>
                   </div>
-                  <p
-                    className={cn(
-                      'mt-1.5 font-mono text-[10.5px]',
-                      idCheck.valid ? 'text-accent' : 'text-muted',
-                    )}
-                  >
-                    {USER_ID_RE.test(idCheck.normalized)
-                      ? 'Padron valido'
-                      : idCheck.message}{' '}
-                    · patron <span className="text-info">LEG-AAAA-NNNN</span>
-                  </p>
+                   <p
+                     className={cn(
+                       'mt-1.5 font-mono text-[10.5px]',
+                       idCheck.valid ? 'text-accent' : 'text-muted',
+                     )}
+                   >
+                     Formato estándar: nombre.apellido (ej: mariana.solis)
+                   </p>
                 </div>
 
                 <div>
@@ -404,16 +399,38 @@ export default function Login() {
                   Tres contrasenas incorrectas bloquean la cuenta · el desbloqueo requiere al administrador
                 </p>
 
-                <p className="text-center text-[11.5px] text-muted">
-                  No tienes cuenta registrada?{' '}
-                  <Link to="/register" className="font-semibold text-accent hover:underline">
-                    Crear acceso en el despacho
-                  </Link>
-                </p>
+
+
+                 <p className="text-center text-[11.5px] text-muted">
+                   No tienes cuenta registrada?{' '}
+                   <Link to="/register" className="font-semibold text-accent hover:underline">
+                     Crear acceso en el despacho
+                   </Link>
+                 </p>
               </form>
             </div>
           </div>
         </motion.section>
+      </div>
+
+      <div className="pointer-events-auto fixed bottom-5 left-5 z-20 max-w-xs rounded-xl border border-line/60 bg-surface/90 p-4 shadow-xl backdrop-blur">
+        <p className="font-display text-xs font-semibold text-ink">Usuario Demo</p>
+        <p className="mt-1 font-mono text-[11px] text-muted">
+          <span className="text-ink">mariana.solis</span> o <span className="text-ink">diego.ferrer</span>
+        </p>
+        <p className="mt-1 font-mono text-[11px] text-muted">
+          Contraseña Demo: <span className="text-ink">Juris2026!Abg</span>
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setUserId('mariana.solis')
+            setPassword('Juris2026!Abg')
+          }}
+          className="mt-3 w-full rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-semibold text-accent transition hover:bg-accent/15"
+        >
+          Llenar con credenciales demo
+        </button>
       </div>
     </div>
   )

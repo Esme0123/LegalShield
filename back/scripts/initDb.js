@@ -218,47 +218,47 @@ const DEMO_USERS = [
   {
     userCode: 'LEG-2026-0001',
     username: 'mariana.solis',
-    email: 'mariana.solis@vidalpenalto.co',
+    email: 'mariana.solis@legalshield.bo',
     role: 'socio',
-    firm: 'Vidal & Penalto Bufetes',
+    firm: 'LegalShield Bufetes',
     department: 'Direccion Juridica',
-    phone: '+57 601 742 1180',
+    phone: '+591 2 244 1180',
   },
   {
     userCode: 'LEG-2026-0142',
     username: 'diego.ferrer',
-    email: 'diego.ferrer@vidalpenalto.co',
+    email: 'diego.ferrer@legalshield.bo',
     role: 'abogado',
-    firm: 'Vidal & Penalto Bufetes',
+    firm: 'LegalShield Bufetes',
     department: 'Litigacion',
-    phone: '+57 300 552 8841',
-  },
-  {
-    userCode: 'LEG-2026-0277',
-    username: 'lucia.ampara',
-    email: 'lucia.ampara@vidalpenalto.co',
-    role: 'asistente',
-    firm: 'Vidal & Penalto Bufetes',
-    department: 'Tramitacion',
-    phone: '+57 315 409 2277',
-  },
-  {
-    userCode: 'LEG-2026-0390',
-    username: 'andres.quintero',
-    email: 'andres.quintero@metalurgiaandes.co',
-    role: 'cliente',
-    firm: 'Metalurgia Andes S.A.S.',
-    department: 'Externo',
-    phone: '+57 310 228 4419',
+    phone: '+591 3 552 8841',
   },
   {
     userCode: 'LEG-2026-0411',
-    username: 'paula.sandoval',
-    email: 'paula.sandoval@vidalpenalto.co',
+    username: 'paula.sando',
+    email: 'paula.sando@legalshield.bo',
     role: 'asistente',
-    firm: 'Vidal & Penalto Bufetes',
+    firm: 'LegalShield Bufetes',
     department: 'Archivo',
-    phone: '+57 320 771 3390',
+    phone: '+591 3 771 3390',
+  },
+  {
+    userCode: 'LEG-2026-0390',
+    username: 'carlos.cliente',
+    email: 'carlos.cliente@gmail.com',
+    role: 'cliente',
+    firm: 'Cliente Externo',
+    department: 'Externo',
+    phone: '+591 3 228 4419',
+  },
+  {
+    userCode: 'LEG-2026-0000',
+    username: 'admin',
+    email: 'admin@legalshield.bo',
+    role: 'socio',
+    firm: 'LegalShield Bufetes',
+    department: 'Super Administracion',
+    phone: '+591 2 000 0000',
   },
 ]
 
@@ -534,6 +534,17 @@ async function main() {
   conn = null
 
   console.log(`[OK] Base de datos e instructivos creados exitosamente (${DB_NAME}, ${tables.length} tablas)`)
+  console.log('')
+  console.log('========================================================')
+  console.log('[OK] BASE DE DATOS INICIALIZADA CON ÉXITO')
+  console.log('Contraseña universal para todas las cuentas: Juris2026!Abg')
+  console.log('Cuentas disponibles para Login (User ID):')
+  console.log('• mariana.solis   (Socio / Admin)')
+  console.log('• diego.ferrer    (Abogado)')
+  console.log('• paula.sando     (Asistente)')
+  console.log('• carlos.cliente  (Cliente)')
+  console.log('• admin           (Super Admin)')
+  console.log('========================================================')
   process.exit(0)
 }
 

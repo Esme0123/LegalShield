@@ -80,14 +80,17 @@ export function scorePassword(value = '') {
 export const USER_ID_RE = /^LEG-\d{4}-\d{4}$/
 
 export function validateUserId(value = '') {
-  const v = value.trim().toUpperCase()
-  if (!v) return { valid: false, level: 0, message: 'El User ID es obligatorio.', normalized: v }
-  if (!v.startsWith('LEG-')) {
-    return { valid: false, level: 0, message: 'Prefijo institucional obligatorio: LEG-', normalized: v }
+  const raw = value.trim()
+  if (!raw) return { valid: false, level: 0, message: 'El User ID es obligatorio.', normalized: raw }
+  const v = raw.toUpperCase()
+  if (v.startsWith('LEG-')) {
+    const parts = v.split('-')
+    if (parts.length !== 3 || parts[1].length !== 4 || parts[2].length !== 4 || !/^\d+$/.test(parts[1] + parts[2])) {
+      return { valid: false, level: 1, message: 'Formato esperado: LEG-2026-0001', normalized: v }
+    }
+    return { valid: true, level: 3, message: 'Identificador conforme al padron del despacho.', normalized: v }
   }
-  const parts = v.split('-')
-  if (parts.length !== 3 || parts[1].length !== 4 || parts[2].length !== 4 || !/^\d+$/.test(parts[1] + parts[2])) {
-    return { valid: false, level: 1, message: 'Formato esperado: LEG-2026-0001', normalized: v }
-  }
-  return { valid: true, level: 3, message: 'Identificador conforme al padron del despacho.', normalized: v }
+  // Acepta username formato nombre.apellido o admin
+  if (/\s/.test(raw)) return { valid: false, level: 0, message: 'Sin espacios en el User ID.', normalized: raw }
+  return { valid: true, level: 3, message: 'Identificador valido.', normalized: raw }
 }

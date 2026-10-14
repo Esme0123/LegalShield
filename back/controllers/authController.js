@@ -144,8 +144,8 @@ async function login(req, res) {
             u.failed_attempts, u.is_locked, u.is_active, u.password_updated_at,
             r.code AS role_code, r.name AS role_name
        FROM users u JOIN roles r ON r.id = u.role_id
-      WHERE u.user_code = ?`,
-    [candidate],
+      WHERE u.username = ? OR u.email = ? OR u.user_code = ?`,
+    [String(userCode ?? '').trim().toLowerCase(), sanitizeEmail(userCode), candidate],
   )
 
   // Respuesta uniforme para usuario inexistente y clave incorrecta: no revela
