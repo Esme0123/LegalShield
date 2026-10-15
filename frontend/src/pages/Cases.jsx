@@ -62,13 +62,16 @@ export default function Cases() {
   const hasPermission = useAppStore((s) => s.hasPermission)
   const session = useAppStore((s) => s.session)
   const pushLog = useAppStore((s) => s.pushLog)
+  const activityLogs = useAppStore((s) => s.activityLogs)
+  const loadActivityLogs = useAppStore((s) => s.loadActivityLogs)
 
   const [selectedId, setSelectedId] = useState(null)
   const [crumpling, setCrumpling] = useState(null)
 
   useEffect(() => {
     loadCases()
-  }, [loadCases])
+    loadActivityLogs()
+  }, [loadCases, loadActivityLogs])
 
   const selected = cases.find((c) => c.id === selectedId) ?? cases[0]
   const canArchive = hasPermission('CASES_ARCHIVE')
@@ -306,6 +309,35 @@ export default function Cases() {
             </motion.div>
           )}
         </AnimatePresence>
+        <div className="ls-card p-4">
+          <SectionTitle
+            icon={FileText}
+            title="Actividad de expedientes"
+            subtitle="Ultimas acciones de negocio registradas en activity_logs"
+          />
+          <ul className="divide-y divide-line/25">
+            {activityLogs.slice(0, 6).map((l) => {
+              const ts = formatDateTime(l.ts)
+              return (
+                <li key={l.id} className="flex items-start gap-3 py-2.5">
+                  <span
+                    className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                      l.severity === 'critico' ? 'bg-danger' : l.severity === 'warn' ? 'bg-accent' : 'bg-info'
+                    }`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-2">
+                      <span className="font-mono text-[10.5px] font-bold text-info">{l.type}</span>
+                      <span className="font-mono text-[9.5px] text-muted">{ts.date} {ts.time}</span>
+                    </p>
+                    <p className="text-[12px] leading-snug text-ink/90">{l.message}</p>
+                  </div>
+                </li>
+              )
+            })}
+            {activityLogs.length === 0 && <p className="py-3 text-[12px] text-muted">Sin actividad registrada</p>}
+          </ul>
+        </div>
       </div>
     </div>
   )

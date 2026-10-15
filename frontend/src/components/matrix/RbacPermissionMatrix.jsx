@@ -9,18 +9,17 @@ import { cn } from '@/lib/cn'
 const GROUPS = [...new Set(PERMISSIONS.map((p) => p.group))]
 
 /**
- * Matriz RBAC atomica: rol x permiso para CASES_*, DOCS_*, LOGS_*, RBAC_*,
- * RISK_* y los nuevos USERS_*. Los cambios se aplican al instante a traves de
- * POST /api/roles/permissions (togglePermission) y quedan auditados como
- * PERMISSION_CHANGED.
+ * Matriz RBAC atomica: rol x permiso. Incluye la segregacion exclusiva del OSI
+ * (USERS_MANAGE, ROLES_MANAGE, ACCOUNT_UNLOCK, SECURITY_LOGS_VIEW). Los cambios
+ * se aplican al instante via POST /api/roles/permissions (togglePermission) y
+ * quedan auditados como PERMISSION_CHANGED.
  */
 export default function RbacPermissionMatrix() {
   const rbac = useAppStore((s) => s.rbac)
-  const session = useAppStore((s) => s.session)
   const hasPermission = useAppStore((s) => s.hasPermission)
   const togglePermission = useAppStore((s) => s.togglePermission)
 
-  const canEdit = hasPermission('RBAC_MANAGE') || session?.role === 'socio'
+  const canEdit = hasPermission('ROLES_MANAGE') || hasPermission('RBAC_MANAGE')
 
   const byGroup = GROUPS.map((group) => ({
     group,
@@ -29,8 +28,9 @@ export default function RbacPermissionMatrix() {
 
   const handleToggle = async (roleId, permissionId) => {
     if (!canEdit) return
+    const roleLabel = ROLES.find((r) => r.id === roleId)?.label ?? roleId
     try {
-      const { granting, roleLabel } = await togglePermission(roleId, permissionId)
+      const { granting } = await togglePermission(roleId, permissionId)
       toast.pastel(
         granting ? 'Permiso concedido' : 'Permiso retirado',
         `${permissionId} ${granting ? 'habilitado' : 'deshabilitado'} para ${roleLabel} · evento PERMISSION_CHANGED`,
@@ -46,12 +46,13 @@ export default function RbacPermissionMatrix() {
         <div>
           <p className="font-display text-sm font-bold tracking-tight">Matriz RBAC · permisos atómicos</p>
           <p className="mt-0.5 text-[11px] text-muted">
-            Gestión granular de usuarios: USERS_READ / USERS_CREATE / USERS_UPDATE / USERS_DELETE / USERS_UNLOCK
+            Segregacion de funciones: el ABM de usuarios, la gestion de roles, el desbloqueo y la
+            bitacora de seguridad son exclusivos del rol OSI
           </p>
         </div>
         {!canEdit && (
           <span className="inline-flex items-center gap-1.5 rounded-full border border-line/50 bg-surface2/40 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted">
-            <KeyRound className="h-3 w-3" /> Solo lectura · falta RBAC_MANAGE
+            <KeyRound className="h-3 w-3" /> Solo lectura · falta ROLES_MANAGE
           </span>
         )}
       </div>

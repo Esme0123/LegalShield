@@ -49,7 +49,13 @@ async function main() {
   )
 
   for (const user of users) {
-    await conn.query('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, user.id])
+    await conn.query(
+      `UPDATE users
+          SET password_hash = ?, failed_attempts = 0, is_locked = FALSE,
+              status = 'ACTIVE', locked_at = NULL, locked_until = NULL
+        WHERE id = ?`,
+      [passwordHash, user.id],
+    )
     await conn.query(
       'INSERT IGNORE INTO password_history (user_id, password_hash) SELECT id, ? FROM users WHERE id = ?',
       [passwordHash, user.id],

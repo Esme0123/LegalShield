@@ -61,12 +61,31 @@ export function isAuthenticated() {
 
 /** Error de API con el codigo HTTP, para que la UI distinga 403 de 500. */
 export class ApiError extends Error {
-  constructor(message, { status, details, code } = {}) {
+  constructor(message, { status, details, code, payload } = {}) {
     super(message)
     this.name = 'ApiError'
     this.status = status ?? 0
     this.details = details ?? null
     this.code = code ?? null
+    this.payload = payload ?? null
+  }
+
+  /** Estado de bloqueo temporal informado por POST /auth/login (401). */
+  get isLocked() {
+    return Boolean(this.payload?.isLocked ?? this.details?.isLocked)
+  }
+
+  /** Segundos restantes de la inhabilitacion temporal, calculados en el servidor. */
+  get remainingSeconds() {
+    return Number(this.payload?.remainingSeconds ?? this.details?.remainingSeconds ?? 0)
+  }
+
+  get failedAttempts() {
+    return Number(this.payload?.failedAttempts ?? this.details?.failedAttempts ?? 0)
+  }
+
+  get maxAttempts() {
+    return Number(this.payload?.maxAttempts ?? this.details?.maxAttempts ?? 3)
   }
 
   get isNetwork() {
@@ -152,6 +171,7 @@ export async function request(path, { method = 'GET', body, signal, auth = true,
     throw new ApiError(payload?.error ?? `Error HTTP ${response.status}`, {
       status: response.status,
       details: payload?.details ?? payload?.detail ?? null,
+      payload,
     })
   }
 
@@ -180,6 +200,8 @@ export const authApi = {
     put('/auth/password', { currentPassword, newPassword }),
   passwordHistory: () => get('/auth/password-history'),
   unlock: (userCode) => post('/auth/unlock', { userCode }),
+  /** Estado del bloqueo temporal de una cuenta (restaura el conteo tras F5). */
+  lockStatus: (userCode) => post('/auth/lock-status', { userCode }, { auth: false }),
 }
 
 /* -------------------------------------------------------------------------- */
@@ -230,7 +252,12 @@ export const usersApi = {
 /* -------------------------------------------------------------------------- */
 
 export const auditApi = {
+  /** Bitacora de seguridad (acceso y control): solo OSI con SECURITY_LOGS_VIEW. */
+  security: (filters, options) => get(`/audit/security${qs(filters)}`, options),
+  /** Alias historico de la bitacora de seguridad. */
   logs: (filters, options) => get(`/audit/logs${qs(filters)}`, options),
+  /** Bitacora de actividad (acciones de negocio): LOGS_VIEW. */
+  activity: (filters, options) => get(`/audit/activity${qs(filters)}`, options),
   events: () => get('/audit/events'),
 }
 

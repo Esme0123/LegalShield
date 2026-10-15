@@ -32,6 +32,9 @@ const authLimiter = rateLimit({
 router.post('/register', authLimiter, asyncHandler(controller.register))
 router.post('/login', authLimiter, asyncHandler(controller.login))
 
+// Estado del bloqueo temporal por cuenta: restaura el conteo tras un F5.
+router.post('/lock-status', authLimiter, asyncHandler(controller.lockStatus))
+
 // --- Requiere sesion ---------------------------------------------------------
 
 router.post('/refresh', authLimiter, auditAction('TOKEN_REFRESH'), asyncHandler(controller.refresh))
@@ -46,7 +49,7 @@ router.get('/profile', authenticate, asyncHandler(profile.getProfile))
 router.put('/profile', authenticate, auditAction('PROFILE_UPDATED'), asyncHandler(profile.updateProfile))
 router.put('/password', authenticate, auditAction('PASSWORD_CHANGED'), asyncHandler(profile.changePassword))
 
-// Desbloqueo: solo quien tenga TOKEN_RESET (normalmente el socio).
-router.post('/unlock', authenticate, checkPermission('TOKEN_RESET'), auditAction('AUTH_UNLOCK'), asyncHandler(controller.unlock))
+// Desbloqueo: exclusivo del Oficial de Seguridad (OSI) via ACCOUNT_UNLOCK.
+router.post('/unlock', authenticate, checkPermission('ACCOUNT_UNLOCK'), auditAction('AUTH_UNLOCK'), asyncHandler(controller.unlock))
 
 module.exports = router

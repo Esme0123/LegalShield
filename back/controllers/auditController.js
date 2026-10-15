@@ -1,12 +1,16 @@
 'use strict'
 
 /**
- * Auditoria.
+ * Auditoria diferenciada.
  *
- * `security_logs` es inmutable (trigger en la base): este modulo solo lee.
- * Los filtros de fecha y tipo de evento se resuelven en SQL con parametros
- * ($1, $2...) para evitar inyeccion, y el rango se acota para no extraer la
- * bitacora completa de un solo golpe.
+ *   GET /api/audit/security  -> security_logs (acceso y control), solo OSI.
+ *   GET /api/audit/activity  -> activity_logs (acciones de negocio).
+ *   GET /api/audit/logs      -> alias de compatibilidad de la bitacora de seguridad.
+ *   GET /api/audit/events    -> catalogo de eventos de seguridad.
+ *
+ * Ambas tablas son de solo lectura aqui (security_logs es inmutable por trigger).
+ * Los filtros de fecha y tipo de evento se resuelven en SQL con parametros para
+ * evitar inyeccion, y el rango se acota para no extraer la bitacora completa.
  */
 
 const { rows, one } = require('../config/db')
@@ -25,11 +29,9 @@ function assertDate(value, field) {
   return parsed
 }
 
-/* -------------------------------------------------------------------------- */
-/* GET /api/audit/logs                                                         */
-/* -------------------------------------------------------------------------- */
-
 /**
+ * Consulta generica parametrizada por tabla (solo nombres controlados).
+ *
  * Query params:
  *   from, to        rango de fechas (ISO 8601)
  *   action          tipo de evento; admite coma para varios (AUTH_FAILED,AUTH_LOCKED)
@@ -37,7 +39,7 @@ function assertDate(value, field) {
  *   userCode        filtra por User ID
  *   limit, offset   paginacion (maximo 500 por pagina)
  */
-async function listLogs(req, res) {
+async function listFrom(table, req, res) {
   const where = []
   const params = []
 
@@ -87,21 +89,22 @@ async function listLogs(req, res) {
     rows(
       `SELECT id, user_code AS "userCode", action, ip_address AS "ipAddress",
               status, details, "timestamp"
-         FROM security_logs
+         FROM ${table}
          ${clause}
         ORDER BY "timestamp" DESC, id DESC
         LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     ),
-    one(`SELECT COUNT(*) AS total FROM security_logs ${clause}`, params),
-    rows('SELECT status, COUNT(*) AS count FROM security_logs GROUP BY status ORDER BY count DESC'),
+    one(`SELECT COUNT(*) AS total FROM ${table} ${clause}`, params),
+    rows(`SELECT status, COUNT(*) AS count FROM ${table} GROUP BY status ORDER BY count DESC`),
     rows(
-      `SELECT action, COUNT(*) AS count FROM security_logs
+      `SELECT action, COUNT(*) AS count FROM ${table}
         GROUP BY action ORDER BY count DESC LIMIT 20`,
     ),
   ])
 
   res.json({
+    stream: table === 'security_logs' ? 'security' : 'activity',
     total: Number(totalRow.total),
     limit,
     offset,
@@ -117,11 +120,21 @@ async function listLogs(req, res) {
   })
 }
 
+/** Bitacora de seguridad: acceso, bloqueos y control de cuentas (rol OSI). */
+async function listSecurityLogs(req, res) {
+  return listFrom('security_logs', req, res)
+}
+
+/** Bitacora de actividad: acciones de negocio del despacho (socios/abogados). */
+async function listActivityLogs(req, res) {
+  return listFrom('activity_logs', req, res)
+}
+
 /* -------------------------------------------------------------------------- */
 /* GET /api/audit/events                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** Catalogo de eventos consultables, util para poblar los filtros del frontend. */
+/** Catalogo de eventos de seguridad consultables, util para los filtros. */
 async function listEventTypes(_req, res) {
   const result = await rows(
     `SELECT action, COUNT(*) AS occurrences,
@@ -134,4 +147,4 @@ async function listEventTypes(_req, res) {
   res.json({ events: result })
 }
 
-module.exports = { listLogs, listEventTypes }
+module.exports = { listSecurityLogs, listActivityLogs, listEventTypes }

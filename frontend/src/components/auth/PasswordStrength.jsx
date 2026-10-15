@@ -16,6 +16,9 @@ export default function PasswordStrength({ value, className = '' }) {
   const result = scorePassword(value)
   const filled = value ? result.score + 1 : 0
 
+  // Nivel cualitativo de la clave (se evita exponer la entropia en bits).
+  const keyStrength = result.score >= 3 ? 'Alta' : result.score === 2 ? 'Media' : 'Baja'
+
   return (
     <div className={cn('rounded-lg border border-line/50 bg-surface2/35 p-3', className)}>
       <div className="flex items-center justify-between gap-2">
@@ -33,7 +36,7 @@ export default function PasswordStrength({ value, className = '' }) {
           )}
         >
           {result.label}
-          {value ? ` · ${result.entropy} bits` : ''}
+          {value ? ` · Seguridad de Clave: ${keyStrength}` : ''}
         </p>
       </div>
 
@@ -105,8 +108,7 @@ export function LockCounter({ attempts, max = 3, locked }) {
 
       <p className="mt-2.5 flex items-start gap-1.5 text-[11px] leading-snug text-muted">
         <Lock className="mt-0.5 h-3 w-3 shrink-0 text-ok" />
-        Al tercer fallo la cuenta se bloquea 120 s y se emite evento
-        <span className="font-mono text-danger"> LOGIN_LOCKED</span>.
+        Al tercer fallo la cuenta se inhabilita durante 120 s por seguridad.
       </p>
 
       {locked && (
@@ -115,7 +117,7 @@ export function LockCounter({ attempts, max = 3, locked }) {
           animate={{ opacity: 1, x: 0 }}
           className="mt-2 flex items-center gap-1.5 rounded-md border border-danger/50 bg-danger/10 px-2 py-1.5 text-[11px] font-medium text-danger"
         >
-          <ShieldAlert className="h-3.5 w-3.5" /> Sesion bajo bloqueo temporal · WAF notificado
+          <ShieldAlert className="h-3.5 w-3.5" /> Acceso suspendido temporalmente por seguridad
         </motion.p>
       )}
     </div>

@@ -9,9 +9,9 @@
  *
  *   1. CREATE DATABASE IF NOT EXISTS legalshield_db (utf8mb4 / unicode_ci)
  *   2. USE legalshield_db
- *   3. CREATE TABLE IF NOT EXISTS de las 8 tablas relacionales
+ *   3. CREATE TABLE IF NOT EXISTS de las 9 tablas relacionales
  *   4. Triggers + vista de conveniencia (idempotentes)
- *   5. Seed: roles, permisos, matriz rol x permiso y usuario Admin
+ *   5. Seed: roles (incluye OSI), permisos, matriz rol x permiso y usuarios
  *   6. Mensaje final + process.exit(0) para no dejar el terminal colgado
  *
  * Es idempotente: puede ejecutarse cuantas veces sea sin duplicar datos.
@@ -81,6 +81,8 @@ const TABLES = [
      failed_attempts     INT NOT NULL DEFAULT 0,
      is_locked           BOOLEAN NOT NULL DEFAULT FALSE,
      locked_at           DATETIME,
+     locked_until        DATETIME,
+     status              VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
      is_active           BOOLEAN NOT NULL DEFAULT TRUE,
      deactivated_at      DATETIME,
      password_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -129,7 +131,8 @@ const TABLES = [
      INDEX idx_cases_created (created_at DESC)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-  // 3.7 security_logs
+  // 3.7 security_logs · eventos de acceso y control (ciberseguridad), visibles
+  //     unicamente para el rol OSI en el modulo de Auditoria de Seguridad.
   `CREATE TABLE IF NOT EXISTS security_logs (
      id         INT AUTO_INCREMENT PRIMARY KEY,
      user_code  VARCHAR(20),
@@ -142,6 +145,22 @@ const TABLES = [
      INDEX idx_logs_timestamp (timestamp DESC),
      INDEX idx_logs_action (action),
      INDEX idx_logs_user (user_code)
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  // 3.8 activity_logs · acciones de negocio del despacho (operativas), visibles
+  //     en Dashboard y Expedientes para Socios y Abogados.
+  `CREATE TABLE IF NOT EXISTS activity_logs (
+     id         INT AUTO_INCREMENT PRIMARY KEY,
+     user_code  VARCHAR(20),
+     action     VARCHAR(60) NOT NULL,
+     ip_address VARCHAR(45),
+     status     VARCHAR(20) NOT NULL DEFAULT 'INFO',
+     details    LONGTEXT,
+     timestamp  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     CONSTRAINT chk_activity_status CHECK (status IN ('INFO', 'WARN', 'CRITICO')),
+     INDEX idx_activity_timestamp (timestamp DESC),
+     INDEX idx_activity_action (action),
+     INDEX idx_activity_user (user_code)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ]
 
@@ -176,22 +195,23 @@ const VIEW = `CREATE OR REPLACE VIEW vw_role_permission_matrix AS
 /* -------------------------------------------------------------------------- */
 
 const ROLES = [
-  ['socio', 'Socio', 'Administrador total. Direccion del despacho.'],
+  ['osi', 'OSI', 'Oficial de Seguridad de la Informacion. ABM de usuarios, matriz RBAC y bitacora de seguridad.'],
+  ['socio', 'Socio', 'Direccion legal. Expedientes, asignacion de abogados y metricas del despacho.'],
   ['abogado', 'Abogado', 'Gestiona los expedientes asignados.'],
   ['asistente', 'Asistente', 'Lectura y apoyo administrativo.'],
   ['cliente', 'Cliente', 'Consulta limitada desde el portal.'],
 ]
 
 const PERMISSIONS = [
-  // Catalogo atomico (17) replicando PERMISSIONS del frontend (seed.js).
+  // Catalogo atomico (21) replicando PERMISSIONS del frontend (seed.js).
   ['CASES_CREATE', 'Crear expedientes'],
   ['CASES_READ', 'Leer expedientes'],
   ['CASES_WRITE', 'Editar expedientes'],
   ['CASES_ARCHIVE', 'Archivar expedientes'],
   ['DOCS_REVEAL', 'Revelar documentos restringidos'],
   ['DOCS_DOWNLOAD', 'Descargar documentos'],
-  ['LOGS_VIEW', 'Ver logs de auditoria'],
-  ['LOGS_EXPORT', 'Exportar logs'],
+  ['LOGS_VIEW', 'Ver logs de aplicacion (actividad del despacho)'],
+  ['LOGS_EXPORT', 'Exportar logs de aplicacion'],
   ['AUDIT_RECEIPT', 'Emitir comprobantes'],
   ['RBAC_MANAGE', 'Administrar matriz RBAC'],
   ['TOKEN_RESET', 'Emitir tokens de reseteo'],
@@ -201,20 +221,51 @@ const PERMISSIONS = [
   ['USERS_UPDATE', 'Editar datos, rol o estado de usuarios'],
   ['USERS_DELETE', 'Dar de baja (desactivar) usuarios'],
   ['USERS_UNLOCK', 'Desbloquear usuarios y resetear clave'],
+  // Segregacion OSI: estos cuatro permisos son exclusivos del rol OSI.
+  ['USERS_MANAGE', 'Gestionar el ABM completo de usuarios'],
+  ['ROLES_MANAGE', 'Modificar la matriz de roles y permisos'],
+  ['ACCOUNT_UNLOCK', 'Desbloquear cuentas inhabilitadas temporalmente'],
+  ['SECURITY_LOGS_VIEW', 'Ver la bitacora de seguridad (eventos de acceso y control)'],
 ]
 
+/**
+ * Matriz estricta de segregacion de funciones:
+ *   · OSI      -> ABM de usuarios, gestion de roles, desbloqueo y logs de seguridad.
+ *   · Socio    -> expedientes, metricas del despacho y logs de aplicacion.
+ *   · Abogado/Asistente/Cliente -> permisos operacionales sobre sus expedientes.
+ */
 const RBAC_MATRIX = {
-  socio: PERMISSIONS.map(([code]) => code),
-  abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT', 'RISK_ASSESS', 'USERS_READ'],
+  osi: [
+    'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
+    'USERS_UNLOCK', 'ACCOUNT_UNLOCK',
+    'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
+    'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT',
+    'CASES_READ',
+  ],
+  socio: [
+    'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE',
+    'DOCS_REVEAL', 'DOCS_DOWNLOAD',
+    'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS',
+  ],
+  abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT', 'RISK_ASSESS'],
   asistente: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'],
   cliente: ['CASES_READ'],
 }
 
 /** Catalogos obsoletos del seed previo: se limpian para alinear la matriz. */
-const OBSOLETE_PERMISSIONS = ['CASES_UPDATE', 'ROLES_MANAGE']
+const OBSOLETE_PERMISSIONS = ['CASES_UPDATE']
 
 /** Personas civiles de demostracion: replican DIRECTORY/USER_PROFILES (seed.js). */
 const DEMO_USERS = [
+  {
+    userCode: 'LEG-2026-0002',
+    username: 'osi.seguridad',
+    email: 'osi@legalshield.bo',
+    role: 'osi',
+    firm: 'LegalShield Bufetes',
+    department: 'Seguridad de la Informacion',
+    phone: '+591 2 244 1199',
+  },
   {
     userCode: 'LEG-2026-0001',
     username: 'mariana.solis',
@@ -423,6 +474,24 @@ async function main() {
     await run('CREATE INDEX idx_users_active ON users (is_active)')
     logger.info('Indice agregado: users.idx_users_active')
   }
+  // 4c. Migracion del bloqueo persistente: `locked_until` sostiene el tiempo de
+  //     inhabilitacion en MySQL y `status` refleja el estado de la cuenta.
+  if (!(await columnExists('users', 'locked_until'))) {
+    await run('ALTER TABLE users ADD COLUMN locked_until DATETIME AFTER locked_at')
+    logger.info('Columna agregada: users.locked_until')
+  }
+  if (!(await columnExists('users', 'status'))) {
+    await run("ALTER TABLE users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' AFTER is_locked")
+    await run(
+      `UPDATE users
+          SET status = CASE
+                        WHEN is_active = FALSE THEN 'DISABLED'
+                        WHEN is_locked  = TRUE  THEN 'LOCKED'
+                        ELSE 'ACTIVE'
+                       END`,
+    )
+    logger.info('Columna agregada: users.status (sincronizada con is_locked/is_active)')
+  }
 
   // 5. Seed data.
   for (const [code, name, description] of ROLES) {
@@ -458,6 +527,58 @@ async function main() {
   }
   logger.info('Matriz rol x permiso aplicada')
 
+  // Sincronizacion estricta: retira toda concesion que no pertenezca a la
+  // matriz vigente (socios sin ABM de usuarios, permisos OSI exclusivos, etc.).
+  const allowedPairs = Object.entries(RBAC_MATRIX)
+    .map(
+      ([roleCode, codes]) =>
+        `(r.code = '${roleCode}' AND p.code IN (${codes.map((c) => `'${c}'`).join(', ')}))`,
+    )
+    .join('\n           OR ')
+  await run(
+    `DELETE rp FROM role_permissions rp
+       JOIN roles       r ON r.id = rp.role_id
+       JOIN permissions p ON p.id = rp.permission_id
+      WHERE NOT (${allowedPairs})`,
+  )
+  logger.info('Segregacion estricta aplicada: concesiones fuera de matriz revocadas')
+
+  // Separacion de bitacoras: los eventos de negocio que en seeds previos
+  // quedaron en security_logs se migran a activity_logs (la tabla de
+  // seguridad es inmutable, por eso se retira el trigger durante el traslado
+  // y se restaura en el mismo bloque).
+  const ACTIVITY_ACTIONS = [
+    'READ', 'CREATE', 'UPDATE', 'DELETE',
+    'CASE_READ', 'CASE_CREATED', 'CASE_UPDATED', 'CASE_ARCHIVED',
+    'PROFILE_UPDATED', 'MATRIX_ACCESS_CHANGED', 'MATRIX_BULK_CHANGED',
+    'DOC_REVEALED', 'DOC_CONCEALED', 'AUDIT_RECEIPT',
+  ]
+  const inList = ACTIVITY_ACTIONS.map((a) => `'${a}'`).join(', ')
+  const [pendingRows] = await run(
+    `SELECT COUNT(*) AS total FROM security_logs WHERE action IN (${inList})`,
+  )
+  if (Number(pendingRows[0].total) > 0) {
+    await run(
+      `INSERT INTO activity_logs (user_code, action, ip_address, status, details, timestamp)
+       SELECT user_code, action, ip_address, status, details, timestamp
+         FROM security_logs
+        WHERE action IN (${inList})`,
+    )
+    await run('DROP TRIGGER IF EXISTS trg_security_logs_no_delete')
+    try {
+      await run(`DELETE FROM security_logs WHERE action IN (${inList})`)
+    } finally {
+      if (!(await triggerExists('trg_security_logs_no_delete'))) {
+        await run(
+          `CREATE TRIGGER trg_security_logs_no_delete
+             BEFORE DELETE ON security_logs FOR EACH ROW
+             SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'security_logs es inmutable: DELETE no permitido'`,
+        )
+      }
+    }
+    logger.info('Bitacoras separadas: eventos de negocio movidos a activity_logs')
+  }
+
   // Personas civiles de demostracion (mismas cuentas que DIRECTORY en el
   // frontend). El usuario previo "admin" colisiona en LEG-2026-0001, asi que
   // ON DUPLICATE KEY UPDATE lo transforma en mariana.solis (socio).
@@ -478,6 +599,8 @@ async function main() {
          failed_attempts = 0,
          is_locked = FALSE,
          locked_at = NULL,
+         locked_until = NULL,
+         status = 'ACTIVE',
          is_active = TRUE,
          deactivated_at = NULL,
          password_updated_at = NOW()`,
@@ -536,14 +659,13 @@ async function main() {
   console.log(`[OK] Base de datos e instructivos creados exitosamente (${DB_NAME}, ${tables.length} tablas)`)
   console.log('')
   console.log('========================================================')
-  console.log('[OK] BASE DE DATOS INICIALIZADA CON ÉXITO')
-  console.log('Contraseña universal para todas las cuentas: Juris2026!Abg')
-  console.log('Cuentas disponibles para Login (User ID):')
-  console.log('• mariana.solis   (Socio / Admin)')
-  console.log('• diego.ferrer    (Abogado)')
-  console.log('• paula.sando     (Asistente)')
-  console.log('• carlos.cliente  (Cliente)')
-  console.log('• admin           (Super Admin)')
+  console.log('[OK] BASE DE DATOS INICIALIZADA CON SEGREGACIÓN OSI')
+  console.log('• osi.seguridad    (OSI - Único con acceso a ABM de Usuarios)')
+  console.log('• mariana.solis    (Socio - Dirección Legal y Expedientes)')
+  console.log('• diego.ferrer     (Abogado - Gestión de Casos)')
+  console.log('• paula.sando      (Asistente - Lectura y Apoyo)')
+  console.log('• carlos.cliente   (Cliente - Consulta de Casos Propios)')
+  console.log('Contraseña universal: Juris2026!Abg')
   console.log('========================================================')
   process.exit(0)
 }

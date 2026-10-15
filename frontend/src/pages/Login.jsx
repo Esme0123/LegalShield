@@ -35,8 +35,10 @@ export default function Login() {
   const login = useAppStore((s) => s.login)
   const requestUnlock = useAppStore((s) => s.requestUnlock)
   const unlockAccount = useAppStore((s) => s.unlockAccount)
+  const checkLockStatus = useAppStore((s) => s.checkLockStatus)
+  const lastIdentifier = useAppStore((s) => s.lastIdentifier)
 
-  const [userId, setUserId] = useState('mariana.solis')
+  const [userId, setUserId] = useState(lastIdentifier || 'mariana.solis')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -49,6 +51,13 @@ export default function Login() {
   useEffect(() => {
     if (session) navigate('/dashboard', { replace: true })
   }, [session, navigate])
+
+  // Tras un F5 el estado del bloqueo se recupera de MySQL: el servidor recalcula
+  // los segundos restantes exactos y la cuenta regresiva continua donde iba.
+  useEffect(() => {
+    if (lastIdentifier) checkLockStatus(lastIdentifier)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!lockedUntil) return undefined
@@ -74,9 +83,9 @@ export default function Login() {
     if (password.length < 6) {
       const result = await login({ userId: idCheck.normalized, password })
       toast.danger(
-        result.locked ? 'Cuenta bloqueada' : 'Credencial invalida',
+        result.locked ? 'Acceso suspendido' : 'Credencial invalida',
         result.locked
-          ? 'Tres intentos fallidos · solicite desbloqueo al administrador'
+          ? 'Demasiados intentos · el acceso se rehabilita automaticamente en 2 minutos'
           : `Intento ${result.attempts} de ${MAX_ATTEMPTS} · revise la contrasena`,
       )
       return
@@ -91,14 +100,14 @@ export default function Login() {
     try {
       const result = await login({ userId: idCheck.normalized, password })
       if (result.ok) {
-        toast.mint('Acceso concedido', `Rol asignado: ${String(result.user.role).toUpperCase()} · evento AUTH_SUCCESS`)
+        toast.mint('Acceso concedido', `Rol asignado: ${String(result.user.role).toUpperCase()}`)
         navigate('/dashboard', { replace: true })
         return
       }
       toast.danger(
-        result.locked ? 'Cuenta bloqueada' : 'Credencial invalida',
+        result.locked ? 'Acceso suspendido' : 'Credencial invalida',
         result.locked
-          ? 'Tres intentos fallidos · solicite el desbloqueo al administrador'
+          ? 'Demasiados intentos · el acceso se rehabilita automaticamente en 2 minutos'
           : `Intento ${result.attempts} de ${MAX_ATTEMPTS}`,
       )
     } catch (error) {
@@ -161,7 +170,7 @@ export default function Login() {
             <div className="mt-7 grid gap-3 sm:grid-cols-3">
               {[
                 { icon: ScanFace, title: 'Identidad fuerte', copy: 'User ID estandar LEG-2026-XXXX + MFA' },
-                { icon: Gavel, title: 'Minimo privilegio', copy: '18 permisos revisables en caliente' },
+                { icon: Gavel, title: 'Minimo privilegio', copy: '21 permisos revisables en caliente' },
                 { icon: Scale, title: 'Evidencia', copy: 'Comprobantes firmados con hash SHA-256' },
               ].map(({ icon: Icon, title, copy }) => (
                 <div key={title} className="ls-panel">
@@ -189,7 +198,7 @@ export default function Login() {
                 <div>
                   <h2 className="ls-heading text-lg">Acceso al expediente electronico</h2>
                   <p className="mt-0.5 text-[11.5px] text-muted">
-                    Sesion cifrada TLS 1.3 · registro de auditoria activo
+                    Conexión segura del despacho
                   </p>
                 </div>
                 <KeyRound className="h-5 w-5 shrink-0 text-ok" />
@@ -279,11 +288,11 @@ export default function Login() {
                         </div>
                         <div className="relative">
                           <p className="flex items-center gap-2 font-display text-sm font-bold text-danger">
-                            <Lock className="h-4 w-4" /> Cuenta bloqueada por politica anti-fuerza bruta
+                            <Lock className="h-4 w-4" /> Acceso suspendido temporalmente por seguridad
                           </p>
                           <p className="mt-1 text-[11.5px] leading-snug text-ink/80">
-                            Bloqueo automatico por {remaining}s. El administrador del despacho debe
-                            validar su identidad antes de emitir un token de reseteo.
+                            Por proteccion de la cuenta, el acceso se rehabilita automaticamente en {remaining}s.
+                            Si el problema persiste, contacte al Oficial de Seguridad del despacho.
                           </p>
 
                           {unlockRequest ? (
@@ -292,15 +301,14 @@ export default function Login() {
                                 SOLICITUD {unlockRequest.ticket} ENVIADA
                               </p>
                               <p className="mt-1 text-[11px] text-muted">
-                                Registrada en auditoria. El token JWT temporal se emitira con TTL 900 s
-                                y uso unico.
+                                Registrada en la bitacora de seguridad. El Oficial de Seguridad (OSI)
+                                validara su identidad antes de restablecer el acceso.
                               </p>
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  // Con API, el desbloqueo real exige el permiso
-                                  // TOKEN_RESET (POST /api/auth/unlock) y deja
-                                  // is_locked = FALSE con el contador en cero.
+                                  // El desbloqueo real exige el permiso ACCOUNT_UNLOCK
+                                  // (POST /api/auth/unlock), exclusivo del OSI.
                                   const result = await unlockAccount(idCheck.normalized)
                                   if (result.ok) {
                                     setPassword('')
@@ -308,15 +316,15 @@ export default function Login() {
                                   } else if (result.reason === 'forbidden') {
                                     toast.danger(
                                       'Operacion rechazada',
-                                      'El desbloqueo requiere el permiso TOKEN_RESET del administrador',
+                                      'El desbloqueo requiere el permiso ACCOUNT_UNLOCK del Oficial de Seguridad',
                                     )
                                   } else {
-                                    toast.danger('No fue posible desbloquear', 'Revise la bitacora de auditoria')
+                                    toast.danger('No fue posible desbloquear', 'Revise la bitacora de seguridad')
                                   }
                                 }}
                                 className="ls-btn-secondary mt-2 w-full text-[11px]"
                               >
-                                <Undo2 className="h-3.5 w-3.5" /> Desbloquear como administrador
+                                <Undo2 className="h-3.5 w-3.5" /> Desbloquear como Oficial de Seguridad
                               </button>
                             </div>
                           ) : (
@@ -325,14 +333,14 @@ export default function Login() {
                               onClick={async () => {
                                 await requestUnlock(idCheck.normalized)
                                 toast.info(
-                                  'Escalado al administrador',
-                                  'Solicitud de desbloqueo registrada como evento de auditoria',
+                                  'Escalado al Oficial de Seguridad',
+                                  'Solicitud de desbloqueo registrada en la bitacora de seguridad',
                                   LifeBuoy,
                                 )
                               }}
                               className="ls-btn-danger mt-3 w-full text-[11px]"
                             >
-                              <LifeBuoy className="h-3.5 w-3.5" /> Solicitar desbloqueo a Administrador
+                              <LifeBuoy className="h-3.5 w-3.5" /> Solicitar desbloqueo al Oficial de Seguridad
                             </button>
                           )}
                         </div>
@@ -396,7 +404,7 @@ export default function Login() {
                 </AnimatePresence>
 
                 <p className="text-center font-mono text-[10px] text-muted">
-                  Tres contrasenas incorrectas bloquean la cuenta · el desbloqueo requiere al administrador
+                  Tres intentos fallidos inhabilitan la cuenta 2 minutos · el desbloqueo lo realiza el OSI
                 </p>
 
 
@@ -416,7 +424,8 @@ export default function Login() {
       <div className="pointer-events-auto fixed bottom-5 left-5 z-20 max-w-xs rounded-xl border border-line/60 bg-surface/90 p-4 shadow-xl backdrop-blur">
         <p className="font-display text-xs font-semibold text-ink">Usuario Demo</p>
         <p className="mt-1 font-mono text-[11px] text-muted">
-          <span className="text-ink">mariana.solis</span> o <span className="text-ink">diego.ferrer</span>
+          <span className="text-ink">osi.seguridad</span>, <span className="text-ink">mariana.solis</span> o{' '}
+          <span className="text-ink">diego.ferrer</span>
         </p>
         <p className="mt-1 font-mono text-[11px] text-muted">
           Contraseña Demo: <span className="text-ink">Juris2026!Abg</span>
@@ -424,7 +433,7 @@ export default function Login() {
         <button
           type="button"
           onClick={() => {
-            setUserId('mariana.solis')
+            setUserId('osi.seguridad')
             setPassword('Juris2026!Abg')
           }}
           className="mt-3 w-full rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-semibold text-accent transition hover:bg-accent/15"

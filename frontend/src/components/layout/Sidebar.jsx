@@ -35,9 +35,8 @@ const SESSION_TOOLS = [
   { to: '/dashboard', label: 'Despacho', icon: Building2, hint: 'Sede asignada' },
 ]
 
-function NavItem({ item, collapsed, onNavigate, permission }) {
+function NavItem({ item, collapsed, onNavigate, allowed = true }) {
   const Icon = item.icon
-  const allowed = permission ? permission(item.to) : true
 
   if (!allowed) {
     return (
@@ -94,15 +93,16 @@ function NavItem({ item, collapsed, onNavigate, permission }) {
 
 export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
   const session = useAppStore((s) => s.session)
-  const hasPermission = useAppStore((s) => s.hasPermission)
+  const hasAnyPermission = useAppStore((s) => s.hasAnyPermission)
   const logout = useAppStore((s) => s.logout)
 
   const roleMeta = ROLES.find((r) => r.id === session?.role)
+  // Cada modulo exige al menos uno de los permisos indicados (segregacion OSI).
   const permissionMap = {
-    '/users': 'USERS_READ',
-    '/roles': 'RBAC_MANAGE',
-    '/audit': 'LOGS_VIEW',
-    '/risk-assessment': 'RISK_ASSESS',
+    '/users': ['USERS_READ', 'USERS_MANAGE'],
+    '/roles': ['RBAC_MANAGE', 'ROLES_MANAGE'],
+    '/audit': ['SECURITY_LOGS_VIEW'],
+    '/risk-assessment': ['RISK_ASSESS'],
   }
 
   return (
@@ -159,19 +159,18 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
             </p>
           )}
           <div className="flex flex-col gap-1">
-            {NAV_ITEMS.map((item) => (
-              <NavItem
-                key={item.to}
-                item={item}
-                collapsed={collapsed}
-                onNavigate={onClose}
-                permission={
-                  permissionMap[item.to]
-                    ? (path) => hasPermission(permissionMap[path])
-                    : undefined
-                }
-              />
-            ))}
+            {NAV_ITEMS.map((item) => {
+              const required = permissionMap[item.to]
+              return (
+                <NavItem
+                  key={item.to}
+                  item={item}
+                  collapsed={collapsed}
+                  onNavigate={onClose}
+                  allowed={required ? hasAnyPermission(required) : true}
+                />
+              )
+            })}
           </div>
 
           {!collapsed && (

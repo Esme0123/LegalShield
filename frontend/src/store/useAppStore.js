@@ -28,6 +28,27 @@ import { cryptoId, nowIso, toggleInList } from '@/lib/format'
 const MAX_ATTEMPTS = 3
 const PASSWORD_HISTORY_LIMIT = 5
 
+/** Clave donde se recuerda el ultimo User ID escrito, para restaurar el
+ *  bloqueo temporal tras un F5 (el conteo exacto lo recalcula el servidor). */
+const LAST_IDENTIFIER_KEY = 'legalshield.lastIdentifier'
+
+function readLastIdentifier() {
+  try {
+    return window.sessionStorage.getItem(LAST_IDENTIFIER_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function writeLastIdentifier(value) {
+  try {
+    if (value) window.sessionStorage.setItem(LAST_IDENTIFIER_KEY, value)
+    else window.sessionStorage.removeItem(LAST_IDENTIFIER_KEY)
+  } catch {
+    /* sessionStorage no disponible */
+  }
+}
+
 /**
  * Estado de conexion con la API REST (`/back`), que persiste en MySQL.
  *
@@ -95,10 +116,13 @@ const apiUserToAdminUser = (row) => {
     department: row.department ?? '',
     role: row.role,
     roleLabel: row.roleLabel,
+    status: row.status,
     isActive: row.isActive,
     isLocked: row.isLocked,
     failedAttempts: row.failedAttempts,
     lockedAt: row.lockedAt,
+    lockedUntil: row.lockedUntil,
+    remainingSeconds: row.remainingSeconds ?? 0,
     createdAt: row.createdAt,
   }
 }
@@ -162,6 +186,7 @@ const initialState = () => ({
   profile: null,
   attempts: 0,
   lockedUntil: null,
+  lastIdentifier: readLastIdentifier(),
   unlockRequest: null,
   didactic: true,
   apiStatus: isApiEnabled() ? 'probeando' : 'error',
@@ -171,6 +196,7 @@ const initialState = () => ({
   rbac: {},
   cases: [],
   logs: [],
+  activityLogs: [],
   revealedDocs: [],
   sis321: structuredClone(SIS321_MATRIX),
   infoAssets: structuredClone(INFO_ASSETS),
@@ -239,6 +265,8 @@ export const useAppStore = create((set, get) => ({
    */
   login: async ({ userId, password }) => {
     const code = String(userId ?? '').trim().toUpperCase()
+    writeLastIdentifier(code)
+    set({ lastIdentifier: code })
 
     try {
       const data = await authApi.login(code, password)
@@ -255,34 +283,50 @@ export const useAppStore = create((set, get) => ({
         return { ok: false, locked: false, attempts: get().attempts, error: `${CONNECTION_ERROR}` }
       }
 
-      // 403 = cuenta bloqueada o desactivada por el servidor.
+      // 403 = cuenta desactivada por un administrador (baja logica).
       if (error instanceof ApiError && error.isForbidden) {
-        const locked = /bloqueada/i.test(error.message)
-        set({
-          lockedUntil: locked ? Date.now() + 120000 : null,
-          unlockRequest: locked ? get().unlockRequest : null,
-        })
-        return { ok: false, locked, attempts: MAX_ATTEMPTS, error: error.message }
+        return { ok: false, locked: false, attempts: get().attempts, error: error.message }
       }
 
-      // 401: la API respondio, la credencial es incorrecta. El backend incluye
-      // failedAttempts/locked para que el toast refleje el contador real de MySQL.
+      // 401: credencial incorrecta, cuenta bloqueada (isLocked) o desactivada.
+      // El backend informa el tiempo restante exacto calculado en MySQL.
       if (error instanceof ApiError && error.isAuth) {
-        const details = error.details ?? {}
-        const locked = Boolean(details.locked)
-        const attempts = Number.isFinite(details.failedAttempts)
-          ? details.failedAttempts
-          : get().attempts + 1
+        const locked = error.isLocked
+        const remainingSeconds = locked ? Math.max(1, error.remainingSeconds) : 0
+        const attempts = error.failedAttempts || get().attempts + 1
         set({
-          attempts,
-          lockedUntil: locked ? Date.now() + 120000 : null,
+          attempts: locked ? MAX_ATTEMPTS : attempts,
+          lockedUntil: locked ? Date.now() + remainingSeconds * 1000 : null,
           unlockRequest: locked ? get().unlockRequest : null,
         })
-        return { ok: false, locked, attempts, error: error.message }
+        return { ok: false, locked, attempts, remainingSeconds, error: error.message }
       }
 
       noteApiFailure(set, error, 'login')
       return { ok: false, locked: false, attempts: get().attempts, error: error.message }
+    }
+  },
+
+  /**
+   * Reconsulta en el servidor el bloqueo temporal de un User ID. Permite que
+   * `Login.jsx`, tras un F5, retome la cuenta regresiva sin reiniciarla.
+   */
+  checkLockStatus: async (userCode) => {
+    const code = String(userCode ?? get().lastIdentifier ?? '').trim().toUpperCase()
+    if (!code) return { isLocked: false, remainingSeconds: 0, failedAttempts: 0 }
+
+    try {
+      const data = await authApi.lockStatus(code)
+      const remainingSeconds = Math.max(0, Number(data.remainingSeconds ?? 0))
+      set({
+        attempts: data.isLocked ? MAX_ATTEMPTS : Number(data.failedAttempts ?? 0),
+        lockedUntil: data.isLocked ? Date.now() + remainingSeconds * 1000 : null,
+        lastIdentifier: code,
+      })
+      return { ...data, remainingSeconds }
+    } catch {
+      // Sin conexion o cuenta inexistente: no se altera el estado de bloqueo.
+      return { isLocked: false, remainingSeconds: 0, failedAttempts: 0 }
     }
   },
 
@@ -326,8 +370,12 @@ export const useAppStore = create((set, get) => ({
 
   /* ------------------------------- ABM / USERS --------------------------- */
 
-  /** Carga la lista del ABM desde MySQL. */
+  /** Carga la lista del ABM desde MySQL (requiere permiso de gestion de usuarios). */
   loadUsers: async () => {
+    if (!get().hasAnyPermission(['USERS_READ', 'USERS_MANAGE'])) {
+      set({ users: [] })
+      return 0
+    }
     try {
       const data = await usersApi.list({ limit: 200 })
       set({ users: data.users.map(apiUserToAdminUser) })
@@ -433,8 +481,8 @@ export const useAppStore = create((set, get) => ({
   },
 
   /**
-   * Desbloqueo real contra la API. Exige el permiso TOKEN_RESET: lo restringe al
-   * socio; no es una autoayuda del titular bloqueado.
+   * Desbloqueo real contra la API. Exige el permiso ACCOUNT_UNLOCK: lo restringe
+   * al Oficial de Seguridad (OSI); no es una autoayuda del titular bloqueado.
    */
   unlockAccount: async (userCode) => {
     try {
@@ -459,7 +507,7 @@ export const useAppStore = create((set, get) => ({
       /* el cierre local no depende de la respuesta del servidor */
     }
     clearTokens()
-    set({ session: null, profile: null, directory: [], users: [], logs: [], cases: [] })
+    set({ session: null, profile: null, directory: [], users: [], logs: [], activityLogs: [], cases: [] })
   },
 
   /* -------------------------------- RBAC --------------------------------- */
@@ -474,6 +522,19 @@ export const useAppStore = create((set, get) => ({
       return state.session.permissions.includes(permissionId)
     }
     return (state.rbac[role] ?? []).includes(permissionId)
+  },
+
+  /** True si la sesion vigente posee al menos uno de los permisos indicados. */
+  hasAnyPermission: (permissionIds = []) => {
+    const permissions = get().session?.permissions
+    if (!permissions?.length) return false
+    return permissionIds.some((code) => permissions.includes(code))
+  },
+
+  /** True si la sesion vigente posee todos los permisos indicados. */
+  hasAllPermissions: (permissionIds = []) => {
+    const permissions = get().session?.permissions ?? []
+    return permissionIds.every((code) => permissions.includes(code))
   },
 
   /**
@@ -519,18 +580,46 @@ export const useAppStore = create((set, get) => ({
     return get().loadMatrix()
   },
 
-  /** Recarga la bitacora inmutable desde MySQL con filtros opcionales. */
-  loadLogs: async (filters = {}) => {
+  /**
+   * Bitacora de SEGURIDAD (acceso y control). Exclusiva del OSI: si la sesion
+   * no tiene SECURITY_LOGS_VIEW no se consulta y no se marca la conexion como
+   * degradada (el 403 es una restriccion de RBAC esperada, no un fallo).
+   */
+  loadSecurityLogs: async (filters = {}) => {
+    if (!get().hasPermission('SECURITY_LOGS_VIEW')) {
+      set({ logs: [] })
+      return 0
+    }
     try {
-      const data = await auditApi.logs({ limit: 80, ...filters })
+      const data = await auditApi.security({ limit: 80, ...filters })
       set({ logs: data.logs.map(apiLogToLog) })
       ok(set)
       return data.logs.length
     } catch (error) {
-      noteApiFailure(set, error, 'logs')
+      noteApiFailure(set, error, 'security-logs')
       return 0
     }
   },
+
+  /** Bitacora de ACTIVIDAD (acciones de negocio del despacho). */
+  loadActivityLogs: async (filters = {}) => {
+    if (!get().hasPermission('LOGS_VIEW')) {
+      set({ activityLogs: [] })
+      return 0
+    }
+    try {
+      const data = await auditApi.activity({ limit: 80, ...filters })
+      set({ activityLogs: data.logs.map(apiLogToLog) })
+      ok(set)
+      return data.logs.length
+    } catch (error) {
+      noteApiFailure(set, error, 'activity-logs')
+      return 0
+    }
+  },
+
+  /** Alias de compatibilidad: la bitacora por defecto es la de seguridad. */
+  loadLogs: async (filters = {}) => get().loadSecurityLogs(filters),
 
   /* ------------------- SIS-321 · Matriz rol x sistema/recurso ---------------
    * Planilla didactica de referencia (UCB): vive en memoria y no persiste.
@@ -652,13 +741,15 @@ export const useAppStore = create((set, get) => ({
   },
 
   /* --------------------------------- RESET ------------------------------- */
-  /** Recarga desde MySQL todos los conjuntos de negocio. */
+  /** Recarga desde MySQL todos los conjuntos de negocio del rol vigente. */
   refreshAll: async () => {
+    const state = get()
     await Promise.allSettled([
-      get().loadCases(),
-      get().loadLogs(),
-      get().loadMatrix(),
-      get().loadUsers(),
+      state.hasPermission('CASES_READ') ? state.loadCases() : Promise.resolve(),
+      state.hasPermission('SECURITY_LOGS_VIEW') ? state.loadSecurityLogs() : Promise.resolve(),
+      state.hasPermission('LOGS_VIEW') ? state.loadActivityLogs() : Promise.resolve(),
+      state.hasAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE']) ? state.loadMatrix() : Promise.resolve(),
+      state.hasAnyPermission(['USERS_READ', 'USERS_MANAGE']) ? state.loadUsers() : Promise.resolve(),
     ])
   },
 }))

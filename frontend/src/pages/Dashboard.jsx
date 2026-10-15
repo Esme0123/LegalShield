@@ -5,7 +5,6 @@ import {
   Activity,
   ArrowRight,
   FileStack,
-  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Users2,
@@ -28,32 +27,28 @@ function maturityScore(controls) {
 export default function Dashboard() {
   const navigate = useNavigate()
   const cases = useAppStore((s) => s.cases)
-  const logs = useAppStore((s) => s.logs)
+  // El panel de inicio resume la ACTIVIDAD de negocio del despacho; los eventos
+  // de acceso y control viven en la bitacora de seguridad (solo OSI).
+  const logs = useAppStore((s) => s.activityLogs)
   const riskControls = useAppStore((s) => s.riskControls)
   const rbac = useAppStore((s) => s.rbac)
   const session = useAppStore((s) => s.session)
   const loadCases = useAppStore((s) => s.loadCases)
-  const loadLogs = useAppStore((s) => s.loadLogs)
+  const loadActivityLogs = useAppStore((s) => s.loadActivityLogs)
   const loadMatrix = useAppStore((s) => s.loadMatrix)
 
   useEffect(() => {
     loadCases()
-    loadLogs()
+    loadActivityLogs()
     loadMatrix()
-  }, [loadCases, loadLogs, loadMatrix])
+  }, [loadCases, loadActivityLogs, loadMatrix])
 
-  const blocked = useMemo(
-    () =>
-      logs.filter(
-        (l) => l.type.includes('INTRUSION') || l.type === 'AUTH_LOCKED' || l.type === 'RATE_LIMITED',
-      ).length,
-    [logs],
-  )
   const critical = useMemo(() => logs.filter((l) => l.severity === 'critico').length, [logs])
   const maturity = maturityScore(riskControls)
   const granted = Object.values(rbac).reduce((acc, list) => acc + list.length, 0)
   const totalPossible = Object.keys(rbac).length * PERMISSIONS.length
   const role = ROLES.find((r) => r.id === session?.role)
+  const seesSecurity = (session?.permissions ?? []).includes('SECURITY_LOGS_VIEW')
 
   return (
     <div className="space-y-6">
@@ -66,7 +61,7 @@ export default function Dashboard() {
         <div className="relative grid gap-6 lg:grid-cols-[1.35fr_1fr] lg:items-center">
           <div>
             <Badge tone="pastel" pulse>
-              <Sparkles className="h-3 w-3" /> Escudo operativo desplegado
+              <Sparkles className="h-3 w-3" /> Sistema Operativo del Despacho
             </Badge>
             <h2 className="mt-3 font-display text-2xl font-bold leading-tight tracking-tight text-balance sm:text-3xl">
               Bienvenido, {session?.name?.split(' ')[0] ?? 'Colegio'}. Su posicio de defensa esta{' '}
@@ -83,16 +78,18 @@ export default function Dashboard() {
                 <FileStack className="h-4 w-4" /> Revisar expedientes
                 <ArrowRight className="h-3.5 w-3.5" />
               </Link>
-              <Link to="/audit" className="ls-btn-secondary">
-                <Activity className="h-4 w-4" /> Ver flujo forense
-              </Link>
+              {seesSecurity && (
+                <Link to="/audit" className="ls-btn-secondary">
+                  <Activity className="h-4 w-4" /> Bitacora de seguridad
+                </Link>
+              )}
             </div>
           </div>
 
           <div className="ls-panel">
             <div className="flex items-center justify-between">
               <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-                Madurez ISO 27001
+                Cumplimiento de Protocolos
               </p>
               <span className="font-display text-2xl font-bold text-ok">{maturity}%</span>
             </div>
@@ -100,7 +97,7 @@ export default function Dashboard() {
             <div className="mt-4 grid grid-cols-3 gap-2 text-center">
               {[
                 { k: 'Criticos', v: critical, cls: 'text-danger' },
-                { k: 'Bloqueos', v: blocked, cls: 'text-accent' },
+                { k: 'Eventos', v: logs.length, cls: 'text-accent' },
                 { k: 'Controles', v: riskControls.length, cls: 'text-info' },
               ].map((s) => (
                 <div key={s.k} className="rounded-lg border border-line/40 bg-bg/30 py-2">
@@ -124,16 +121,16 @@ export default function Dashboard() {
           foot={<Progress value={relativePercent(cases.filter((c) => c.progress > 60).length, cases.length || 1)} />}
         />
         <StatCard
-          icon={ShieldAlert}
-          label="Intrusiones bloqueadas"
-          value={blocked}
-          delta="Reglas WAF + rate-limit"
+          icon={Activity}
+          label="Actividad registrada"
+          value={logs.length}
+          delta="operaciones recientes del despacho"
           tone="danger"
-          foot={<Progress value={Math.min(100, blocked * 18)} tone="pastel" />}
+          foot={<Progress value={Math.min(100, logs.length * 4)} tone="pastel" />}
         />
         <StatCard
           icon={ShieldCheck}
-          label="Madurez ISO 27001"
+          label="Protocolos de seguridad"
           value={`${maturity}%`}
           delta={`${riskControls.filter((c) => c.score < c.target).length} controles bajo objetivo`}
           tone="pastel"
@@ -202,11 +199,13 @@ export default function Dashboard() {
           <SectionTitle
             icon={Activity}
             title="Actividad reciente"
-            subtitle="Ultimos eventos registrados en la bitacora forense"
+            subtitle="Ultimas acciones de negocio registradas por el despacho"
             actions={
-              <Link to="/audit" className="ls-btn-ghost text-xs">
-                Logs completos <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
+              seesSecurity ? (
+                <Link to="/audit" className="ls-btn-ghost text-xs">
+                  Logs completos <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              ) : null
             }
           />
           <ul className="divide-y divide-line/25">
@@ -236,15 +235,23 @@ export default function Dashboard() {
               <div key={r.id}>
                 <div className="mb-1 flex items-center justify-between">
                   <span className="text-[12px] font-medium">{r.label}</span>
-                  <span className="font-mono text-[10px] text-muted">{(rbac[r.id] ?? []).length}/12</span>
+                  <span className="font-mono text-[10px] text-muted">
+                    {(rbac[r.id] ?? []).length}/{PERMISSIONS.length}
+                  </span>
                 </div>
-                <Progress value={rbac[r.id]?.length ?? 0} max={12} tone={r.id === 'socio' ? 'pastel' : 'accent'} />
+                <Progress
+                  value={rbac[r.id]?.length ?? 0}
+                  max={PERMISSIONS.length}
+                  tone={r.id === 'osi' ? 'pastel' : 'accent'}
+                />
               </div>
             ))}
           </div>
-          <Link to="/roles" className="ls-btn-secondary mt-4 w-full text-xs">
-            Ajustar matriz RBAC
-          </Link>
+          {seesSecurity && (
+            <Link to="/roles" className="ls-btn-secondary mt-4 w-full text-xs">
+              Ajustar matriz RBAC
+            </Link>
+          )}
         </div>
       </section>
     </div>

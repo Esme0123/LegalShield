@@ -21,14 +21,18 @@ function assertSecretsConfigured() {
   }
 }
 
-/** Carga permisos RBAC vigentes del usuario (fuente de verdad: la base de datos). */
+/**
+ * Carga permisos RBAC vigentes del usuario (fuente de verdad: la base de datos).
+ * Se resuelve por el rol del usuario, de modo que un cambio en la matriz surte
+ * efecto en la siguiente peticion sin reemitir el token.
+ */
 async function loadPermissions(userId) {
   const result = await rows(
     `SELECT p.code
-       FROM role_permissions rp
-       JOIN permissions p ON p.id = rp.permission_id
-       JOIN roles       r ON r.id = rp.role_id
-      WHERE r.id = ?
+       FROM users u
+       JOIN role_permissions rp ON rp.role_id = u.role_id
+       JOIN permissions      p  ON p.id = rp.permission_id
+      WHERE u.id = ?
       ORDER BY p.code`,
     [userId],
   )
@@ -82,6 +86,7 @@ async function verifyAccessToken(token) {
 
   const user = await one(
     `SELECT u.id, u.user_code, u.username, u.email, u.role_id, u.is_locked,
+            u.locked_until, TIMESTAMPDIFF(SECOND, NOW(), u.locked_until) AS remaining_seconds,
             r.code AS role_code, r.name AS role_name
        FROM users u
        JOIN roles r ON r.id = u.role_id
@@ -90,7 +95,12 @@ async function verifyAccessToken(token) {
   )
 
   if (!user) throw unauthorized('La cuenta asociada al token ya no existe')
-  if (user.is_locked) throw unauthorized('La cuenta esta bloqueada por politica anti-fuerza bruta')
+
+  // Solo invalida la sesion mientras el bloqueo siga vigente en MySQL; un
+  // bloqueo vencido se ignora (la cuenta se libera en el siguiente login).
+  if (user.is_locked && Number(user.remaining_seconds ?? 0) > 0) {
+    throw unauthorized('La cuenta esta bloqueada por politica anti-fuerza bruta')
+  }
 
   const permissions = await loadPermissions(user.id)
   return { ...user, permissions, tokenId: payload.jti ?? null }
@@ -108,13 +118,16 @@ async function rotateRefreshToken(refreshToken) {
 
   const user = await one(
     `SELECT u.id, u.user_code, u.username, u.email, u.role_id, u.is_locked,
+            u.locked_until, TIMESTAMPDIFF(SECOND, NOW(), u.locked_until) AS remaining_seconds,
             r.code AS role_code, r.name AS role_name
        FROM users u JOIN roles r ON r.id = u.role_id
       WHERE u.id = ?`,
     [Number(payload.sub)],
   )
   if (!user) throw unauthorized('La cuenta asociada al refresh token ya no existe')
-  if (user.is_locked) throw unauthorized('La cuenta esta bloqueada')
+  if (user.is_locked && Number(user.remaining_seconds ?? 0) > 0) {
+    throw unauthorized('La cuenta esta bloqueada')
+  }
 
   const permissions = await loadPermissions(user.id)
   logger.info('Refresh token rotado', { userCode: user.user_code })

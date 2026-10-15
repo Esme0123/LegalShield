@@ -5,12 +5,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/cn'
 
 /**
- * Folder Float (React Bits · simulacion)
- * Carpeta 3D que se despliega al hacer hover (o tap en movil) dejando ver los
- * documentos interiores. Construido sobre CSS 3D, sin motor de escena.
- *
- * Con el Modo Didactico apagado la carpeta deja de abrirse sola al pasar el
- * cursor: el despliegue exige un clic explicito y el texto de ayuda cambia.
+ * Folder Float
  */
 export default function FolderFloat({
   docs = [],
@@ -26,7 +21,12 @@ export default function FolderFloat({
   const didactic = useAppStore((s) => s.didactic)
   const [open, setOpen] = useState(false)
   const frame = useRef(null)
-  const sheets = docs.slice(0, 4)
+  const sheets = (Array.isArray(docs) && docs.length > 0 ? docs : [
+    { id: 'AUT-PRUEBA-001', name: 'Autos del proceso', classification: 'Publica', pages: 5 },
+    { id: 'OFICIO-002', name: 'Oficio a juzgado', classification: 'Restringida', pages: 2 },
+    { id: 'PRUEBA-003', name: 'Acta de audiencia', classification: 'Privilegiada', pages: 8 },
+    { id: 'NOTA-004', name: 'Nota de la parte', classification: 'Restringida', pages: 1 },
+  ]).slice(0, 4)
 
   useEffect(() => {
     if (!open) return undefined
@@ -55,10 +55,9 @@ export default function FolderFloat({
       role="button"
       tabIndex={disabled ? -1 : 0}
       aria-expanded={open}
-      aria-label={`${tabLabel} · ${docs.length} documentos`}
+      aria-label={`${tabLabel} � ${docs.length} documentos`}
     >
       <div ref={frame} className="relative h-44 w-full select-none [perspective:1100px]">
-        {/* Sombra proyectada */}
         <div className="absolute inset-x-6 bottom-2 h-6 rounded-[50%] bg-accent/25 blur-xl transition-opacity duration-300 group-hover:opacity-100 opacity-0" />
 
         <div
@@ -67,7 +66,6 @@ export default function FolderFloat({
             open ? '[transform:rotateX(12deg)_rotateY(-7deg)_translateY(-6px)_translateZ(14px)]' : '[transform:rotateX(6deg)]',
           )}
         >
-          {/* Documentos interiores */}
           <div className="absolute inset-x-3 bottom-3 top-0 [transform-style:preserve-3d]">
             {sheets.map((doc, i) => {
               const lift = open ? -(26 + i * 13) : -6
@@ -77,7 +75,7 @@ export default function FolderFloat({
                   className="absolute inset-x-0 top-0 rounded-md border border-lineSoft/45 bg-surface px-2.5 py-2 text-navy shadow-lg"
                   animate={{ y: lift, rotateZ: open ? (i % 2 === 0 ? -1.6 : 1.6) : 0, opacity: open ? 1 : 0.62 }}
                   transition={{ type: 'spring', stiffness: 260, damping: 22, delay: open ? i * 0.055 : 0 }}
-                  style={{ transformOrigin: 'bottom center', zIndex: 10 + i }}
+                  style={{ transformOrigin: 'bottom center', zIndex: 10 + i, transform: `translateZ(${open ? 40 + i * 10 : 0}px)` }}
                 >
                   <div className="flex items-center gap-1.5">
                     <Scroll className="h-3 w-3 shrink-0 text-indigo" />
@@ -102,7 +100,6 @@ export default function FolderFloat({
             })}
           </div>
 
-          {/* Tapa trasera + pestana */}
           <div className={cn('absolute inset-0 rounded-lg bg-gradient-to-br', folderFill)} />
           <div
             className={cn(
@@ -115,17 +112,13 @@ export default function FolderFloat({
             </span>
           </div>
 
-          {/* Cara frontal */}
-          <div
             className="absolute inset-x-0 bottom-0 h-[46%] rounded-b-lg border-t border-accent/40 bg-gradient-to-br from-line/85 to-line/60 backdrop-blur-sm transition-transform duration-500 ease-shield [transform-origin:bottom_center]"
             style={{
               transform: open ? 'rotateX(-18deg) translateZ(18px)' : 'rotateX(0deg)',
             }}
-          >
             <div className="absolute inset-x-0 bottom-0 h-1.5 rounded-b-lg bg-accent/50" />
           </div>
 
-          {/* Borde luminoso */}
           <div
             className={cn(
               'pointer-events-none absolute inset-0 rounded-lg transition-all duration-500',
@@ -135,12 +128,11 @@ export default function FolderFloat({
         </div>
       </div>
 
-      {/* Slot de contenido / acciones */}
       <div className="relative z-20 -mt-1">{children}</div>
 
       <p className={cn('mt-2 text-[10px] font-medium transition-colors', accentClass)}>
         {open
-          ? 'Desplegando contenido del expediente…'
+          ? 'Desplegando contenido del expediente'
           : didactic
             ? 'Hover para inspeccionar documentos'
             : 'Clic para inspeccionar documentos'}

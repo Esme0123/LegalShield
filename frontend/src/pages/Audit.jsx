@@ -28,9 +28,22 @@ const SEVERITY = {
 const TYPE_TONE = {
   AUTH_SUCCESS: 'text-accent',
   AUTH_FAILED: 'text-ok',
-  AUTH_LOGOUT: 'text-muted',
+  AUTH_LOCKED: 'text-danger',
+  AUTH_DISABLED: 'text-danger',
+  AUTH_UNLOCK: 'text-ok',
+  LOGOUT: 'text-muted',
   LOGIN_LOCKED: 'text-danger',
-  UNLOCK_REQUESTED: 'text-ok',
+  REGISTER: 'text-info',
+  TOKEN_REFRESH: 'text-info',
+  PASSWORD_CHANGED: 'text-accent',
+  PASSWORD_CHANGE_FAILED: 'text-danger',
+  ACCESS_DENIED: 'text-danger',
+  RATE_LIMITED: 'text-danger',
+  USER_CREATED: 'text-ok',
+  USER_UPDATED: 'text-accent',
+  USER_DEACTIVATED: 'text-danger',
+  USER_REACTIVATED: 'text-ok',
+  USER_UNLOCKED: 'text-ok',
   PERMISSION_CHANGED: 'text-accent',
   PERMISSION_DENIED: 'text-danger',
   DOC_REVEALED: 'text-ok',
@@ -43,10 +56,11 @@ const TYPE_TONE = {
 }
 
 export default function Audit() {
+  // Bitacora de SEGURIDAD: eventos de acceso y control, exclusiva del OSI.
   const logs = useAppStore((s) => s.logs)
   const liveFeedOn = useAppStore((s) => s.liveFeedOn)
   const setLiveFeed = useAppStore((s) => s.setLiveFeed)
-  const loadLogs = useAppStore((s) => s.loadLogs)
+  const loadSecurityLogs = useAppStore((s) => s.loadSecurityLogs)
   const receipts = useAppStore((s) => s.receipts)
   const tokens = useAppStore((s) => s.tokens)
   const issueReceipt = useAppStore((s) => s.issueReceipt)
@@ -59,19 +73,19 @@ export default function Audit() {
   const [query, setQuery] = useState('')
   const [tick, setTick] = useState(0)
 
-  const canView = hasPermission('LOGS_VIEW')
+  const canView = hasPermission('SECURITY_LOGS_VIEW')
   const canExport = hasPermission('LOGS_EXPORT')
-  const canTokens = hasPermission('TOKEN_RESET')
+  const canTokens = hasPermission('ACCOUNT_UNLOCK') || hasPermission('TOKEN_RESET')
 
   useEffect(() => {
-    loadLogs()
-  }, [loadLogs])
+    loadSecurityLogs()
+  }, [loadSecurityLogs])
 
   useEffect(() => {
     if (!liveFeedOn) return undefined
-    const timer = setInterval(() => loadLogs(), 8000)
+    const timer = setInterval(() => loadSecurityLogs(), 8000)
     return () => clearInterval(timer)
-  }, [liveFeedOn, loadLogs])
+  }, [liveFeedOn, loadSecurityLogs])
 
   useEffect(() => {
     const timer = setInterval(() => setTick((t) => t + 1), 30000)
@@ -95,10 +109,10 @@ export default function Audit() {
     return (
       <div className="ls-card grid place-items-center gap-2 p-12 text-center">
         <ShieldCheck className="h-8 w-8 text-danger" />
-        <p className="font-display text-sm font-bold">Acceso denegado · LOGS_VIEW requerido</p>
+        <p className="font-display text-sm font-bold">Acceso denegado · SECURITY_LOGS_VIEW requerido</p>
         <p className="max-w-sm text-[12px] text-muted">
-          La bitacora forense solo se abre a roles con permiso de auditoria. Solicite a un Socio que
-          reevalue la matriz RBAC.
+          La bitacora de seguridad solo se abre al Oficial de Seguridad (OSI). Solicite a un OSI que
+          reevalue la matriz de roles.
         </p>
       </div>
     )
@@ -112,8 +126,8 @@ export default function Audit() {
       <div className="space-y-5">
         <SectionTitle
           icon={Activity}
-          title="Bitacora de auditoria y seguridad"
-          subtitle="Flujo en vivo · inspeccione cualquier fila con la linterna para amplificar su traza"
+          title="Bitacora de seguridad"
+          subtitle="Eventos de acceso y control en vivo · inspeccione cualquier fila con la linterna para amplificar su traza"
           actions={
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -309,27 +323,27 @@ export default function Audit() {
             <div className="ls-card p-4">
               <SectionTitle
                 icon={ShieldCheck}
-                title="Tokens JWT de reseteo"
-                subtitle="Emision temporal con TTL 900 s y consumo unico"
+                title="Tokens de desbloqueo"
+                subtitle="Código temporal válido por 15 minutos y de uso único"
                 actions={
                   canTokens ? (
                     <button
                       type="button"
                       onClick={() => {
-                        const target = logs.find((l) => l.type === 'AUTH_LOCKED')?.actor
+                        const target = logs.find((l) => l.type === 'AUTH_LOCKED' || l.type === 'LOGIN_LOCKED')?.actor
                         if (!target) {
                           toast.info('Sin cuentas bloqueadas', 'No hay bloqueos recientes que requieran token')
                           return
                         }
                         const tk = issueResetToken(target)
-                        toast.danger('Token emitido', `${tk.id} para ${tk.userId} · TTL 900 s`)
+                        toast.info('Token emitido', `${tk.id} para ${tk.userId} · válido 15 minutos`)
                       }}
                       className="ls-btn-ghost text-[11px]"
                     >
                       <RefreshCcw className="h-3.5 w-3.5" /> Emitir
                     </button>
                   ) : (
-                    <Badge tone="danger">TOKEN_RESET denegado</Badge>
+                    <Badge tone="danger">ACCOUNT_UNLOCK denegado</Badge>
                   )
                 }
               />
@@ -343,7 +357,7 @@ export default function Audit() {
                       kind="token"
                       serial={t.id}
                       title="Token temporal"
-                      subject={`Reseteo de clave para ${t.userId} · uso unico · TTL ${t.ttl}s`}
+                      subject={`Desbloqueo de clave para ${t.userId} · uso unico · valido 15 minutos`}
                       hash={`${Math.abs(t.userId.length * 977)}f2a91c4d`}
                       signer="LegalShield Auth"
                       issuedAt={t.issuedAt}

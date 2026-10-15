@@ -88,8 +88,9 @@ function scopeCasesToOwner(req, _res, next) {
   const user = req.user
   if (!user) return next(forbidden('Se requiere sesion activa'))
 
-  // El socio dirige el despacho: alcance transversal.
-  if (ROLE_GLOBAL_ACCESS.includes(user.role_code) || hasPermission(user, 'RBAC_MANAGE')) {
+  // El socio dirige el despacho: alcance transversal. El resto (abogado,
+  // asistente, cliente y OSI) queda acotado a los expedientes propios.
+  if (ROLE_GLOBAL_ACCESS.includes(user.role_code)) {
     req.scope = { all: true }
     return next()
   }

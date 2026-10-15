@@ -20,9 +20,20 @@ export const PERMISSIONS = [
   { id: 'USERS_UPDATE', label: 'Editar datos, rol o estado', group: 'Usuarios', severity: 'alta' },
   { id: 'USERS_DELETE', label: 'Dar de baja (desactivar) usuarios', group: 'Usuarios', severity: 'critica' },
   { id: 'USERS_UNLOCK', label: 'Desbloquear usuarios y resetear clave', group: 'Usuarios', severity: 'critica' },
+  { id: 'USERS_MANAGE', label: 'Gestionar el ABM completo de usuarios', group: 'Usuarios', severity: 'critica' },
+  { id: 'ROLES_MANAGE', label: 'Modificar la matriz de roles y permisos', group: 'Seguridad', severity: 'critica' },
+  { id: 'ACCOUNT_UNLOCK', label: 'Desbloquear cuentas inhabilitadas temporalmente', group: 'Seguridad', severity: 'critica' },
+  { id: 'SECURITY_LOGS_VIEW', label: 'Ver la bitacora de seguridad', group: 'Auditoria', severity: 'critica' },
 ]
 
 export const ROLES = [
+  {
+    id: 'osi',
+    label: 'OSI',
+    short: 'OSI',
+    description: 'Oficial de Seguridad de la Informacion. ABM de usuarios, matriz RBAC y bitacora de seguridad.',
+    accent: 'critica',
+  },
   {
     id: 'socio',
     label: 'Socio',

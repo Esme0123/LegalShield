@@ -83,7 +83,7 @@ export default function TearTicket({
                 </p>
               </div>
             </div>
-            <span className="ls-chip shrink-0">{kind === 'token' ? 'JWT TTL 900s' : 'SHA-256'}</span>
+            <span className="ls-chip shrink-0">{kind === 'token' ? 'Código temporal 15 min' : 'SHA-256'}</span>
           </div>
         </motion.div>
 

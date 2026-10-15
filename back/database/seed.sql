@@ -7,16 +7,17 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- Roles del despacho (4 roles, alineados con ROLES del frontend)
+-- Roles del despacho (5 roles, alineados con ROLES del frontend)
 -- ---------------------------------------------------------------------------
 INSERT IGNORE INTO roles (code, name, description) VALUES
+  ('osi',        'OSI',        'Oficial de Seguridad de la Informacion: ABM de usuarios, matriz RBAC y bitacora de seguridad.'),
   ('socio',      'Socio',      'Direccion del despacho. Responsabilidad final sobre el cierre de expedientes.'),
   ('abogado',    'Abogado',    'Practicante principal con firma procesal y acceso a la prueba documental.'),
   ('asistente',  'Asistente',  'Soporte administrativo. Opera expedientes sin acceso a material restringido.'),
   ('cliente',    'Cliente',    'Acceso externo limitado al seguimiento de su propio expediente.');
 
 -- ---------------------------------------------------------------------------
--- Permisos atomicos (17 permisos, alineados con PERMISSIONS del frontend)
+-- Permisos atomicos (21 permisos, alineados con PERMISSIONS del frontend)
 -- ---------------------------------------------------------------------------
 INSERT IGNORE INTO permissions (code, description) VALUES
   ('CASES_CREATE',  'Crear expedientes'),
@@ -25,8 +26,8 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('CASES_ARCHIVE', 'Archivar expedientes'),
   ('DOCS_REVEAL',   'Revelar documentos restringidos'),
   ('DOCS_DOWNLOAD', 'Descargar documentos'),
-  ('LOGS_VIEW',     'Ver logs de auditoria'),
-  ('LOGS_EXPORT',   'Exportar logs'),
+  ('LOGS_VIEW',     'Ver logs de aplicacion (actividad del despacho)'),
+  ('LOGS_EXPORT',   'Exportar logs de aplicacion'),
   ('AUDIT_RECEIPT', 'Emitir comprobantes'),
   ('RBAC_MANAGE',   'Administrar matriz RBAC'),
   ('TOKEN_RESET',   'Emitir tokens de reseteo'),
@@ -35,29 +36,61 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('USERS_CREATE',  'Registrar usuarios (User ID nombre.apellido)'),
   ('USERS_UPDATE',  'Editar datos, rol o estado de usuarios'),
   ('USERS_DELETE',  'Dar de baja (desactivar) usuarios'),
-  ('USERS_UNLOCK',  'Desbloquear usuarios y resetear clave');
+  ('USERS_UNLOCK',  'Desbloquear usuarios y resetear clave'),
+  ('USERS_MANAGE',  'Gestionar el ABM completo de usuarios'),
+  ('ROLES_MANAGE',  'Modificar la matriz de roles y permisos'),
+  ('ACCOUNT_UNLOCK', 'Desbloquear cuentas inhabilitadas temporalmente'),
+  ('SECURITY_LOGS_VIEW', 'Ver la bitacora de seguridad (eventos de acceso y control)');
 
 -- ---------------------------------------------------------------------------
--- Matriz inicial rol -> permisos (INITIAL_RBAC del frontend)
+-- Matriz estricta de segregacion de funciones (INITIAL_RBAC del frontend)
+--   · OSI   -> ABM de usuarios, roles, desbloqueo y bitacora de seguridad.
+--   · Socio -> expedientes, metricas y logs de aplicacion (sin ABM ni roles).
 -- ---------------------------------------------------------------------------
 INSERT IGNORE INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM roles r
 JOIN permissions p ON 1 = 1
-WHERE (r.code = 'socio' AND p.code IN (
+WHERE (r.code = 'osi' AND p.code IN (
+  'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
+  'USERS_UNLOCK', 'ACCOUNT_UNLOCK', 'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
+  'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'CASES_READ'
+))
+   OR (r.code = 'socio' AND p.code IN (
   'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'DOCS_REVEAL',
-  'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RBAC_MANAGE',
-  'TOKEN_RESET', 'RISK_ASSESS', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE',
-  'USERS_DELETE', 'USERS_UNLOCK'
+  'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS'
 ))
    OR (r.code = 'abogado' AND p.code IN (
   'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW',
-  'AUDIT_RECEIPT', 'RISK_ASSESS', 'USERS_READ'
+  'AUDIT_RECEIPT', 'RISK_ASSESS'
 ))
    OR (r.code = 'asistente' AND p.code IN (
   'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'
 ))
    OR (r.code = 'cliente' AND p.code IN ('CASES_READ'));
+
+-- Revocacion estricta: cualquier concesion fuera de la matriz (p. ej. seeds
+-- previos que daban USERS_* o RBAC_MANAGE al socio) se retira al re-sembrar.
+DELETE rp FROM role_permissions rp
+  JOIN roles       r ON r.id = rp.role_id
+  JOIN permissions p ON p.id = rp.permission_id
+ WHERE NOT (
+   (r.code = 'osi' AND p.code IN (
+     'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
+     'USERS_UNLOCK', 'ACCOUNT_UNLOCK', 'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
+     'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'CASES_READ'
+   ))
+   OR (r.code = 'socio' AND p.code IN (
+     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'DOCS_REVEAL',
+     'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS'
+   ))
+   OR (r.code = 'abogado' AND p.code IN (
+     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW',
+     'AUDIT_RECEIPT', 'RISK_ASSESS'
+   ))
+   OR (r.code = 'asistente' AND p.code IN ('CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'))
+   OR (r.code = 'cliente' AND p.code IN ('CASES_READ'))
+ );
 
 -- ---------------------------------------------------------------------------
 -- Usuarios de demostracion
@@ -66,6 +99,12 @@ WHERE (r.code = 'socio' AND p.code IN (
 -- ---------------------------------------------------------------------------
 INSERT IGNORE INTO users (user_code, username, email, password_hash, role_id, firm, department, phone)
 VALUES
+  ('LEG-2026-0002', 'osi.seguridad',
+   'osi@legalshield.bo',
+   '$2a$12$demo.hashed.placeholder.replace.in.setup.script.0000000000000000000000',
+   (SELECT id FROM roles WHERE code = 'osi'),
+   'LegalShield Bufetes', 'Seguridad de la Informacion', '+591 2 244 1199'),
+
   ('LEG-2026-0001', 'mariana.solis',
    'mariana.solis@vidalpenalto.co',
    '$2a$12$demo.hashed.placeholder.replace.in.setup.script.0000000000000000000000',

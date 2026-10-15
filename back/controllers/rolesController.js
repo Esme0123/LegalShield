@@ -161,13 +161,19 @@ async function updatePermissions(req, res) {
 /* POST /api/roles/reset                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** Restaura la matriz inicial declarada en database/seed.sql. */
+/** Restaura la matriz base de segregacion (misma que el seed del sistema). */
 async function resetMatrix(req, res) {
   const BASELINE = {
+    osi: [
+      'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
+      'USERS_UNLOCK', 'ACCOUNT_UNLOCK',
+      'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
+      'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'CASES_READ',
+    ],
     socio: [
       'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE',
       'DOCS_REVEAL', 'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT',
-      'AUDIT_RECEIPT', 'RBAC_MANAGE', 'TOKEN_RESET', 'RISK_ASSESS',
+      'AUDIT_RECEIPT', 'RISK_ASSESS',
     ],
     abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT', 'RISK_ASSESS'],
     asistente: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'],

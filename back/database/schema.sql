@@ -74,7 +74,9 @@ CREATE TABLE IF NOT EXISTS users (
   phone               VARCHAR(40),
   failed_attempts     INT NOT NULL DEFAULT 0,
   is_locked           BOOLEAN NOT NULL DEFAULT FALSE,
+  status              VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
   locked_at           DATETIME,
+  locked_until        DATETIME,
   is_active           BOOLEAN NOT NULL DEFAULT TRUE,
   deactivated_at      DATETIME,
   password_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -150,8 +152,31 @@ CREATE TABLE IF NOT EXISTS security_logs (
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
--- Triggers: inmovilizan la bitacora (UPDATE y DELETE lanzan excepcion).
+-- 7b. activity_logs
+--     Bitacora de ACTIVIDAD de negocio (expedientes, documentos, perfil).
+--     Separada de security_logs: no contiene eventos de acceso y control, y a
+--     diferencia de aquella no es inmutable (permite depuracion/archivado).
 -- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS activity_logs (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  user_code  VARCHAR(20),
+  action     VARCHAR(60) NOT NULL,
+  ip_address VARCHAR(45),
+  status     VARCHAR(20) NOT NULL DEFAULT 'INFO',
+  details    LONGTEXT,
+  timestamp  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT chk_activity_status CHECK (status IN ('INFO', 'WARN', 'CRITICO')),
+  INDEX idx_activity_timestamp (timestamp DESC),
+  INDEX idx_activity_action (action),
+  INDEX idx_activity_user (user_code)
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------------
+-- Triggers: inmovilizan la bitacora (UPDATE y DELETE lanzan excepcion).
+-- Se recrean en cada importacion para que schema.sql sea idempotente.
+-- ---------------------------------------------------------------------------
+DROP TRIGGER IF EXISTS trg_security_logs_no_update;
+DROP TRIGGER IF EXISTS trg_security_logs_no_delete;
 CREATE TRIGGER trg_security_logs_no_update
 BEFORE UPDATE ON security_logs
 FOR EACH ROW
@@ -165,6 +190,8 @@ SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'security_logs es inmutable: DELETE n
 -- ---------------------------------------------------------------------------
 -- Triggers: actualizan updated_at automaticamente en users y legal_cases.
 -- ---------------------------------------------------------------------------
+DROP TRIGGER IF EXISTS trg_users_updated_at;
+DROP TRIGGER IF EXISTS trg_cases_updated_at;
 CREATE TRIGGER trg_users_updated_at
 BEFORE UPDATE ON users
 FOR EACH ROW
@@ -197,7 +224,8 @@ INSERT IGNORE INTO roles (id, code, name, description) VALUES
   (1, 'socio',     'Socio',     'Administrador total'),
   (2, 'abogado',   'Abogado',   'Gestiona casos asignados'),
   (3, 'asistente', 'Asistente', 'Lectura y apoyo'),
-  (4, 'cliente',   'Cliente',   'Consulta portal');
+  (4, 'cliente',   'Cliente',   'Consulta portal'),
+  (5, 'osi',       'OSI',       'Oficial de Seguridad de la Informacion: ABM de usuarios, matriz RBAC y bitacora de seguridad');
 
 INSERT IGNORE INTO permissions (code, description) VALUES
   ('CASES_CREATE',  'Crear expedientes'),
@@ -206,8 +234,8 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('CASES_ARCHIVE', 'Archivar expedientes'),
   ('DOCS_REVEAL',   'Revelar documentos restringidos'),
   ('DOCS_DOWNLOAD', 'Descargar documentos'),
-  ('LOGS_VIEW',     'Ver logs de auditoria'),
-  ('LOGS_EXPORT',   'Exportar logs'),
+  ('LOGS_VIEW',     'Ver logs de aplicacion (actividad del despacho)'),
+  ('LOGS_EXPORT',   'Exportar logs de aplicacion'),
   ('AUDIT_RECEIPT', 'Emitir comprobantes'),
   ('RBAC_MANAGE',   'Administrar matriz RBAC'),
   ('TOKEN_RESET',   'Emitir tokens de reseteo'),
@@ -216,4 +244,8 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('USERS_CREATE',  'Registrar usuarios (User ID nombre.apellido)'),
   ('USERS_UPDATE',  'Editar datos, rol o estado de usuarios'),
   ('USERS_DELETE',  'Dar de baja (desactivar) usuarios'),
-  ('USERS_UNLOCK',  'Desbloquear usuarios y resetear clave');
+  ('USERS_UNLOCK',  'Desbloquear usuarios y resetear clave'),
+  ('USERS_MANAGE',  'Gestionar el ABM completo de usuarios'),
+  ('ROLES_MANAGE',  'Modificar la matriz de roles y permisos'),
+  ('ACCOUNT_UNLOCK', 'Desbloquear cuentas inhabilitadas temporalmente'),
+  ('SECURITY_LOGS_VIEW', 'Ver la bitacora de seguridad (eventos de acceso y control)');

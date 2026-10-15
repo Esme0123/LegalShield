@@ -34,7 +34,6 @@ const FILTERS = [
 
 export default function Roles() {
   const sis321 = useAppStore((s) => s.sis321)
-  const session = useAppStore((s) => s.session)
   const logs = useAppStore((s) => s.logs)
   const hasPermission = useAppStore((s) => s.hasPermission)
   const toggleMatrixAccess = useAppStore((s) => s.toggleMatrixAccess)
@@ -48,7 +47,7 @@ export default function Roles() {
     loadMatrix()
   }, [loadMatrix])
 
-  const canEdit = hasPermission('RBAC_MANAGE') || session?.role === 'socio'
+  const canEdit = hasPermission('ROLES_MANAGE') || hasPermission('RBAC_MANAGE')
 
   const coverage = useMemo(() => {
     const values = SIS321_ROLES.map((r) => (sis321[r.id] ?? []).length / RESOURCE_COUNT)

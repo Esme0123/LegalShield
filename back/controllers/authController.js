@@ -25,9 +25,32 @@ const {
 
 const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12)
 const MAX_FAILED_ATTEMPTS = Number(process.env.MAX_FAILED_ATTEMPTS || 3)
+/** Minutos de inhabilitacion temporal tras agotar los intentos. */
+const LOCK_MINUTES = Number(process.env.LOCK_MINUTES || 2)
+const LOCK_MESSAGE = 'Cuenta inhabilitada temporalmente'
 
 /** Roles que un usuario puede solicitar al registrarse. */
 const REGISTERABLE_ROLES = ['abogado', 'asistente', 'socio']
+
+/** Segundos restantes del bloqueo persistido en MySQL (locked_until). */
+function remainingSecondsFrom(lockedUntil, sqlSeconds) {
+  if (sqlSeconds !== null && sqlSeconds !== undefined) {
+    return Math.max(0, Number(sqlSeconds))
+  }
+  if (!lockedUntil) return 0
+  return Math.max(0, Math.ceil((new Date(lockedUntil).getTime() - Date.now()) / 1000))
+}
+
+/** Libera el bloqueo vencido: la cuenta vuelve a estado operativo. */
+async function releaseExpiredLock(userId) {
+  await query(
+    `UPDATE users
+        SET is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0,
+            locked_at = NULL, locked_until = NULL
+      WHERE id = ?`,
+    [userId],
+  )
+}
 
 /* -------------------------------------------------------------------------- */
 /* POST /api/auth/register                                                     */
@@ -154,7 +177,9 @@ async function login(req, res) {
 
   const user = await one(
     `SELECT u.id, u.user_code, u.username, u.email, u.role_id, u.password_hash,
-            u.failed_attempts, u.is_locked, u.is_active, u.password_updated_at,
+            u.failed_attempts, u.is_locked, u.status, u.locked_until, u.is_active,
+            u.password_updated_at,
+            TIMESTAMPDIFF(SECOND, NOW(), u.locked_until) AS remaining_seconds,
             r.code AS role_code, r.name AS role_name
        FROM users u JOIN roles r ON r.id = u.role_id
       WHERE u.username = ? OR u.email = ? OR u.user_code = ?`,
@@ -171,7 +196,7 @@ async function login(req, res) {
   }
 
   // 0. Baja logica: la cuenta fue desactivada por un administrador (ABM /users).
-  if (!user.is_active) {
+  if (!user.is_active || user.status === 'DISABLED') {
     record('AUTH_DISABLED', {
       userCode: user.user_code,
       req,
@@ -180,14 +205,31 @@ async function login(req, res) {
     throw forbidden('La cuenta esta desactivada. Contacte al administrador del despacho')
   }
 
-  // 1. Cuenta bloqueada -> 403 antes de comparar la clave.
+  // 1. Bloqueo temporal persistido en MySQL: si NOW() < locked_until se informa
+  //    el tiempo restante exacto; si ya vencio, la cuenta se libera sola.
   if (user.is_locked) {
-    record('AUTH_LOCKED', {
-      userCode: user.user_code,
-      req,
-      details: { reason: 'intento_sobre_cuenta_bloqueada', ip },
-    })
-    throw forbidden('La cuenta esta bloqueada. Solicite el desbloqueo al administrador')
+    const remainingSeconds = remainingSecondsFrom(user.locked_until, user.remaining_seconds)
+
+    if (remainingSeconds > 0) {
+      record('AUTH_LOCKED', {
+        userCode: user.user_code,
+        req,
+        details: { reason: 'intento_sobre_cuenta_bloqueada', remainingSeconds, ip },
+      })
+      return res.status(401).json({
+        message: LOCK_MESSAGE,
+        error: LOCK_MESSAGE,
+        isLocked: true,
+        remainingSeconds,
+        locked: true,
+        failedAttempts: Number(user.failed_attempts),
+        maxAttempts: MAX_FAILED_ATTEMPTS,
+        details: { isLocked: true, remainingSeconds, locked: true, failedAttempts: Number(user.failed_attempts) },
+      })
+    }
+
+    await releaseExpiredLock(user.id)
+    user.is_locked = false
   }
 
   const matches = await bcrypt.compare(password, user.password_hash)
@@ -199,21 +241,35 @@ async function login(req, res) {
     await query(
       `UPDATE users
           SET locked_at = CASE WHEN failed_attempts + 1 >= ? THEN now() ELSE locked_at END,
+              locked_until = CASE
+                               WHEN failed_attempts + 1 >= ?
+                                 THEN DATE_ADD(now(), INTERVAL ? MINUTE)
+                               ELSE locked_until
+                             END,
+              status = CASE WHEN failed_attempts + 1 >= ? THEN 'LOCKED' ELSE status END,
               is_locked  = CASE WHEN failed_attempts + 1 >= ? THEN TRUE  ELSE is_locked  END,
               failed_attempts = failed_attempts + 1
         WHERE id = ?`,
-      [MAX_FAILED_ATTEMPTS, MAX_FAILED_ATTEMPTS, user.id],
+      [MAX_FAILED_ATTEMPTS, MAX_FAILED_ATTEMPTS, LOCK_MINUTES, MAX_FAILED_ATTEMPTS, MAX_FAILED_ATTEMPTS, user.id],
     )
-    const updated = await one('SELECT failed_attempts, is_locked FROM users WHERE id = ?', [user.id])
+    const updated = await one(
+      `SELECT failed_attempts, is_locked, locked_until,
+              TIMESTAMPDIFF(SECOND, NOW(), locked_until) AS remaining_seconds
+         FROM users WHERE id = ?`,
+      [user.id],
+    )
     const failedAttempts = Number(updated.failed_attempts)
     const lockedNow = Boolean(updated.is_locked)
+    const remainingSeconds = lockedNow
+      ? Math.max(0, Number(updated.remaining_seconds ?? LOCK_MINUTES * 60))
+      : 0
 
     // 3. Al alcanzar el umbral -> cuenta bloqueada + evento LOGIN_LOCKED en bitacora.
     if (lockedNow) {
       record('LOGIN_LOCKED', {
         userCode: user.user_code,
         req,
-        details: { failedAttempts, threshold: MAX_FAILED_ATTEMPTS, ip },
+        details: { failedAttempts, threshold: MAX_FAILED_ATTEMPTS, remainingSeconds, ip },
       })
     } else {
       record('AUTH_FAILED', {
@@ -223,22 +279,27 @@ async function login(req, res) {
       })
     }
 
-    // 401 uniforme con el contador real para que el frontend muestre
-    // "Intento N de 3" y, al bloquear, el estado locked.
+    // 401 uniforme con el contador real. Al bloquear se anexa isLocked y el
+    // tiempo restante para que el frontend inicie su cuenta regresiva exacta.
     return res.status(401).json({
-      message: 'Credencial inválida',
-      error: 'Credencial inválida',
+      message: lockedNow ? LOCK_MESSAGE : 'Credencial inválida',
+      error: lockedNow ? LOCK_MESSAGE : 'Credencial inválida',
       failedAttempts,
       maxAttempts: MAX_FAILED_ATTEMPTS,
       locked: lockedNow,
-      details: { failedAttempts, maxAttempts: MAX_FAILED_ATTEMPTS, locked: lockedNow },
+      isLocked: lockedNow,
+      remainingSeconds,
+      details: { failedAttempts, maxAttempts: MAX_FAILED_ATTEMPTS, locked: lockedNow, isLocked: lockedNow, remainingSeconds },
     })
   }
 
   // 4. Credencial correcta -> reinicia el contador y emite sesion.
   await withTransaction(async (client) => {
     await client.query(
-      'UPDATE users SET failed_attempts = 0, is_locked = FALSE, locked_at = NULL WHERE id = ?',
+      `UPDATE users
+          SET failed_attempts = 0, is_locked = FALSE, status = 'ACTIVE',
+              locked_at = NULL, locked_until = NULL
+        WHERE id = ?`,
       [user.id],
     )
   })
@@ -272,6 +333,52 @@ async function login(req, res) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* POST /api/auth/lock-status                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Estado del bloqueo temporal de una cuenta. Permite que el frontend, tras una
+ * recarga (F5), retome el conteo exacto en los segundos que restan en MySQL.
+ */
+async function lockStatus(req, res) {
+  const body = req.body ?? {}
+  const identifier = normalizeLoginIdentifier(body.userCode ?? body.identifier ?? body.email)
+
+  if (!identifier) {
+    return res.json({ isLocked: false, remainingSeconds: 0, failedAttempts: 0 })
+  }
+
+  const user = await one(
+    `SELECT id, failed_attempts, is_locked, locked_until,
+            TIMESTAMPDIFF(SECOND, NOW(), locked_until) AS remaining_seconds
+       FROM users
+      WHERE username = ? OR email = ? OR user_code = ?`,
+    [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
+  )
+
+  if (!user || !user.is_locked) {
+    return res.json({
+      isLocked: false,
+      remainingSeconds: 0,
+      failedAttempts: Number(user?.failed_attempts ?? 0),
+    })
+  }
+
+  const remainingSeconds = remainingSecondsFrom(user.locked_until, user.remaining_seconds)
+  if (remainingSeconds <= 0) {
+    await releaseExpiredLock(user.id)
+    return res.json({ isLocked: false, remainingSeconds: 0, failedAttempts: 0 })
+  }
+
+  return res.json({
+    isLocked: true,
+    remainingSeconds,
+    failedAttempts: Number(user.failed_attempts),
+    message: LOCK_MESSAGE,
+  })
+}
+
+/* -------------------------------------------------------------------------- */
 /* POST /api/auth/unlock                                                       */
 /* -------------------------------------------------------------------------- */
 
@@ -279,13 +386,13 @@ async function unlock(req, res) {
   const target = normalizeUserCode(req.body?.userCode)
   if (!target) throw unprocessable('User ID invalido', { pattern: USER_CODE_RE.source })
 
-  // El desbloqueo lo ejecuta un administrador del despacho (socio) o quien tenga
-  // TOKEN_RESET: es una operacion de privilegio, no una autoayuda del titular.
+  // El desbloqueo es una operacion del Oficial de Seguridad (OSI): exige el
+  // permiso ACCOUNT_UNLOCK y no es una autoayuda del titular bloqueado.
   const actor = req.user
   const isPrivileged =
-    actor.role_code === 'socio' || (actor.permissions ?? []).includes('TOKEN_RESET')
+    actor.role_code === 'osi' || (actor.permissions ?? []).includes('ACCOUNT_UNLOCK')
   if (!isPrivileged) {
-    throw forbidden('Solo un administrador con TOKEN_RESET puede desbloquear cuentas')
+    throw forbidden('Solo el Oficial de Seguridad (OSI) puede desbloquear cuentas')
   }
 
   const user = await one(
@@ -296,7 +403,10 @@ async function unlock(req, res) {
 
   await withTransaction(async (client) => {
     await client.query(
-      'UPDATE users SET is_locked = FALSE, failed_attempts = 0, locked_at = NULL WHERE id = ?',
+      `UPDATE users
+          SET is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0,
+              locked_at = NULL, locked_until = NULL
+        WHERE id = ?`,
       [user.id],
     )
   })
@@ -400,11 +510,13 @@ module.exports = {
   register,
   login,
   unlock,
+  lockStatus,
   refresh,
   me,
   logout,
   directory,
   passwordHistory,
   MAX_FAILED_ATTEMPTS,
+  LOCK_MINUTES,
   BCRYPT_ROUNDS,
 }

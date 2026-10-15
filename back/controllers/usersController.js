@@ -38,7 +38,9 @@ const SELECT_USER = `
   SELECT u.id, u.user_code AS "userCode", u.username, u.email,
          u.firm, u.department, u.phone,
          u.failed_attempts AS "failedAttempts", u.is_locked AS "isLocked",
-         u.is_active AS "isActive", u.locked_at AS "lockedAt",
+         u.status, u.locked_at AS "lockedAt", u.locked_until AS "lockedUntil",
+         TIMESTAMPDIFF(SECOND, NOW(), u.locked_until) AS "remainingSeconds",
+         u.is_active AS "isActive",
          u.created_at AS "createdAt", u.updated_at AS "updatedAt",
          r.code AS role, r.name AS "roleLabel"
     FROM users u
@@ -61,8 +63,11 @@ function userPayload(row) {
     phone: row.phone,
     failedAttempts: row.failedAttempts,
     isLocked: row.isLocked,
+    status: row.status,
     isActive: row.isActive,
     lockedAt: row.lockedAt,
+    lockedUntil: row.lockedUntil,
+    remainingSeconds: Math.max(0, Number(row.remainingSeconds ?? 0)),
     createdAt: row.createdAt,
     role: row.role,
     roleLabel: row.roleLabel,
@@ -86,7 +91,8 @@ async function listUsers(req, res) {
   if (state === 'activo') {
     where.push('u.is_active = TRUE AND u.is_locked = FALSE')
   } else if (state === 'bloqueado') {
-    where.push('u.is_locked = TRUE')
+    // Solo bloqueos vigentes: un locked_until vencido ya no inhabilita la cuenta.
+    where.push('u.is_locked = TRUE AND (u.locked_until IS NULL OR u.locked_until > NOW())')
   } else if (state === 'inactivo') {
     where.push('u.is_active = FALSE')
   }
@@ -286,9 +292,15 @@ async function setUserStatus(req, res) {
 
   await withTransaction(async (client) => {
     if (active) {
-      await client.query('UPDATE users SET is_active = TRUE, deactivated_at = NULL WHERE id = ?', [id])
+      await client.query(
+        "UPDATE users SET is_active = TRUE, deactivated_at = NULL, status = CASE WHEN is_locked = TRUE THEN 'LOCKED' ELSE 'ACTIVE' END WHERE id = ?",
+        [id],
+      )
     } else {
-      await client.query('UPDATE users SET is_active = FALSE, deactivated_at = NOW() WHERE id = ?', [id])
+      await client.query(
+        "UPDATE users SET is_active = FALSE, deactivated_at = NOW(), status = 'DISABLED' WHERE id = ?",
+        [id],
+      )
     }
   })
 
@@ -332,7 +344,8 @@ async function unlockUser(req, res) {
   await withTransaction(async (client) => {
     await client.query(
       `UPDATE users
-          SET is_locked = FALSE, failed_attempts = 0, locked_at = NULL,
+          SET is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0,
+              locked_at = NULL, locked_until = NULL,
               password_hash = ?, password_updated_at = now()
         WHERE id = ?`,
       [passwordHash, id],
