@@ -22,6 +22,7 @@ import { MAX_ATTEMPTS, useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { USER_ID_RE, validateUserId } from '@/lib/security'
 import { cn } from '@/lib/cn'
+import CaptchaChallenge from '@/components/auth/CaptchaChallenge'
 
 const SIGNAL_STEPS = ['Analisis de User ID…', 'Verificacion de politica…', 'MFA · passkey', 'Emision de sesion']
 
@@ -44,6 +45,9 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
   const [step, setStep] = useState(-1)
   const [now, setNow] = useState(Date.now())
+  const [showCaptcha, setShowCaptcha] = useState(false)
+  const [captchaToken, setCaptchaToken] = useState('')
+  const [captchaVerified, setCaptchaVerified] = useState(false)
 
   const locked = Boolean(lockedUntil) && now < lockedUntil
   const idCheck = useMemo(() => validateUserId(userId), [userId])
@@ -80,14 +84,8 @@ export default function Login() {
     // Una clave demasiado corta se cuenta como intento fallido, pero se resuelve
     // en local: la politica real (12 caracteres y politica completa) la aplica el
     // backend en /api/auth/login.
-    if (password.length < 6) {
-      const result = await login({ userId: idCheck.normalized, password })
-      toast.danger(
-        result.locked ? 'Acceso suspendido' : 'Credencial invalida',
-        result.locked
-          ? 'Demasiados intentos · el acceso se rehabilita automaticamente en 2 minutos'
-          : `Intento ${result.attempts} de ${MAX_ATTEMPTS} · revise la contrasena`,
-      )
+    if (showCaptcha && !captchaVerified) {
+      toast.danger('Verificación requerida', 'Por favor resuelve el CAPTCHA para continuar')
       return
     }
 
@@ -107,11 +105,17 @@ export default function Login() {
       toast.danger(
         result.locked ? 'Acceso suspendido' : 'Credencial invalida',
         result.locked
-          ? 'Demasiados intentos · el acceso se rehabilita automaticamente en 2 minutos'
+          ? 'Demasiados intentos - el acceso se rehabilita automaticamente en 2 minutos'
           : `Intento ${result.attempts} de ${MAX_ATTEMPTS}`,
       )
+      if (result.showCaptcha || result.attempts >= 1) {
+        setShowCaptcha(true)
+        setCaptchaVerified(false)
+      }
     } catch (error) {
       toast.danger('Fallo de autenticacion', error.message ?? 'No fue posible validar la credencial')
+      setShowCaptcha(true)
+      setCaptchaVerified(false)
     } finally {
       setBusy(false)
       setStep(-1)
@@ -268,6 +272,27 @@ export default function Login() {
                 </div>
 
                 <LockCounter attempts={attempts} max={MAX_ATTEMPTS} locked={locked} />
+
+                <AnimatePresence>
+                  {showCaptcha && !locked && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <CaptchaChallenge 
+                        onVerify={(verified, token) => {
+                          setCaptchaVerified(verified)
+                          if (verified) {
+                            setCaptchaToken(token)
+                          }
+                        }}
+                        disabled={busy}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 <AnimatePresence>
                   {locked && (

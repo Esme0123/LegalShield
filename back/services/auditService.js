@@ -42,6 +42,8 @@ const EVENT = {
   USER_DEACTIVATED: { status: 'WARN', stream: 'security' },
   USER_REACTIVATED: { status: 'INFO', stream: 'security' },
   USER_UNLOCKED: { status: 'INFO', stream: 'security' },
+  ACCOUNT_UNLOCK_TOKEN_GENERATED: { status: 'INFO', stream: 'security' },
+  ACCOUNT_UNLOCKED_VIA_TOKEN: { status: 'INFO', stream: 'security' },
   PERMISSION_CHANGED: { status: 'WARN', stream: 'security' },
   // Operacion del negocio (actividad)
   CASE_CREATED: { status: 'INFO', stream: 'activity' },

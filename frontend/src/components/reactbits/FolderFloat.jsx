@@ -112,10 +112,12 @@ export default function FolderFloat({
             </span>
           </div>
 
+          <div
             className="absolute inset-x-0 bottom-0 h-[46%] rounded-b-lg border-t border-accent/40 bg-gradient-to-br from-line/85 to-line/60 backdrop-blur-sm transition-transform duration-500 ease-shield [transform-origin:bottom_center]"
             style={{
               transform: open ? 'rotateX(-18deg) translateZ(18px)' : 'rotateX(0deg)',
             }}
+          >
             <div className="absolute inset-x-0 bottom-0 h-1.5 rounded-b-lg bg-accent/50" />
           </div>
 
@@ -128,15 +130,17 @@ export default function FolderFloat({
         </div>
       </div>
 
-      <div className="relative z-20 -mt-1">{children}</div>
+      <>
+        <div className="relative z-20 -mt-1">{children}</div>
 
-      <p className={cn('mt-2 text-[10px] font-medium transition-colors', accentClass)}>
-        {open
-          ? 'Desplegando contenido del expediente'
-          : didactic
-            ? 'Hover para inspeccionar documentos'
-            : 'Clic para inspeccionar documentos'}
-      </p>
+        <p className={cn('mt-2 text-[10px] font-medium transition-colors', accentClass)}>
+          {open
+            ? 'Desplegando contenido del expediente'
+            : didactic
+              ? 'Hover para inspeccionar documentos'
+              : 'Clic para inspeccionar documentos'}
+        </p>
+      </>
     </div>
   )
 }

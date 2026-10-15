@@ -51,5 +51,6 @@ router.put('/password', authenticate, auditAction('PASSWORD_CHANGED'), asyncHand
 
 // Desbloqueo: exclusivo del Oficial de Seguridad (OSI) via ACCOUNT_UNLOCK.
 router.post('/unlock', authenticate, checkPermission('ACCOUNT_UNLOCK'), auditAction('AUTH_UNLOCK'), asyncHandler(controller.unlock))
+router.post('/verify-unlock-token', authLimiter, asyncHandler(controller.verifyUnlockToken))
 
 module.exports = router

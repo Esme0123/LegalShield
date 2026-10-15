@@ -86,12 +86,16 @@ const TABLES = [
      is_active           BOOLEAN NOT NULL DEFAULT TRUE,
      deactivated_at      DATETIME,
      password_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     unlock_token        VARCHAR(12),
+     unlock_token_expires_at DATETIME,
+     unlock_token_used   BOOLEAN NOT NULL DEFAULT FALSE,
      created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT,
      CONSTRAINT chk_failed_attempts CHECK (failed_attempts >= 0),
      INDEX idx_users_role (role_id),
-     INDEX idx_users_active (is_active)
+     INDEX idx_users_active (is_active),
+     INDEX idx_users_unlock_token (unlock_token)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
   // 3.5 password_history
@@ -491,6 +495,22 @@ async function main() {
                        END`,
     )
     logger.info('Columna agregada: users.status (sincronizada con is_locked/is_active)')
+  }
+  if (!(await columnExists('users', 'unlock_token'))) {
+    await run("ALTER TABLE users ADD COLUMN unlock_token VARCHAR(12) AFTER password_updated_at")
+    logger.info('Columna agregada: users.unlock_token')
+  }
+  if (!(await columnExists('users', 'unlock_token_expires_at'))) {
+    await run('ALTER TABLE users ADD COLUMN unlock_token_expires_at DATETIME AFTER unlock_token')
+    logger.info('Columna agregada: users.unlock_token_expires_at')
+  }
+  if (!(await columnExists('users', 'unlock_token_used'))) {
+    await run('ALTER TABLE users ADD COLUMN unlock_token_used BOOLEAN NOT NULL DEFAULT FALSE AFTER unlock_token_expires_at')
+    logger.info('Columna agregada: users.unlock_token_used')
+  }
+  if (!(await indexExists('users', 'idx_users_unlock_token'))) {
+    await run('CREATE INDEX idx_users_unlock_token ON users (unlock_token)')
+    logger.info('Indice agregado: users.idx_users_unlock_token')
   }
 
   // 5. Seed data.

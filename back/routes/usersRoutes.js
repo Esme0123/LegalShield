@@ -38,5 +38,10 @@ router.post(
   auditAction('USER_UNLOCKED'),
   asyncHandler(controller.unlockUser),
 )
+router.post(
+  '/:id/generate-unlock-token',
+  checkAnyPermission(['USERS_MANAGE', 'ACCOUNT_UNLOCK', 'TOKEN_RESET']),
+  asyncHandler(controller.generateUnlockToken),
+)
 
 module.exports = router

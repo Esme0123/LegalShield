@@ -28,6 +28,7 @@ const MAX_FAILED_ATTEMPTS = Number(process.env.MAX_FAILED_ATTEMPTS || 3)
 /** Minutos de inhabilitacion temporal tras agotar los intentos. */
 const LOCK_MINUTES = Number(process.env.LOCK_MINUTES || 2)
 const LOCK_MESSAGE = 'Cuenta inhabilitada temporalmente'
+const CAPTCHA_THRESHOLD = Number(process.env.CAPTCHA_THRESHOLD || 1)
 
 /** Roles que un usuario puede solicitar al registrarse. */
 const REGISTERABLE_ROLES = ['abogado', 'asistente', 'socio']
@@ -158,7 +159,7 @@ async function login(req, res) {
   // Acepta el identificador bajo cualquiera de los alias usados por el frontend:
   // { userCode }, { username }, { identifier } o { email }.
   const rawIdentifier = body.userCode ?? body.username ?? body.identifier ?? body.email
-  const { password } = body
+  const { password, captchaToken, captchaResponse } = body
   const ip = getClientIp(req)
 
   const identifier = normalizeLoginIdentifier(rawIdentifier)
@@ -195,6 +196,27 @@ async function login(req, res) {
     throw genericError
   }
 
+  // Validación CAPTCHA si hay intentos fallidos previos (Mecanismo Menos Común)
+  if (Number(user.failed_attempts) >= CAPTCHA_THRESHOLD) {
+    const expected = String(captchaToken ?? '').trim()
+    const provided = String(captchaResponse ?? '').trim()
+    if (!provided || provided !== expected) {
+      await query(
+        `UPDATE users
+            SET failed_attempts = failed_attempts + 1
+          WHERE id = ?`,
+        [user.id],
+      )
+      const updated = await one('SELECT failed_attempts FROM users WHERE id = ?', [user.id])
+      record('AUTH_FAILED', {
+        userCode: user.user_code,
+        req,
+        details: { reason: 'captcha_invalido', failedAttempts: updated?.failed_attempts ?? Number(user.failed_attempts) + 1, ip },
+      })
+      throw unauthorized('Validación CAPTCHA requerida o incorrecta')
+    }
+  }
+
   // 0. Baja logica: la cuenta fue desactivada por un administrador (ABM /users).
   if (!user.is_active || user.status === 'DISABLED') {
     record('AUTH_DISABLED', {
@@ -216,16 +238,17 @@ async function login(req, res) {
         req,
         details: { reason: 'intento_sobre_cuenta_bloqueada', remainingSeconds, ip },
       })
-      return res.status(401).json({
-        message: LOCK_MESSAGE,
-        error: LOCK_MESSAGE,
-        isLocked: true,
-        remainingSeconds,
-        locked: true,
-        failedAttempts: Number(user.failed_attempts),
-        maxAttempts: MAX_FAILED_ATTEMPTS,
-        details: { isLocked: true, remainingSeconds, locked: true, failedAttempts: Number(user.failed_attempts) },
-      })
+    return res.status(401).json({
+      message: LOCK_MESSAGE,
+      error: LOCK_MESSAGE,
+      isLocked: true,
+      remainingSeconds,
+      locked: true,
+      failedAttempts: Number(user.failed_attempts),
+      maxAttempts: MAX_FAILED_ATTEMPTS,
+      showCaptcha: false,
+      details: { isLocked: true, remainingSeconds, locked: true, failedAttempts: Number(user.failed_attempts) },
+    })
     }
 
     await releaseExpiredLock(user.id)
@@ -289,6 +312,7 @@ async function login(req, res) {
       locked: lockedNow,
       isLocked: lockedNow,
       remainingSeconds,
+      showCaptcha: !lockedNow && failedAttempts >= CAPTCHA_THRESHOLD,
       details: { failedAttempts, maxAttempts: MAX_FAILED_ATTEMPTS, locked: lockedNow, isLocked: lockedNow, remainingSeconds },
     })
   }
@@ -405,7 +429,8 @@ async function unlock(req, res) {
     await client.query(
       `UPDATE users
           SET is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0,
-              locked_at = NULL, locked_until = NULL
+              locked_at = NULL, locked_until = NULL,
+              unlock_token = NULL, unlock_token_expires_at = NULL, unlock_token_used = FALSE
         WHERE id = ?`,
       [user.id],
     )
@@ -506,7 +531,67 @@ async function passwordHistory(req, res) {
   res.json({ limit: PASSWORD_HISTORY_LIMIT, entries: result })
 }
 
-module.exports = {
+/* -------------------------------------------------------------------------- */
+/* POST /api/auth/verify-unlock-token                                           */
+/* -------------------------------------------------------------------------- */
+
+async function verifyUnlockToken(req, res) {
+  const token = String(req.body?.token ?? '').trim()
+  const identifier = normalizeLoginIdentifier(req.body?.userCode ?? req.body?.identifier ?? req.body?.email)
+
+  if (!token) throw badRequest('Token de desbloqueo requerido')
+  if (!identifier) throw badRequest('Identificador de usuario requerido')
+
+  const user = await one(
+    `SELECT id, user_code, username, email, is_locked, is_active, status, failed_attempts,
+            unlock_token, unlock_token_expires_at, unlock_token_used
+       FROM users WHERE username = ? OR email = ? OR user_code = ?`,
+    [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
+  )
+
+  if (!user) throw notFound('Usuario no encontrado')
+
+  if (user.unlock_token_used) {
+    throw forbidden('El token de desbloqueo ya fue utilizado')
+  }
+
+  if (!user.unlock_token_expires_at || new Date(user.unlock_token_expires_at) < new Date()) {
+    throw forbidden('El token de desbloqueo ha expirado')
+  }
+
+  if (user.unlock_token !== token) {
+    throw unauthorized('Token de desbloqueo incorrecto')
+  }
+
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE users
+          SET is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0,
+              locked_at = NULL, locked_until = NULL,
+              unlock_token_used = TRUE, unlock_token = NULL, unlock_token_expires_at = NULL
+        WHERE id = ?`,
+      [user.id],
+    )
+  })
+
+  record('ACCOUNT_UNLOCKED_VIA_TOKEN', {
+    userCode: user.user_code,
+    req,
+    details: { ip: getClientIp(req) },
+  })
+
+  res.json({
+    message: 'Cuenta desbloqueada exitosamente',
+    user: {
+      userCode: user.user_code,
+      username: user.username,
+      isLocked: false,
+      failedAttempts: 0,
+    },
+  })
+}
+
+  module.exports = {
   register,
   login,
   unlock,
@@ -516,7 +601,9 @@ module.exports = {
   logout,
   directory,
   passwordHistory,
+  verifyUnlockToken,
   MAX_FAILED_ATTEMPTS,
   LOCK_MINUTES,
   BCRYPT_ROUNDS,
+  CAPTCHA_THRESHOLD,
 }

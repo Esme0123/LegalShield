@@ -33,6 +33,12 @@ function generateTempPassword() {
   return `${crypto.randomBytes(9).toString('base64url')}Aa1!`
 }
 
+/** Genera token numérico de 6 dígitos para desbloqueo */
+function generateSixDigitToken() {
+  // Generar token de 6 dígitos (numérico)
+  return Math.floor(100000 + Math.random() * 900000).toString()
+}
+
 /** Columnas del directorio expuestas al ABM (nunca hashes). */
 const SELECT_USER = `
   SELECT u.id, u.user_code AS "userCode", u.username, u.email,
@@ -317,7 +323,7 @@ async function setUserStatus(req, res) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* POST /api/users/:id/unlock � Desbloqueo + reset de clave                    */
+/* POST /api/users/:id/unlock  Desbloqueo + reset de clave                    */
 /* -------------------------------------------------------------------------- */
 
 async function unlockUser(req, res) {
@@ -346,7 +352,8 @@ async function unlockUser(req, res) {
       `UPDATE users
           SET is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0,
               locked_at = NULL, locked_until = NULL,
-              password_hash = ?, password_updated_at = now()
+              password_hash = ?, password_updated_at = now(),
+              unlock_token = NULL, unlock_token_expires_at = NULL, unlock_token_used = FALSE
         WHERE id = ?`,
       [passwordHash, id],
     )
@@ -374,4 +381,39 @@ async function unlockUser(req, res) {
   })
 }
 
-module.exports = { listUsers, createUser, updateUser, setUserStatus, unlockUser }
+/* -------------------------------------------------------------------------- */
+/* POST /api/users/:id/generate-unlock-token  Generar token de desbloqueo (OSI) */
+/* -------------------------------------------------------------------------- */
+
+async function generateUnlockToken(req, res) {
+  const id = parseId(req)
+  const existing = await one('SELECT id, user_code, is_locked, is_active FROM users WHERE id = ?', [id])
+  if (!existing) throw notFound(`No existe el usuario #${id}`)
+
+  const token = generateSixDigitToken()
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000) // 15 minutos
+
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE users
+          SET unlock_token = ?, unlock_token_expires_at = ?, unlock_token_used = FALSE
+        WHERE id = ?`,
+      [token, expiresAt, id],
+    )
+  })
+
+  record('ACCOUNT_UNLOCK_TOKEN_GENERATED', {
+    userCode: req.user.user_code,
+    req,
+    details: { target: existing.user_code, expiresInMinutes: 15 },
+  })
+
+  res.json({
+    message: `Token de desbloqueo generado para ${existing.user_code}`,
+    token,
+    expiresAt,
+    expiresInMinutes: 15,
+  })
+}
+
+module.exports = { listUsers, createUser, updateUser, setUserStatus, unlockUser, generateUnlockToken }

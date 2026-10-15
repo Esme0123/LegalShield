@@ -189,7 +189,7 @@ const del = (path, options) => request(path, { ...options, method: 'DELETE' })
 /* -------------------------------------------------------------------------- */
 
 export const authApi = {
-  login: (userCode, password) => post('/auth/login', { userCode, password }, { auth: false }),
+  login: (userCode, password, captchaToken, captchaResponse) => post('/auth/login', { userCode, password, captchaToken, captchaResponse }, { auth: false }),
   register: (payload) => post('/auth/register', payload, { auth: false }),
   me: () => get('/auth/me'),
   logout: () => post('/auth/logout'),
@@ -202,6 +202,7 @@ export const authApi = {
   unlock: (userCode) => post('/auth/unlock', { userCode }),
   /** Estado del bloqueo temporal de una cuenta (restaura el conteo tras F5). */
   lockStatus: (userCode) => post('/auth/lock-status', { userCode }, { auth: false }),
+  verifyUnlockToken: (payload) => post('/auth/verify-unlock-token', payload, { auth: false }),
 }
 
 /* -------------------------------------------------------------------------- */
@@ -245,6 +246,7 @@ export const usersApi = {
   update: (id, payload) => put(`/users/${id}`, payload),
   status: (id, payload) => patch(`/users/${id}/status`, payload),
   unlock: (id, payload) => post(`/users/${id}/unlock`, payload),
+  generateUnlockToken: (id) => post(`/users/${id}/generate-unlock-token`),
 }
 
 /* -------------------------------------------------------------------------- */
