@@ -13,7 +13,10 @@ const { badRequest, conflict, forbidden, notFound, unauthorized, unprocessable }
 const { evaluatePassword, PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
 const {
   USER_CODE_RE,
+  USER_CODE_CI_RE,
+  USERNAME_RE,
   normalizeUserCode,
+  normalizeLoginIdentifier,
   generateUserCode,
   sanitizeEmail,
   buildUsername,
@@ -128,12 +131,22 @@ async function register(req, res) {
 /* -------------------------------------------------------------------------- */
 
 async function login(req, res) {
-  const { userCode, password } = req.body ?? {}
+  const body = req.body ?? {}
+  // Acepta el identificador bajo cualquiera de los alias usados por el frontend:
+  // { userCode }, { username }, { identifier } o { email }.
+  const rawIdentifier = body.userCode ?? body.username ?? body.identifier ?? body.email
+  const { password } = body
   const ip = getClientIp(req)
 
-  const candidate = normalizeUserCode(userCode)
-  if (!candidate) {
-    throw unprocessable('User ID invalido', { pattern: USER_CODE_RE.source })
+  const identifier = normalizeLoginIdentifier(rawIdentifier)
+  if (!identifier) {
+    throw unprocessable('Identificador invalido', {
+      accepted: {
+        username: USERNAME_RE.source,
+        userCode: USER_CODE_CI_RE.source,
+        email: 'correo institucional (ej: mariana.solis@legalshield.bo)',
+      },
+    })
   }
   if (typeof password !== 'string' || password.length === 0) {
     throw badRequest('La contrasena es obligatoria')
@@ -145,7 +158,7 @@ async function login(req, res) {
             r.code AS role_code, r.name AS role_name
        FROM users u JOIN roles r ON r.id = u.role_id
       WHERE u.username = ? OR u.email = ? OR u.user_code = ?`,
-    [String(userCode ?? '').trim().toLowerCase(), sanitizeEmail(userCode), candidate],
+    [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
   )
 
   // Respuesta uniforme para usuario inexistente y clave incorrecta: no revela
@@ -153,7 +166,7 @@ async function login(req, res) {
   const genericError = unauthorized('User ID o contrasena incorrectos')
 
   if (!user) {
-    record('AUTH_FAILED', { userCode: candidate, req, details: { reason: 'usuario_no_existe', ip } })
+    record('AUTH_FAILED', { userCode: identifier, req, details: { reason: 'usuario_no_existe', ip } })
     throw genericError
   }
 
@@ -179,36 +192,47 @@ async function login(req, res) {
 
   const matches = await bcrypt.compare(password, user.password_hash)
 
-  // 2. Clave incorrecta -> incrementar failed_attempts.
+  // 2. Clave incorrecta -> incrementar failed_attempts en 1.
+  // Nota: MySQL evalua los SET de izquierda a derecha, por eso los CASE se
+  // calculan ANTES del incremento: `failed_attempts + 1` es el valor final.
   if (!matches) {
     await query(
       `UPDATE users
-          SET failed_attempts = failed_attempts + 1,
-              locked_at = CASE WHEN failed_attempts + 1 >= ? THEN now() ELSE locked_at END,
-              is_locked  = CASE WHEN failed_attempts + 1 >= ? THEN TRUE  ELSE is_locked  END
+          SET locked_at = CASE WHEN failed_attempts + 1 >= ? THEN now() ELSE locked_at END,
+              is_locked  = CASE WHEN failed_attempts + 1 >= ? THEN TRUE  ELSE is_locked  END,
+              failed_attempts = failed_attempts + 1
         WHERE id = ?`,
       [MAX_FAILED_ATTEMPTS, MAX_FAILED_ATTEMPTS, user.id],
     )
     const updated = await one('SELECT failed_attempts, is_locked FROM users WHERE id = ?', [user.id])
+    const failedAttempts = Number(updated.failed_attempts)
+    const lockedNow = Boolean(updated.is_locked)
 
-    // 3. Al superar el umbral -> AUTH_LOCKED en la bitacora.
-    if (updated.is_locked) {
-      record('AUTH_LOCKED', {
+    // 3. Al alcanzar el umbral -> cuenta bloqueada + evento LOGIN_LOCKED en bitacora.
+    if (lockedNow) {
+      record('LOGIN_LOCKED', {
         userCode: user.user_code,
         req,
-        details: { failedAttempts: updated.failed_attempts, threshold: MAX_FAILED_ATTEMPTS, ip },
+        details: { failedAttempts, threshold: MAX_FAILED_ATTEMPTS, ip },
       })
-      throw forbidden(
-        `Cuenta bloqueada tras ${updated.failed_attempts} intentos fallidos. Solicite el desbloqueo al administrador`,
-      )
+    } else {
+      record('AUTH_FAILED', {
+        userCode: user.user_code,
+        req,
+        details: { failedAttempts, remaining: MAX_FAILED_ATTEMPTS - failedAttempts, ip },
+      })
     }
 
-    record('AUTH_FAILED', {
-      userCode: user.user_code,
-      req,
-      details: { failedAttempts: updated.failed_attempts, remaining: MAX_FAILED_ATTEMPTS - updated.failed_attempts, ip },
+    // 401 uniforme con el contador real para que el frontend muestre
+    // "Intento N de 3" y, al bloquear, el estado locked.
+    return res.status(401).json({
+      message: 'Credencial inválida',
+      error: 'Credencial inválida',
+      failedAttempts,
+      maxAttempts: MAX_FAILED_ATTEMPTS,
+      locked: lockedNow,
+      details: { failedAttempts, maxAttempts: MAX_FAILED_ATTEMPTS, locked: lockedNow },
     })
-    throw genericError
   }
 
   // 4. Credencial correcta -> reinicia el contador y emite sesion.

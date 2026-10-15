@@ -15,6 +15,27 @@ const YEAR = Number(process.env.USER_CODE_YEAR || new Date().getFullYear())
 /** Patron del User ID: tres letras, guion, cuatro digitos, guion, cuatro digitos. */
 const USER_CODE_RE = /^LEG-\d{4}-\d{4}$/
 
+/** Identificador de login flexible: tambien admite username y correo. */
+const USER_CODE_CI_RE = /^LEG-\d{4}-\d{4}$/i
+const USERNAME_RE = /^[a-zA-Z0-9._-]+$/
+const EMAIL_ID_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i
+
+/**
+ * Normaliza cualquier identificador de login aceptado por el backend:
+ *   · User ID corporativo  LEG-2026-0001  ->  'LEG-2026-0001'
+ *   · username             mariana.solis  ->  'mariana.solis'
+ *   · correo institucional a.b@dominio.bo ->  'a.b@dominio.bo'
+ * Devuelve null si no coincide con ningun formato.
+ */
+function normalizeLoginIdentifier(value) {
+  const raw = String(value ?? '').trim().replace(/\s+/g, '')
+  if (!raw) return null
+  if (USER_CODE_CI_RE.test(raw)) return raw.toUpperCase()
+  if (EMAIL_ID_RE.test(raw)) return raw.toLowerCase()
+  if (USERNAME_RE.test(raw)) return raw.toLowerCase()
+  return null
+}
+
 /** Deja el User ID en mayusculas y sin espacios; null si no cumple el patron. */
 function normalizeUserCode(value) {
   const raw = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '')
@@ -133,7 +154,11 @@ function normalizeRole(value) {
 
 module.exports = {
   USER_CODE_RE,
+  USER_CODE_CI_RE,
+  USERNAME_RE,
+  EMAIL_ID_RE,
   normalizeUserCode,
+  normalizeLoginIdentifier,
   describeUserCodePattern,
   generateUserCode,
   sanitizeEmail,

@@ -16,6 +16,7 @@ const EVENT = {
   AUTH_SUCCESS: { status: 'INFO' },
   AUTH_FAILED: { status: 'WARN' },
   AUTH_LOCKED: { status: 'CRITICO' },
+  LOGIN_LOCKED: { status: 'CRITICO' },
   AUTH_DISABLED: { status: 'WARN' },
   AUTH_UNLOCK: { status: 'INFO' },
   REGISTER: { status: 'INFO' },

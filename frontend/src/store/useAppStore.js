@@ -265,11 +265,20 @@ export const useAppStore = create((set, get) => ({
         return { ok: false, locked, attempts: MAX_ATTEMPTS, error: error.message }
       }
 
-      // 401: la API respondio, la credencial es incorrecta.
+      // 401: la API respondio, la credencial es incorrecta. El backend incluye
+      // failedAttempts/locked para que el toast refleje el contador real de MySQL.
       if (error instanceof ApiError && error.isAuth) {
-        const attempts = get().attempts + 1
-        set({ attempts })
-        return { ok: false, locked: false, attempts, error: error.message }
+        const details = error.details ?? {}
+        const locked = Boolean(details.locked)
+        const attempts = Number.isFinite(details.failedAttempts)
+          ? details.failedAttempts
+          : get().attempts + 1
+        set({
+          attempts,
+          lockedUntil: locked ? Date.now() + 120000 : null,
+          unlockRequest: locked ? get().unlockRequest : null,
+        })
+        return { ok: false, locked, attempts, error: error.message }
       }
 
       noteApiFailure(set, error, 'login')
