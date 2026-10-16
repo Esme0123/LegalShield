@@ -92,19 +92,7 @@ export default function Roles() {
       <SectionTitle
         icon={Scale}
         title="Matriz de Permisos por Rol"
-        subtitle="Gestión de Expedientes, Documentación Legal, Auditoría e Historial y Administración de Usuarios (OSI). Cada casilla alterada sella un evento crítico."
-        actions={
-          <button
-            type="button"
-            onClick={() => {
-              resetMatrix()
-              toast.info('Matriz restaurada', 'Permisos base reaplicados sobre los cinco roles')
-            }}
-            className="ls-btn-secondary text-xs"
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> Restaurar matriz
-          </button>
-        }
+        subtitle="Matriz unificada por confidencialidad con roles OSI, Socio, Abogado, Asistente y Cliente."
       />
 
       {/* Modulos del sistema */}
@@ -193,14 +181,10 @@ export default function Roles() {
         onToggleColumn={handleColumn}
       />
 
-      <RbacPermissionMatrix />
-
+      {/* Solo una matriz unificada - eliminada tabla inferior de permisos atómicos */}
       <p className="flex items-start gap-2 text-[11.5px] leading-snug text-muted">
         <Scale className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-        Regla de segregación de funciones: el alta, la baja, el desbloqueo y la asignación de
-        permisos son exclusivos del rol OSI, y el cliente solo consulta su propio expediente. El
-        encabezado de cada acción marca cuantos de los {MATRIX_ROLES.length} roles la tienen
-        habilitada y permite conmutar la columna completa.
+        Matriz unificada por confidencialidad: Crítico / Confidencial (Gestión de usuarios OSI, asignación de roles, desbloqueo de cuentas, bitácora de seguridad), Privado (Creación de expedientes, edición de escritos procesales, descarga de pruebas), Público (Consulta de estado de causas públicas e información general). Roles: OSI, Socio, Abogado, Asistente, Cliente.
       </p>
 
       {lastChange && (

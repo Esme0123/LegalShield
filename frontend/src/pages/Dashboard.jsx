@@ -59,14 +59,10 @@ export default function Dashboard() {
         <div className="relative grid gap-6 lg:items-center">
           <div>
             <h2 className="font-display text-2xl font-bold leading-tight tracking-tight text-balance sm:text-3xl">
-              Bienvenido, {session?.name ?? 'usuario'}.
+              Bienvenido, {session?.name ?? session?.username ?? 'usuario'}.
             </h2>
             <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-muted">
-              Panel operativo y supervisión del despacho. Sesión{' '}
-              <span className="font-mono text-info">{session?.userId}</span> · rol{' '}
-              <span className="text-accent">{role?.label}</span>. Su posición de defensa está
-              consolidada: {relativePercent(granted, totalPossible)}% de cobertura mínima y{' '}
-              <span className="text-danger">{critical} eventos críticos</span> en la bitácora del día.
+              Bienvenido, {session?.name ?? session?.username ?? 'usuario'}. Panel operativo y supervisión del despacho.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
               <Link to="/cases" className="ls-btn-primary">
@@ -95,27 +91,27 @@ export default function Dashboard() {
         />
         <StatCard
           icon={Activity}
-          label="Actividad registrada"
-          value={logs.length}
-          delta="operaciones recientes del despacho"
+          label="Próximos Vencimientos"
+          value={0}
+          delta="vencimientos por vencer"
           tone="danger"
-          foot={<Progress value={Math.min(100, logs.length * 4)} tone="pastel" />}
+          foot={<Progress value={0} tone="pastel" />}
         />
         <StatCard
           icon={ShieldCheck}
-          label="Protocolos de seguridad"
-          value={`${maturity}%`}
-          delta={`${riskControls.filter((c) => c.score < c.target).length} controles bajo objetivo`}
+          label="Documentos Guardados"
+          value={0}
+          delta="documentación del despacho"
           tone="pastel"
-          foot={<Progress value={maturity} tone="pastel" />}
+          foot={<Progress value={0} tone="pastel" />}
         />
         <StatCard
           icon={Users2}
-          label="Permisos concedidos"
-          value={granted}
-          delta={`de ${totalPossible} pares rol/permiso`}
+          label="Clientes Registrados"
+          value={0}
+          delta="total de clientes"
           tone="info"
-          foot={<Progress value={relativePercent(granted, totalPossible)} tone="info" />}
+          foot={<Progress value={0} tone="info" />}
         />
       </section>
 

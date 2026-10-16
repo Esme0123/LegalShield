@@ -27,7 +27,7 @@ const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12)
 const MAX_FAILED_ATTEMPTS = Number(process.env.MAX_FAILED_ATTEMPTS || 3)
 /** Minutos de inhabilitacion temporal tras agotar los intentos. */
 const LOCK_MINUTES = Number(process.env.LOCK_MINUTES || 2)
-const LOCK_MESSAGE = 'Cuenta inhabilitada temporalmente'
+const LOCK_MESSAGE = '3 de 3 - Cuenta inhabilitada temporalmente'
 const CAPTCHA_THRESHOLD = Number(process.env.CAPTCHA_THRESHOLD || 1)
 
 /** Roles que un usuario puede solicitar al registrarse. */
@@ -239,15 +239,15 @@ async function login(req, res) {
         details: { reason: 'intento_sobre_cuenta_bloqueada', remainingSeconds, ip },
       })
     return res.status(401).json({
-      message: LOCK_MESSAGE,
-      error: LOCK_MESSAGE,
-      isLocked: true,
-      remainingSeconds,
-      locked: true,
-      failedAttempts: Number(user.failed_attempts),
-      maxAttempts: MAX_FAILED_ATTEMPTS,
-      showCaptcha: false,
-      details: { isLocked: true, remainingSeconds, locked: true, failedAttempts: Number(user.failed_attempts) },
+       message: '3 de 3 - Cuenta inhabilitada temporalmente',
+       error: '3 de 3 - Cuenta inhabilitada temporalmente',
+       isLocked: true,
+       remainingSeconds,
+       locked: true,
+       failedAttempts: Number(user.failed_attempts),
+       maxAttempts: MAX_FAILED_ATTEMPTS,
+       showCaptcha: false,
+       details: { isLocked: true, remainingSeconds, locked: true, failedAttempts: Number(user.failed_attempts) },
     })
     }
 
@@ -305,15 +305,15 @@ async function login(req, res) {
     // 401 uniforme con el contador real. Al bloquear se anexa isLocked y el
     // tiempo restante para que el frontend inicie su cuenta regresiva exacta.
     return res.status(401).json({
-      message: lockedNow ? LOCK_MESSAGE : 'Credencial inválida',
-      error: lockedNow ? LOCK_MESSAGE : 'Credencial inválida',
-      failedAttempts,
-      maxAttempts: MAX_FAILED_ATTEMPTS,
-      locked: lockedNow,
-      isLocked: lockedNow,
-      remainingSeconds,
-      showCaptcha: !lockedNow && failedAttempts >= CAPTCHA_THRESHOLD,
-      details: { failedAttempts, maxAttempts: MAX_FAILED_ATTEMPTS, locked: lockedNow, isLocked: lockedNow, remainingSeconds },
+       message: lockedNow ? '3 de 3 - Cuenta inhabilitada temporalmente' : 'Credencial inválida',
+       error: lockedNow ? '3 de 3 - Cuenta inhabilitada temporalmente' : 'Credencial inválida',
+       failedAttempts,
+       maxAttempts: MAX_FAILED_ATTEMPTS,
+       locked: lockedNow,
+       isLocked: lockedNow,
+       remainingSeconds,
+       showCaptcha: !lockedNow && failedAttempts >= CAPTCHA_THRESHOLD,
+       details: { failedAttempts, maxAttempts: MAX_FAILED_ATTEMPTS, locked: lockedNow, isLocked: lockedNow, remainingSeconds },
     })
   }
 
@@ -394,12 +394,12 @@ async function lockStatus(req, res) {
     return res.json({ isLocked: false, remainingSeconds: 0, failedAttempts: 0 })
   }
 
-  return res.json({
-    isLocked: true,
-    remainingSeconds,
-    failedAttempts: Number(user.failed_attempts),
-    message: LOCK_MESSAGE,
-  })
+   return res.json({
+     isLocked: true,
+     remainingSeconds,
+     failedAttempts: Number(user.failed_attempts),
+     message: '3 de 3 - Cuenta inhabilitada temporalmente',
+   })
 }
 
 /* -------------------------------------------------------------------------- */

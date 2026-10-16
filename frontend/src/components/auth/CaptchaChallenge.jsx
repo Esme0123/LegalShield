@@ -36,6 +36,7 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
     if (value === "" || isNaN(userAnswer)) {
       setIsValid(false)
       setError("")
+      onVerify && onVerify(false, "")
       return
     }
 
@@ -45,6 +46,7 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
       onVerify && onVerify(true, correctAnswer.toString())
     } else {
       setIsValid(false)
+      onVerify && onVerify(false, "")
     }
   }
 
@@ -59,12 +61,13 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
       onVerify && onVerify(true, correctAnswer.toString())
     } else {
       setIsValid(false)
-      setError("Respuesta incorrecta. Inténtalo de nuevo.")
+      setError("Respuesta de verificación incorrecta")
       setAttempts((prev) => prev + 1)
       if (attempts >= 2) {
         generateChallenge()
         setAttempts(0)
       }
+      onVerify && onVerify(false, "")
     }
   }
 

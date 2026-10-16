@@ -32,7 +32,7 @@ export default function Login() {
   const lockedUntil = useAppStore((s) => s.lockedUntil)
   const unlockRequest = useAppStore((s) => s.unlockRequest)
   const session = useAppStore((s) => s.session)
-  const didactic = useAppStore((s) => s.didactic)
+
   const login = useAppStore((s) => s.login)
   const requestUnlock = useAppStore((s) => s.requestUnlock)
   const unlockAccount = useAppStore((s) => s.unlockAccount)
@@ -49,6 +49,7 @@ export default function Login() {
   const [showCaptcha, setShowCaptcha] = useState(false)
   const [captchaToken, setCaptchaToken] = useState('')
   const [captchaVerified, setCaptchaVerified] = useState(false)
+  const [localError, setLocalError] = useState('')
 
   const locked = Boolean(lockedUntil) && now < lockedUntil
   const idCheck = useMemo(() => validateUserId(userId), [userId])
@@ -82,6 +83,7 @@ export default function Login() {
       setShowCaptcha(false)
       setCaptchaVerified(false)
       setCaptchaToken('')
+      setLocalError('')
     }
     setUserId(value)
   }
@@ -122,10 +124,11 @@ export default function Login() {
       }
       toast.danger(
         result.locked ? 'Acceso suspendido' : 'Credencial invalida',
-        result.locked
-          ? 'Demasiados intentos - el acceso se rehabilita automaticamente en 2 minutos'
-          : `Intento ${Math.min(result.attempts, MAX_ATTEMPTS)} de ${MAX_ATTEMPTS}`,
+        result.locked ? '3 de 3 - Cuenta inhabilitada temporalmente' : `Intento ${Math.min(result.attempts, MAX_ATTEMPTS)} de ${MAX_ATTEMPTS}`,
       )
+      if (result.locked) {
+        setLocalError('3 de 3 - Cuenta inhabilitada temporalmente')
+      }
       if (result.showCaptcha || result.attempts >= 1) {
         setShowCaptcha(true)
         setCaptchaVerified(false)
@@ -142,7 +145,7 @@ export default function Login() {
 
   return (
     <div className="relative min-h-screen overflow-hidden">
-      <AeroShards density={didactic ? 0.0001 : 0.00003} className={didactic ? '' : 'opacity-40'} />
+            <AeroShards density={0.00003} className="opacity-40" />
 
       <header className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
         <div className="flex items-center gap-2.5">
@@ -191,7 +194,7 @@ export default function Login() {
 
             <div className="mt-7 grid gap-3 sm:grid-cols-3">
               {[
-                { icon: ScanFace, title: 'Identidad fuerte', copy: 'User ID estandar LEG-2026-XXXX + MFA' },
+                { icon: ScanFace, title: 'Identidad fuerte', copy: 'User ID estándar + MFA' },
                 { icon: Gavel, title: 'Minimo privilegio', copy: '21 permisos revisables en caliente' },
                 { icon: Scale, title: 'Evidencia', copy: 'Comprobantes firmados con hash SHA-256' },
               ].map(({ icon: Icon, title, copy }) => (
@@ -336,6 +339,9 @@ export default function Login() {
                             Por proteccion de la cuenta, el acceso se rehabilita automaticamente en {remaining}s.
                             Si el problema persiste, contacte al Oficial de Seguridad del despacho.
                           </p>
+                          <div className="mt-2 text-[12px] font-bold text-danger">
+                            3 de 3 - Cuenta inhabilitada temporalmente
+                          </div>
 
                           {unlockRequest ? (
                             <div className="mt-3 rounded-lg border border-accent/50 bg-accent/10 p-3">

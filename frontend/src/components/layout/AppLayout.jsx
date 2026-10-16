@@ -28,7 +28,6 @@ export default function AppLayout() {
   const location = useLocation()
   const logs = useAppStore((s) => s.logs)
   const session = useAppStore((s) => s.session)
-  const didactic = useAppStore((s) => s.didactic)
   const refreshAll = useAppStore((s) => s.refreshAll)
 
   const [title, subtitle] = TITLES[location.pathname] ?? ['LegalShield', '']
@@ -42,7 +41,7 @@ export default function AppLayout() {
   return (
     <div className="relative min-h-screen">
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-        <AeroShards density={didactic ? 0.00012 : 0.00004} className={didactic ? 'opacity-70' : 'opacity-25'} />
+        <AeroShards density={0.00004} className="opacity-25" />
       </div>
 
       <Sidebar
@@ -93,8 +92,6 @@ export default function AppLayout() {
               <RefreshCcw className="h-4 w-4" />
             </button>
 
-            <EffectsToggle className="hidden lg:inline-flex" />
-
             <Link
               to="/profile"
               title="Mi perfil"
@@ -104,11 +101,11 @@ export default function AppLayout() {
                 <Scale className="h-3.5 w-3.5" />
               </span>
               <span className="text-left leading-none">
-                <span className="block font-mono text-[10.5px] font-semibold text-ink">
-                  {session?.userId ?? 'LEG-0000'}
+                <span className="block text-[11px] font-semibold text-ink">
+                  {session?.name ?? session?.username ?? session?.userId ?? 'usuario'}
                 </span>
                 <span className="mt-0.5 block text-[9.5px] capitalize text-muted">
-                  {session?.roleId ?? 'sesion'}
+                  {session?.roleId ?? session?.role ?? 'sesion'}
                 </span>
               </span>
             </Link>

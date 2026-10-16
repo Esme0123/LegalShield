@@ -45,17 +45,12 @@ export default function RbacPermissionMatrix() {
     <div className="ls-card overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line/40 px-5 py-4">
         <div>
-          <p className="font-display text-sm font-bold tracking-tight">Permisos atómicos por rol</p>
+          <p className="font-display text-sm font-bold tracking-tight">Matriz unificada por confidencialidad</p>
           <p className="mt-0.5 text-[11px] text-muted">
-            Segregación de funciones: el alta de usuarios, la gestión de permisos, el desbloqueo y la
-            bitácora de seguridad son exclusivos del rol OSI
+            Clasificación por accesos: Crítico / Confidencial, Privado y Público. Roles: OSI, Socio, Abogado, Asistente, Cliente.
           </p>
         </div>
-        {!canEdit && (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-line/50 bg-surface2/40 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted">
-            <KeyRound className="h-3 w-3" /> Solo lectura · falta ROLES_MANAGE
-          </span>
-        )}
+
       </div>
 
       <div className="overflow-x-auto">
@@ -74,72 +69,112 @@ export default function RbacPermissionMatrix() {
             </tr>
           </thead>
           <tbody>
-            {byGroup.map(({ group, items }) => (
-              <Fragment key={group}>
-                <tr>
-                  <th
-                    colSpan={ROLES.length + 1}
-                    scope="colgroup"
-                    className="!border-y !border-line/20 bg-surface2/40 px-4 py-1.5 text-left"
-                  >
-                    <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted">{group}</span>
-                  </th>
-                </tr>
-                {items.map((perm) => {
-                  const grantedCount = ROLES.filter((role) => (rbac[role.id] ?? []).includes(perm.id)).length
+            <tr>
+              <th colSpan={ROLES.length + 1} className="!border-y !border-line/20 bg-surface2/40 px-4 py-1.5 text-left">
+                <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted">Crítico / Confidencial</span>
+              </th>
+            </tr>
+            {PERMISSIONS.filter(p => ['USERS_MANAGE', 'ROLES_MANAGE', 'ACCOUNT_UNLOCK', 'SECURITY_LOGS_VIEW'].includes(p.id)).map((perm) => (
+              <tr key={perm.id}>
+                <th scope="row" className="sticky left-0 z-20 !border-r !border-line/25 bg-surface text-left">
+                  <div className="py-1 pr-3">
+                    <p className="truncate text-[12px] font-semibold text-ink">{perm.label}</p>
+                    <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted">{perm.group}</p>
+                  </div>
+                </th>
+                {ROLES.map((role) => {
+                  const granted = (rbac[role.id] ?? []).includes(perm.id)
                   return (
-                    <tr key={perm.id}>
-                      <th scope="row" className="sticky left-0 z-20 !border-r !border-line/25 bg-surface text-left">
-                        <div className="flex items-center justify-between gap-2 py-1 pr-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-[12px] font-semibold text-ink">{perm.label}</p>
-                            <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted">{perm.group}</p>
-                          </div>
-                          <span
-                            className={cn(
-                              'shrink-0 font-mono text-[9px]',
-                              grantedCount === ROLES.length
-                                ? 'text-ok'
-                                : grantedCount === 0
-                                  ? 'text-muted/50'
-                                  : 'text-info',
-                            )}
-                          >
-                            {grantedCount}/{ROLES.length}
-                          </span>
-                        </div>
-                      </th>
-                      {ROLES.map((role) => {
-                        const granted = (rbac[role.id] ?? []).includes(perm.id)
-                        return (
-                          <td key={role.id} className="!py-2 !text-center">
-                            <motion.button
-                              type="button"
-                              whileTap={canEdit ? { scale: 0.85 } : undefined}
-                              onClick={() => handleToggle(role.id, perm.id)}
-                              disabled={!canEdit}
-                              title={
-                                canEdit
-                                  ? `${granted ? 'Retirar' : 'Conceder'} ${perm.label} a ${role.label}`
-                                  : 'Sin permiso para editar la matriz'
-                              }
-                              className={cn(
-                                'mx-auto grid h-7 w-7 place-items-center rounded-md border transition-all duration-200',
-                                granted
-                                  ? 'border-accent/60 bg-accent/15 text-accent'
-                                  : 'border-line/40 text-muted/40 hover:border-accent/40 hover:text-info',
-                                !canEdit && 'cursor-not-allowed opacity-60',
-                              )}
-                            >
-                              {granted ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
-                            </motion.button>
-                          </td>
-                        )
-                      })}
-                    </tr>
+                    <td key={role.id} className="!py-2 !text-center">
+                      <motion.button
+                        type="button"
+                        whileTap={canEdit ? { scale: 0.85 } : undefined}
+                        onClick={() => handleToggle(role.id, perm.id)}
+                        disabled={!canEdit}
+                        className={cn(
+                          'mx-auto grid h-7 w-7 place-items-center rounded-md border transition-all duration-200',
+                          granted ? 'border-accent/60 bg-accent/15 text-accent' : 'border-line/40 text-muted/40 hover:border-accent/40 hover:text-info',
+                          !canEdit && 'cursor-not-allowed opacity-60',
+                        )}
+                      >
+                        {granted ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                      </motion.button>
+                    </td>
                   )
                 })}
-              </Fragment>
+              </tr>
+            ))}
+            <tr>
+              <th colSpan={ROLES.length + 1} className="!border-y !border-line/20 bg-surface2/40 px-4 py-1.5 text-left">
+                <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted">Privado</span>
+              </th>
+            </tr>
+            {PERMISSIONS.filter(p => ['CASES_CREATE', 'CASES_EDIT', 'DOCUMENTS_DOWNLOAD', 'CASES_VIEW', 'DOCUMENTS_VIEW'].includes(p.id) || p.group === 'Expedientes' || p.group === 'Documentación Legal')
+              .filter(p => !['USERS_MANAGE', 'ROLES_MANAGE', 'ACCOUNT_UNLOCK', 'SECURITY_LOGS_VIEW'].includes(p.id))
+              .map((perm) => (
+                <tr key={perm.id}>
+                  <th scope="row" className="sticky left-0 z-20 !border-r !border-line/25 bg-surface text-left">
+                    <div className="py-1 pr-3">
+                      <p className="truncate text-[12px] font-semibold text-ink">{perm.label}</p>
+                      <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted">{perm.group}</p>
+                    </div>
+                  </th>
+                  {ROLES.map((role) => {
+                    const granted = (rbac[role.id] ?? []).includes(perm.id)
+                    return (
+                      <td key={role.id} className="!py-2 !text-center">
+                        <motion.button
+                          type="button"
+                          whileTap={canEdit ? { scale: 0.85 } : undefined}
+                          onClick={() => handleToggle(role.id, perm.id)}
+                          disabled={!canEdit}
+                          className={cn(
+                            'mx-auto grid h-7 w-7 place-items-center rounded-md border transition-all duration-200',
+                            granted ? 'border-accent/60 bg-accent/15 text-accent' : 'border-line/40 text-muted/40 hover:border-accent/40 hover:text-info',
+                            !canEdit && 'cursor-not-allowed opacity-60',
+                          )}
+                        >
+                          {granted ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                        </motion.button>
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            <tr>
+              <th colSpan={ROLES.length + 1} className="!border-y !border-line/20 bg-surface2/40 px-4 py-1.5 text-left">
+                <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted">Público</span>
+              </th>
+            </tr>
+            {PERMISSIONS.filter(p => p.group === 'Consulta' || (p.id.includes('VIEW') && !['CASES_VIEW', 'DOCUMENTS_VIEW', 'SECURITY_LOGS_VIEW'].includes(p.id))).map((perm) => (
+              <tr key={perm.id}>
+                <th scope="row" className="sticky left-0 z-20 !border-r !border-line/25 bg-surface text-left">
+                  <div className="py-1 pr-3">
+                    <p className="truncate text-[12px] font-semibold text-ink">{perm.label}</p>
+                    <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted">{perm.group}</p>
+                  </div>
+                </th>
+                {ROLES.map((role) => {
+                  const granted = (rbac[role.id] ?? []).includes(perm.id)
+                  return (
+                    <td key={role.id} className="!py-2 !text-center">
+                      <motion.button
+                        type="button"
+                        whileTap={canEdit ? { scale: 0.85 } : undefined}
+                        onClick={() => handleToggle(role.id, perm.id)}
+                        disabled={!canEdit}
+                        className={cn(
+                          'mx-auto grid h-7 w-7 place-items-center rounded-md border transition-all duration-200',
+                          granted ? 'border-accent/60 bg-accent/15 text-accent' : 'border-line/40 text-muted/40 hover:border-accent/40 hover:text-info',
+                          !canEdit && 'cursor-not-allowed opacity-60',
+                        )}
+                      >
+                        {granted ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                      </motion.button>
+                    </td>
+                  )
+                })}
+              </tr>
             ))}
           </tbody>
         </table>

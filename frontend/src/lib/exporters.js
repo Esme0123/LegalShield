@@ -27,6 +27,10 @@ export function exportCsv(filename, headers, rows) {
   downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), filename)
 }
 
+export function exportExcel(filename, headers, rows) {
+  exportCsv(filename.replace(/\.xlsx?$/i, '.csv'), headers, rows)
+}
+
 /** Normaliza cualquier caracter fuera de WinAnsi a un equivalente ASCII. */
 const toWinAnsi = (value) =>
   String(value ?? '')
@@ -52,21 +56,26 @@ const BOTTOM = 56
  * Genera y descarga un PDF real. `lines` es un arreglo de cadenas: cada una se
  * imprime en una línea de la página.
  */
-export function exportPdf({ filename, title = 'LegalShield', subtitle = '', lines = [] }) {
+export function exportPdf({ filename, title = 'LegalShield', subtitle = '', lines = [], headers = [], rows = [] }) {
+  const now = new Date().toLocaleString('es-ES')
+  const headerLine = `Fecha de emisión: ${now}`
+  const fullLines = [headerLine, '', ...(rows.length ? rows.map(r => (Array.isArray(r) ? r.join(' | ') : String(r))) : lines)]
   const perPage = Math.max(1, Math.floor((TOP - BOTTOM) / LEADING))
   const chunks = []
-  for (let i = 0; i < lines.length; i += perPage) chunks.push(lines.slice(i, i + perPage))
+  for (let i = 0; i < fullLines.length; i += perPage) chunks.push(fullLines.slice(i, i + perPage))
   if (chunks.length === 0) chunks.push([])
   const total = chunks.length
 
   const pageContent = (rows, index) => {
     const parts = [
+      `0.196 G 0.196 G 1 0 0 1 ${MARGIN} 800 Tm 0.5 0.8 w ${MARGIN} 806 m ${PAGE_W - MARGIN} 806 l S 0 G`,
       `BT /F1 16 Tf 1 0 0 1 ${MARGIN} 796 Tm (${pdfEscape(title)}) Tj ET`,
     ]
     if (subtitle) {
       parts.push(`BT /F1 9 Tf 1 0 0 1 ${MARGIN} 778 Tm (${pdfEscape(subtitle)}) Tj ET`)
     }
-    parts.push(`0.7 G 0.8 w ${MARGIN} 768 m ${PAGE_W - MARGIN} 768 l S 0 G`)
+    parts.push(`BT /F1 8 Tf 1 0 0 1 ${MARGIN} 766 Tm (${pdfEscape(headerLine)}) Tj ET`)
+    parts.push(`0.4 G 0.8 w ${MARGIN} 760 m ${PAGE_W - MARGIN} 760 l S 0 G`)
     parts.push(`BT /F1 ${BODY_SIZE} Tf ${LEADING} TL 1 0 0 1 ${MARGIN} ${TOP} Tm`)
     rows.forEach((line, i) => {
       parts.push(`(${pdfEscape(line)}) Tj`)
