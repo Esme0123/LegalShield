@@ -48,10 +48,13 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchActivity = async () => {
       try {
-        const res = await fetch('/api/audit/activity?limit=5')
+        const apiEnabled = (await import('@/lib/apiClient')).isApiEnabled
+        const enabled = typeof apiEnabled === 'function' ? apiEnabled() : true
+        const res = await fetch(enabled ? '/api/audit/activity?limit=5' : '/api/audit/logs?limit=5', { headers: { 'Content-Type': 'application/json' } })
         if (res.ok) {
           const data = await res.json()
-          setRecentActivity(data.data || data.activity || data.items || [])
+          const items = data.items || data.data || data.activity || data.logs || []
+          setRecentActivity(items.slice(0, 5))
         } else {
           setRecentActivity(logs.slice(0, 5))
         }
