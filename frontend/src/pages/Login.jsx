@@ -151,7 +151,7 @@ export default function Login() {
 
   return (
     <div className="relative min-h-screen overflow-hidden">
-            <AeroShards density={0.00003} className="opacity-40" />
+      <AeroShards density={0.00003} className="opacity-40" />
 
       <header className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
         <div className="flex items-center gap-2.5">
