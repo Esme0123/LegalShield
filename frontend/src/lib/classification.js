@@ -1,5 +1,5 @@
 /**
- * Matriz de clasificacion de informacion (SIS-321)
+ * Matriz de clasificacion de informacion
  *
  * Cada dimension se valora de 1 a 3 y se convierte a porcentaje sobre el peso
  * que le corresponde. El total es la suma ponderada y define el nivel.

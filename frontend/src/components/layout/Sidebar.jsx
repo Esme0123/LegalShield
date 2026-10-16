@@ -24,7 +24,7 @@ import EffectsToggle from '@/components/ui/EffectsToggle'
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, hint: 'Panorama operativo' },
   { to: '/users', label: 'Gestión de Usuarios', icon: Users, hint: 'ABM granular · 9.1' },
-  { to: '/roles', label: 'Matriz SIS-321', icon: UserCheck, hint: 'Permisos por rol' },
+  { to: '/roles', label: 'Matriz de Permisos por Rol', icon: UserCheck, hint: 'Módulos y permisos' },
   { to: '/cases', label: 'Expedientes', icon: FileStack, hint: 'Juicios y documentos' },
   { to: '/audit', label: 'Auditoria', icon: Scroll, hint: 'Logs forenses en vivo' },
   { to: '/risk-assessment', label: 'ISO 27001', icon: ShieldCheck, hint: 'Riesgo y madurez' },

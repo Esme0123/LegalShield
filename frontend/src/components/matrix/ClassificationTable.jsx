@@ -39,7 +39,7 @@ function ValueSelect({ value, onChange, disabled, label }) {
 }
 
 /**
- * Resumen · Matriz de clasificacion de informacion (SIS-321).
+ * Resumen · Matriz de clasificacion de informacion.
  * Cada activo se valora en confidencialidad, integridad y disponibilidad (1 a 3),
  * se convierte a porcentaje ponderado y el total define el nivel automatico.
  */

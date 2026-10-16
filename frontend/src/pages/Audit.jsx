@@ -3,19 +3,18 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   Activity,
   Download,
+  FileText,
   Filter,
-  Pause,
-  Play,
   QrCode,
   RefreshCcw,
   Radio,
   ShieldCheck,
 } from 'lucide-react'
-import GlowCursor from '@/components/reactbits/GlowCursor'
 import TearTicket from '@/components/reactbits/TearTicket'
 import { Badge, SectionTitle } from '@/components/ui/primitives'
 import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
+import { exportCsv, exportPdf } from '@/lib/exporters'
 import { cn } from '@/lib/cn'
 import { formatDateTime } from '@/lib/format'
 
@@ -24,6 +23,38 @@ const SEVERITY = {
   warn: { tone: 'accent', cls: 'text-accent', dot: 'bg-accent' },
   critico: { tone: 'danger', cls: 'text-danger', dot: 'bg-danger' },
 }
+
+/** Clasificación de eventos: acceso/control (seguridad) vs. negocio. */
+const SECURITY_TYPES = new Set([
+  'AUTH_SUCCESS',
+  'AUTH_FAILED',
+  'AUTH_LOCKED',
+  'AUTH_DISABLED',
+  'AUTH_UNLOCK',
+  'LOGIN_LOCKED',
+  'LOGOUT',
+  'REGISTER',
+  'TOKEN_REFRESH',
+  'TOKEN_ISSUED',
+  'PASSWORD_CHANGED',
+  'PASSWORD_CHANGE_FAILED',
+  'ACCESS_DENIED',
+  'RATE_LIMITED',
+  'USER_CREATED',
+  'USER_UPDATED',
+  'USER_DEACTIVATED',
+  'USER_REACTIVATED',
+  'USER_UNLOCKED',
+  'PERMISSION_CHANGED',
+  'PERMISSION_DENIED',
+  'INTRUSION_BLOCKED',
+])
+
+const FILTERS = [
+  { id: 'all', label: 'Todos' },
+  { id: 'seguridad', label: 'Seguridad' },
+  { id: 'operativo', label: 'Operativos' },
+]
 
 const TYPE_TONE = {
   AUTH_SUCCESS: 'text-accent',
@@ -59,7 +90,6 @@ export default function Audit() {
   // Bitacora de SEGURIDAD: eventos de acceso y control, exclusiva del OSI.
   const logs = useAppStore((s) => s.logs)
   const liveFeedOn = useAppStore((s) => s.liveFeedOn)
-  const setLiveFeed = useAppStore((s) => s.setLiveFeed)
   const loadSecurityLogs = useAppStore((s) => s.loadSecurityLogs)
   const receipts = useAppStore((s) => s.receipts)
   const tokens = useAppStore((s) => s.tokens)
@@ -69,7 +99,7 @@ export default function Audit() {
   const tearToken = useAppStore((s) => s.tearToken)
   const hasPermission = useAppStore((s) => s.hasPermission)
 
-  const [severity, setSeverity] = useState('all')
+  const [category, setCategory] = useState('all')
   const [query, setQuery] = useState('')
   const [tick, setTick] = useState(0)
 
@@ -95,13 +125,51 @@ export default function Audit() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return logs.filter((l) => {
-      const okSeverity = severity === 'all' || l.severity === severity
+      const isSecurity = SECURITY_TYPES.has(l.type)
+      const okCategory =
+        category === 'all' || (category === 'seguridad' ? isSecurity : !isSecurity)
       const okQuery =
         !q ||
         [l.type, l.actor, l.message, l.target].join(' ').toLowerCase().includes(q)
-      return okSeverity && okQuery
+      return okCategory && okQuery
     })
-  }, [logs, severity, query])
+  }, [logs, category, query])
+
+  const exportStamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+
+  const handleExportCsv = () => {
+    if (!canExport) {
+      toast.danger('Exportacion bloqueada', 'LOGS_EXPORT no esta habilitado para tu rol')
+      return
+    }
+    const headers = ['Marca', 'Fecha', 'Hora', 'Evento', 'Clasificacion', 'Actor', 'Objetivo', 'Detalle']
+    const rows = filtered.map((l) => {
+      const ts = formatDateTime(l.ts)
+      return [l.id, ts.date, ts.time, l.type, l.severity, l.actor, l.target, l.message]
+    })
+    exportCsv(`bitacora-seguridad-${exportStamp()}.csv`, headers, rows)
+    toast.info('CSV descargado', `${filtered.length} eventos exportados`)
+  }
+
+  const handleExportPdf = () => {
+    if (!canExport) {
+      toast.danger('Exportacion bloqueada', 'LOGS_EXPORT no esta habilitado para tu rol')
+      return
+    }
+    const lines = filtered.map((l) => {
+      const ts = formatDateTime(l.ts)
+      const detail = l.message.length > 110 ? `${l.message.slice(0, 109)}…` : l.message
+      return `${ts.full}   ${l.type}   [${l.severity}]   ${l.actor}   ·   ${detail}`
+    })
+    const scope = FILTERS.find((f) => f.id === category)?.label ?? 'Todos'
+    exportPdf({
+      filename: `bitacora-seguridad-${exportStamp()}.pdf`,
+      title: 'Bitácora de seguridad · LegalShield',
+      subtitle: `${filtered.length} eventos · filtro: ${scope} · emitido ${formatDateTime(new Date().toISOString()).full}`,
+      lines,
+    })
+    toast.info('PDF descargado', `${filtered.length} eventos exportados`)
+  }
 
   const activeTokens = tokens.filter((t) => t.status === 'activo')
 
@@ -120,36 +188,18 @@ export default function Audit() {
 
   return (
     <div className="relative">
-      {/* Linterna de inspeccion forense */}
-      <GlowCursor />
-
       <div className="space-y-5">
         <SectionTitle
           icon={Activity}
-          title="Bitacora de seguridad"
+          title="Bitácora de seguridad"
           subtitle="Eventos de acceso y control en vivo · inspeccione cualquier fila con la linterna para amplificar su traza"
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setLiveFeed((v) => !v)}
-                className={cn('ls-btn-secondary text-xs', liveFeedOn && 'border-accent/70 text-accent')}
-              >
-                {liveFeedOn ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                {liveFeedOn ? 'Pausar flujo' : 'Reanudar flujo'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!canExport) {
-                    toast.danger('Exportacion bloqueada', 'LOGS_EXPORT no esta habilitado para tu rol')
-                    return
-                  }
-                  toast.info('Exportacion preparada', `${filtered.length} eventos · CSV con sello SHA-256`)
-                }}
-                className="ls-btn-secondary text-xs"
-              >
+              <button type="button" onClick={handleExportCsv} className="ls-btn-secondary text-xs">
                 <Download className="h-3.5 w-3.5" /> Exportar CSV
+              </button>
+              <button type="button" onClick={handleExportPdf} className="ls-btn-secondary text-xs">
+                <FileText className="h-3.5 w-3.5" /> Exportar PDF
               </button>
             </div>
           }
@@ -174,19 +224,19 @@ export default function Audit() {
 
               <div className="ml-auto flex flex-wrap items-center gap-1.5">
                 <Filter className="h-3.5 w-3.5 text-muted" />
-                {['all', 'info', 'warn', 'critico'].map((s) => (
+                {FILTERS.map((f) => (
                   <button
-                    key={s}
+                    key={f.id}
                     type="button"
-                    onClick={() => setSeverity(s)}
+                    onClick={() => setCategory(f.id)}
                     className={cn(
                       'rounded-full border px-2.5 py-0.5 font-mono text-[10px] uppercase transition-all duration-300',
-                      severity === s
+                      category === f.id
                         ? 'border-accent/70 bg-accent/15 text-accent'
                         : 'border-line/50 text-muted hover:text-ink',
                     )}
                   >
-                    {s}
+                    {f.label}
                   </button>
                 ))}
                 <input

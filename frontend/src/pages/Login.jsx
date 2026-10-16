@@ -37,6 +37,7 @@ export default function Login() {
   const requestUnlock = useAppStore((s) => s.requestUnlock)
   const unlockAccount = useAppStore((s) => s.unlockAccount)
   const checkLockStatus = useAppStore((s) => s.checkLockStatus)
+  const resetLock = useAppStore((s) => s.resetLock)
   const lastIdentifier = useAppStore((s) => s.lastIdentifier)
 
   const [userId, setUserId] = useState(lastIdentifier || 'mariana.solis')
@@ -72,6 +73,19 @@ export default function Login() {
 
   const remaining = locked ? Math.max(0, Math.ceil((lockedUntil - now) / 1000)) : 0
 
+  // Al cambiar de usuario se descarta el estado del usuario anterior: el
+  // contador de intentos vuelve a 0 y se libera cualquier bloqueo local para
+  // no arrastrar los fallos de otra cuenta.
+  const handleUserChange = (value) => {
+    if (value !== userId) {
+      resetLock()
+      setShowCaptcha(false)
+      setCaptchaVerified(false)
+      setCaptchaToken('')
+    }
+    setUserId(value)
+  }
+
   const submit = async (e) => {
     e.preventDefault()
     if (locked || busy) return
@@ -96,7 +110,11 @@ export default function Login() {
     })
 
     try {
-      const result = await login({ userId: idCheck.normalized, password })
+      const result = await login({
+        userId: idCheck.normalized,
+        password,
+        captchaToken: captchaToken || undefined,
+      })
       if (result.ok) {
         toast.mint('Acceso concedido', `Rol asignado: ${String(result.user.role).toUpperCase()}`)
         navigate('/dashboard', { replace: true })
@@ -106,7 +124,7 @@ export default function Login() {
         result.locked ? 'Acceso suspendido' : 'Credencial invalida',
         result.locked
           ? 'Demasiados intentos - el acceso se rehabilita automaticamente en 2 minutos'
-          : `Intento ${result.attempts} de ${MAX_ATTEMPTS}`,
+          : `Intento ${Math.min(result.attempts, MAX_ATTEMPTS)} de ${MAX_ATTEMPTS}`,
       )
       if (result.showCaptcha || result.attempts >= 1) {
         setShowCaptcha(true)
@@ -217,9 +235,8 @@ export default function Login() {
                     <input
                       id="userId"
                       value={userId}
-                      onChange={(e) => setUserId(e.target.value)}
+                      onChange={(e) => handleUserChange(e.target.value)}
                       placeholder="ej. mariana.solis"
-                      disabled={locked}
                       autoComplete="off"
                       spellCheck={false}
                       className={cn(

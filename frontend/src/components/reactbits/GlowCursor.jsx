@@ -4,9 +4,9 @@ import { rgbaToken, themeToken } from '@/lib/format'
 
 /**
  * Glow Cursor (React Bits · simulacion)
- * Cursor con estela de luz usado como "linterna de inspeccion forense".
- * Se monta solo en la vista de auditoria; el contenedor oculta el cursor
- * nativo para que la estela sea el punto de foco real.
+ * Cursor circular con estela de luz usado como "linterna de inspeccion forense".
+ * Se monta en la raiz de la aplicacion (`App.jsx`) para que el seguidor cubra
+ * toda la pantalla: header, tablas, formularios y dashboard.
  *
  * Modo Didactico apagado: la estela se acorta y se apaga la etiqueta
  * `data-inspect`, dejando un halo tenue que no tape la tabla de auditoria.
@@ -120,7 +120,7 @@ export default function GlowCursor({ color = '--ls-accent', trail = 16 }) {
     <canvas
       ref={canvasRef}
       aria-hidden="true"
-      className="pointer-events-none fixed inset-0 z-[60] hidden md:block"
+      className="fixed inset-0 pointer-events-none z-[99999] hidden md:block"
     />
   )
 }

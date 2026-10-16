@@ -31,7 +31,7 @@ const ROLE_ICONS = { scale: Scale, gavel: Gavel, userCheck: UserCheck }
 
 const PRIVACY_NOTES = [
   { icon: Scroll, title: 'Reserva profesional', copy: 'El alta queda sellada en auditoria con tu User ID asignado.' },
-  { icon: ShieldCheck, title: 'Minimo privilegio', copy: 'El rol solicitado define los permisos de la matriz SIS-321.' },
+  { icon: ShieldCheck, title: 'Minimo privilegio', copy: 'El rol solicitado define los permisos de la matriz de permisos por rol.' },
   { icon: Key, title: 'Credencial unica', copy: 'No se admiten las ultimas 5 contrasenas del usuario (punto 9.3).' },
 ]
 
@@ -177,7 +177,7 @@ export default function Register() {
           <p className="mt-4 max-w-xl text-[13.5px] leading-relaxed text-muted">
             El despacho asigna automaticamente el identificador institucional y deja constancia del
             rol solicitado. La habilitacion efectiva depende de la aprobacion del Socio en la
-            matriz de permisos SIS-321.
+            matriz de permisos por rol.
           </p>
 
           <div className="ls-card mt-7 p-6">

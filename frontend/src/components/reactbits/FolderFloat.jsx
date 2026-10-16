@@ -55,7 +55,7 @@ export default function FolderFloat({
       role="button"
       tabIndex={disabled ? -1 : 0}
       aria-expanded={open}
-      aria-label={`${tabLabel} � ${docs.length} documentos`}
+      aria-label={`${tabLabel} — ${docs.length} documentos`}
     >
       <div ref={frame} className="relative h-44 w-full select-none [perspective:1100px]">
         <div className="absolute inset-x-6 bottom-2 h-6 rounded-[50%] bg-accent/25 blur-xl transition-opacity duration-300 group-hover:opacity-100 opacity-0" />

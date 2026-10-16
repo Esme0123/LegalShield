@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AppLayout from '@/components/layout/AppLayout'
+import GlowCursor from '@/components/reactbits/GlowCursor'
 import Login from '@/pages/Login'
 import Register from '@/pages/Register'
 import Dashboard from '@/pages/Dashboard'
@@ -31,25 +32,29 @@ export default function App() {
   }, [bootstrap])
 
   return (
-    <Routes>
-      <Route path="/login" element={session ? <Navigate to="/dashboard" replace /> : <Login />} />
-      <Route path="/register" element={session ? <Navigate to="/dashboard" replace /> : <Register />} />
-      <Route
-        element={
-          <RequireSession>
-            <AppLayout />
-          </RequireSession>
-        }
-      >
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/roles" element={<Roles />} />
-        <Route path="/users" element={<UsersManagement />} />
-        <Route path="/cases" element={<Cases />} />
-        <Route path="/audit" element={<Audit />} />
-        <Route path="/risk-assessment" element={<RiskAssessment />} />
-        <Route path="/profile" element={<Profile />} />
-      </Route>
-      <Route path="*" element={<Navigate to={session ? '/dashboard' : '/login'} replace />} />
-    </Routes>
+    <>
+      {/* Cursor circular global: cubre header, tablas, formularios y dashboard. */}
+      <GlowCursor />
+      <Routes>
+        <Route path="/login" element={session ? <Navigate to="/dashboard" replace /> : <Login />} />
+        <Route path="/register" element={session ? <Navigate to="/dashboard" replace /> : <Register />} />
+        <Route
+          element={
+            <RequireSession>
+              <AppLayout />
+            </RequireSession>
+          }
+        >
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/roles" element={<Roles />} />
+          <Route path="/users" element={<UsersManagement />} />
+          <Route path="/cases" element={<Cases />} />
+          <Route path="/audit" element={<Audit />} />
+          <Route path="/risk-assessment" element={<RiskAssessment />} />
+          <Route path="/profile" element={<Profile />} />
+        </Route>
+        <Route path="*" element={<Navigate to={session ? '/dashboard' : '/login'} replace />} />
+      </Routes>
+    </>
   )
 }

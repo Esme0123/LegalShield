@@ -1,14 +1,14 @@
 import { create } from 'zustand'
 import {
   INFO_ASSETS,
+  MATRIX_CELLS,
+  MATRIX_ROLES,
+  MATRIX_MODULES,
   PERMISSIONS,
   REGISTER_ROLES,
   ROLES,
   RISK_CONTROLS,
   RISK_HEATMAP,
-  SIS321_MATRIX,
-  SIS321_ROLES,
-  SIS321_SYSTEMS,
 } from '@/data/seed'
 import {
   ApiError,
@@ -198,7 +198,7 @@ const initialState = () => ({
   logs: [],
   activityLogs: [],
   revealedDocs: [],
-  sis321: structuredClone(SIS321_MATRIX),
+  matrixCells: structuredClone(MATRIX_CELLS),
   infoAssets: structuredClone(INFO_ASSETS),
   riskControls: structuredClone(RISK_CONTROLS),
   risks: structuredClone(RISK_HEATMAP),
@@ -263,13 +263,13 @@ export const useAppStore = create((set, get) => ({
    * Login contra la API. El contrato { ok, locked, attempts, user } se preserva
    * para que `Login.jsx` no cambie. Nunca inventa una sesion local.
    */
-  login: async ({ userId, password }) => {
+  login: async ({ userId, password, captchaToken, captchaResponse }) => {
     const code = String(userId ?? '').trim().toUpperCase()
     writeLastIdentifier(code)
     set({ lastIdentifier: code })
 
     try {
-      const data = await authApi.login(code, password)
+      const data = await authApi.login(code, password, captchaToken, captchaResponse)
       setTokens({ access: data.token, refresh: data.refreshToken })
       ok(set)
 
@@ -290,10 +290,11 @@ export const useAppStore = create((set, get) => ({
 
       // 401: credencial incorrecta, cuenta bloqueada (isLocked) o desactivada.
       // El backend informa el tiempo restante exacto calculado en MySQL.
+      // El contador de la UI nunca sobrepasa MAX_ATTEMPTS (3 intentos).
       if (error instanceof ApiError && error.isAuth) {
         const locked = error.isLocked
         const remainingSeconds = locked ? Math.max(1, error.remainingSeconds) : 0
-        const attempts = error.failedAttempts || get().attempts + 1
+        const attempts = Math.min(MAX_ATTEMPTS, Number(error.failedAttempts) || get().attempts + 1)
         set({
           attempts: locked ? MAX_ATTEMPTS : attempts,
           lockedUntil: locked ? Date.now() + remainingSeconds * 1000 : null,
@@ -318,8 +319,9 @@ export const useAppStore = create((set, get) => ({
     try {
       const data = await authApi.lockStatus(code)
       const remainingSeconds = Math.max(0, Number(data.remainingSeconds ?? 0))
+      const failedAttempts = Math.min(MAX_ATTEMPTS, Math.max(0, Number(data.failedAttempts ?? 0)))
       set({
-        attempts: data.isLocked ? MAX_ATTEMPTS : Number(data.failedAttempts ?? 0),
+        attempts: data.isLocked ? MAX_ATTEMPTS : failedAttempts,
         lockedUntil: data.isLocked ? Date.now() + remainingSeconds * 1000 : null,
         lastIdentifier: code,
       })
@@ -621,33 +623,36 @@ export const useAppStore = create((set, get) => ({
   /** Alias de compatibilidad: la bitacora por defecto es la de seguridad. */
   loadLogs: async (filters = {}) => get().loadSecurityLogs(filters),
 
-  /* ------------------- SIS-321 · Matriz rol x sistema/recurso ---------------
-   * Planilla didactica de referencia (UCB): vive en memoria y no persiste.
+  /* ------------ Matriz de Permisos por Rol · rol x modulo/accion ----------
+   * Estado didactico en memoria (no persiste): los permisos atomicos reales
+   * viven en MySQL a traves de `rbac` y /api/roles/permissions.
    * ------------------------------------------------------------------------ */
   toggleMatrixAccess: (roleId, resourceId) => {
-    set((s) => ({ sis321: { ...s.sis321, [roleId]: toggleInList(s.sis321[roleId] ?? [], resourceId) } }))
-    const roleLabel = SIS321_ROLES.find((r) => r.id === roleId)?.label ?? roleId
-    const resource = SIS321_SYSTEMS.flatMap((system) => system.resources).find((r) => r.id === resourceId)
-    const granted = (get().sis321[roleId] ?? []).includes(resourceId)
+    set((s) => ({
+      matrixCells: { ...s.matrixCells, [roleId]: toggleInList(s.matrixCells[roleId] ?? [], resourceId) },
+    }))
+    const roleLabel = MATRIX_ROLES.find((r) => r.id === roleId)?.label ?? roleId
+    const resource = MATRIX_MODULES.flatMap((module) => module.resources).find((r) => r.id === resourceId)
+    const granted = (get().matrixCells[roleId] ?? []).includes(resourceId)
     return { granting: granted, roleLabel, resourceLabel: resource?.label ?? resourceId }
   },
 
-  /** Marca o desmarca un recurso para los nueve roles de una vez. */
-  setSystemColumn: (resourceId, granted) => {
+  /** Marca o desmarca un recurso para los cinco roles de una vez. */
+  setMatrixColumn: (resourceId, granted) => {
     const state = get()
-    const sis321 = { ...state.sis321 }
-    SIS321_ROLES.forEach((role) => {
-      const list = sis321[role.id] ?? []
-      sis321[role.id] = granted
+    const matrixCells = { ...state.matrixCells }
+    MATRIX_ROLES.forEach((role) => {
+      const list = matrixCells[role.id] ?? []
+      matrixCells[role.id] = granted
         ? [...new Set([...list, resourceId])]
         : list.filter((id) => id !== resourceId)
     })
-    set({ sis321 })
+    set({ matrixCells })
   },
 
-  resetSis321: () => set({ sis321: structuredClone(SIS321_MATRIX) }),
+  resetMatrix: () => set({ matrixCells: structuredClone(MATRIX_CELLS) }),
 
-  /* ------------- SIS-321 · Matriz de clasificacion de informacion --------- */
+  /* ------------- Matriz de clasificacion de informacion ------------------ */
   setInfoAssetValue: (assetId, dimension, value) => {
     const next = Math.min(3, Math.max(1, Number(value)))
     set((s) => ({

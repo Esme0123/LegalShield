@@ -29,11 +29,12 @@ export default function RbacPermissionMatrix() {
   const handleToggle = async (roleId, permissionId) => {
     if (!canEdit) return
     const roleLabel = ROLES.find((r) => r.id === roleId)?.label ?? roleId
+    const permissionLabel = PERMISSIONS.find((p) => p.id === permissionId)?.label ?? permissionId
     try {
       const { granting } = await togglePermission(roleId, permissionId)
       toast.pastel(
         granting ? 'Permiso concedido' : 'Permiso retirado',
-        `${permissionId} ${granting ? 'habilitado' : 'deshabilitado'} para ${roleLabel} · evento PERMISSION_CHANGED`,
+        `${permissionLabel} ${granting ? 'habilitado' : 'deshabilitado'} para ${roleLabel} · evento PERMISSION_CHANGED`,
       )
     } catch (error) {
       toast.danger('La API rechazo el cambio', error.message ?? 'La matriz se reequilibro al estado persistido')
@@ -44,10 +45,10 @@ export default function RbacPermissionMatrix() {
     <div className="ls-card overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line/40 px-5 py-4">
         <div>
-          <p className="font-display text-sm font-bold tracking-tight">Matriz RBAC · permisos atómicos</p>
+          <p className="font-display text-sm font-bold tracking-tight">Permisos atómicos por rol</p>
           <p className="mt-0.5 text-[11px] text-muted">
-            Segregacion de funciones: el ABM de usuarios, la gestion de roles, el desbloqueo y la
-            bitacora de seguridad son exclusivos del rol OSI
+            Segregación de funciones: el alta de usuarios, la gestión de permisos, el desbloqueo y la
+            bitácora de seguridad son exclusivos del rol OSI
           </p>
         </div>
         {!canEdit && (
@@ -62,7 +63,7 @@ export default function RbacPermissionMatrix() {
           <thead>
             <tr>
               <th scope="col" className="!left-0 !z-20 w-[280px] min-w-[280px] !border-r !border-line/25 text-left">
-                Permiso atómico
+                Permiso
               </th>
               {ROLES.map((role) => (
                 <th key={role.id} scope="col" className="!py-3 text-center">
@@ -91,8 +92,8 @@ export default function RbacPermissionMatrix() {
                       <th scope="row" className="sticky left-0 z-20 !border-r !border-line/25 bg-surface text-left">
                         <div className="flex items-center justify-between gap-2 py-1 pr-3">
                           <div className="min-w-0">
-                            <p className="font-mono text-[10.5px] font-semibold text-ink">{perm.id}</p>
-                            <p className="truncate text-[11px] text-muted">{perm.label}</p>
+                            <p className="truncate text-[12px] font-semibold text-ink">{perm.label}</p>
+                            <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted">{perm.group}</p>
                           </div>
                           <span
                             className={cn(
@@ -119,7 +120,7 @@ export default function RbacPermissionMatrix() {
                               disabled={!canEdit}
                               title={
                                 canEdit
-                                  ? `${granted ? 'Retirar' : 'Conceder'} ${perm.id} a ${role.label}`
+                                  ? `${granted ? 'Retirar' : 'Conceder'} ${perm.label} a ${role.label}`
                                   : 'Sin permiso para editar la matriz'
                               }
                               className={cn(

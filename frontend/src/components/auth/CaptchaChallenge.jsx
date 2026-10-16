@@ -2,8 +2,8 @@ import { useEffect, useState } from "react"
 import { ShieldAlert } from "lucide-react"
 
 /**
- * Componente CAPTCHA como "Mecanismo Menos Com˙n" (Principio de DiseÒo Seguro #7)
- * DesafÌo matem·tico interactivo de confirmaciÛn humana
+ * Componente CAPTCHA como "Mecanismo Menos Com√∫n" (Principio de Dise√±o Seguro #7)
+ * Desaf√≠o matem√°tico interactivo de confirmaci√≥n humana
  */
 export default function CaptchaChallenge({ onVerify, disabled }) {
   const [num1, setNum1] = useState(0)
@@ -32,13 +32,13 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
     setAnswer(value)
     const correctAnswer = num1 + num2
     const userAnswer = parseInt(value)
-    
+
     if (value === "" || isNaN(userAnswer)) {
       setIsValid(false)
       setError("")
       return
     }
-    
+
     if (userAnswer === correctAnswer) {
       setIsValid(true)
       setError("")
@@ -52,14 +52,14 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
     e.preventDefault()
     const correctAnswer = num1 + num2
     const userAnswer = parseInt(answer)
-    
+
     if (userAnswer === correctAnswer) {
       setIsValid(true)
       setError("")
       onVerify && onVerify(true, correctAnswer.toString())
     } else {
       setIsValid(false)
-      setError("Respuesta incorrecta. IntÈntalo de nuevo.")
+      setError("Respuesta incorrecta. Int√©ntalo de nuevo.")
       setAttempts((prev) => prev + 1)
       if (attempts >= 2) {
         generateChallenge()
@@ -77,11 +77,11 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
       <div className="flex items-center gap-2 mb-3">
         <ShieldAlert className="h-4 w-4 text-accent" />
         <p className="font-mono text-[10.5px] font-bold text-accent uppercase tracking-wider">
-          VerificaciÛn Anti-Bot (Mecanismo Menos Com˙n)
+          Verificaci√≥n Anti-Bot (Mecanismo Menos Com√∫n)
         </p>
       </div>
       <p className="mb-3 text-[11.5px] leading-snug text-ink/80">
-        Resuelve la siguiente operaciÛn matem·tica para confirmar que eres humano:
+        Resuelve la siguiente operaci√≥n matem√°tica para confirmar que eres humano:
       </p>
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <div className="flex items-center justify-center gap-2 text-lg font-bold font-mono">
@@ -105,7 +105,7 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
           <p className="text-center text-[10.5px] text-danger">{error}</p>
         )}
         {isValid && (
-          <p className="text-center text-[10.5px] text-accent">? VerificaciÛn completada</p>
+          <p className="text-center text-[10.5px] text-accent">‚úì Verificaci√≥n completada</p>
         )}
         <div className="flex gap-2">
           <button
@@ -114,14 +114,14 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
             disabled={disabled}
             className="flex-1 rounded-lg border border-line/60 bg-surface2/60 px-2 py-1.5 text-[10.5px] font-mono uppercase tracking-wider text-muted transition hover:bg-surface2 hover:text-accent"
           >
-            Nuevo desafÌo
+            NUEVO DESAF√çO
           </button>
           <button
             type="submit"
             disabled={disabled || !answer}
             className="flex-1 rounded-lg border border-accent/40 bg-accent/10 px-2 py-1.5 text-[10.5px] font-mono uppercase tracking-wider text-accent transition hover:bg-accent/15 disabled:opacity-50"
           >
-            Verificar
+            VERIFICAR
           </button>
         </div>
       </form>

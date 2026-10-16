@@ -6,7 +6,6 @@ import {
   ArrowRight,
   FileStack,
   ShieldCheck,
-  Sparkles,
   Users2,
 } from 'lucide-react'
 import AeroShards from '@/components/reactbits/AeroShards'
@@ -16,7 +15,6 @@ import { Badge, Progress, RiskBadge, SectionTitle, StatCard } from '@/components
 import { useAppStore } from '@/store/useAppStore'
 import { PERMISSIONS, ROLES } from '@/data/seed'
 import { timeAgo, relativePercent } from '@/lib/format'
-import { cn } from '@/lib/cn'
 
 function maturityScore(controls) {
   if (!controls.length) return 0
@@ -58,20 +56,17 @@ export default function Dashboard() {
       <section className="relative overflow-hidden rounded-2xl border border-line/60 bg-surface/60 p-5 shadow-card backdrop-blur-md sm:p-7">
         <AeroShards density={0.00016} className="opacity-60" />
         <div className="ls-grid-overlay" />
-        <div className="relative grid gap-6 lg:grid-cols-[1.35fr_1fr] lg:items-center">
+        <div className="relative grid gap-6 lg:items-center">
           <div>
-            <Badge tone="pastel" pulse>
-              <Sparkles className="h-3 w-3" /> Sistema Operativo del Despacho
-            </Badge>
-            <h2 className="mt-3 font-display text-2xl font-bold leading-tight tracking-tight text-balance sm:text-3xl">
-              Bienvenido, {session?.name?.split(' ')[0] ?? 'Colegio'}. Su posicio de defensa esta{' '}
-              <span className="text-accent">consolidada</span>.
+            <h2 className="font-display text-2xl font-bold leading-tight tracking-tight text-balance sm:text-3xl">
+              Bienvenido, {session?.name ?? 'usuario'}.
             </h2>
-            <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-muted">
-              Sesion <span className="font-mono text-info">{session?.userId}</span> · rol{' '}
-              <span className="text-accent">{role?.label}</span>. Matriz de separacion de funciones al{' '}
-              {relativePercent(granted, totalPossible)}% de cobertura minima y{' '}
-              <span className="text-danger">{critical} eventos criticos</span> en la bitacora del dia.
+            <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-muted">
+              Panel operativo y supervisión del despacho. Sesión{' '}
+              <span className="font-mono text-info">{session?.userId}</span> · rol{' '}
+              <span className="text-accent">{role?.label}</span>. Su posición de defensa está
+              consolidada: {relativePercent(granted, totalPossible)}% de cobertura mínima y{' '}
+              <span className="text-danger">{critical} eventos críticos</span> en la bitácora del día.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
               <Link to="/cases" className="ls-btn-primary">
@@ -80,31 +75,9 @@ export default function Dashboard() {
               </Link>
               {seesSecurity && (
                 <Link to="/audit" className="ls-btn-secondary">
-                  <Activity className="h-4 w-4" /> Bitacora de seguridad
+                  <Activity className="h-4 w-4" /> Bitácora de seguridad
                 </Link>
               )}
-            </div>
-          </div>
-
-          <div className="ls-panel">
-            <div className="flex items-center justify-between">
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-                Cumplimiento de Protocolos
-              </p>
-              <span className="font-display text-2xl font-bold text-ok">{maturity}%</span>
-            </div>
-            <Progress value={maturity} tone="pastel" className="mt-3" />
-            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-              {[
-                { k: 'Criticos', v: critical, cls: 'text-danger' },
-                { k: 'Eventos', v: logs.length, cls: 'text-accent' },
-                { k: 'Controles', v: riskControls.length, cls: 'text-info' },
-              ].map((s) => (
-                <div key={s.k} className="rounded-lg border border-line/40 bg-bg/30 py-2">
-                  <p className={cn('font-display text-lg font-bold', s.cls)}>{s.v}</p>
-                  <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted">{s.k}</p>
-                </div>
-              ))}
             </div>
           </div>
         </div>

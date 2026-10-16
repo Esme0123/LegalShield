@@ -1,69 +1,69 @@
 import { motion } from 'framer-motion'
 import { Check, X } from 'lucide-react'
-import { SIS321_SYSTEMS } from '@/data/seed'
+import { MATRIX_MODULES } from '@/data/seed'
 import { cn } from '@/lib/cn'
 
-/** Total de columnas de recurso de la planilla SIS-321. */
-export const RESOURCE_COUNT = SIS321_SYSTEMS.reduce((acc, system) => acc + system.resources.length, 0)
+/** Total de columnas de accion de la matriz de permisos por rol. */
+export const RESOURCE_COUNT = MATRIX_MODULES.reduce((acc, module) => acc + module.resources.length, 0)
 
-/** Ancho de columna segun el numero de recursos del sistema (1fr por recurso). */
-const columnWidth = (system) => `${Math.max(84, system.resources.length * 92)}px`
+/** Ancho de columna segun el numero de acciones del modulo (1fr por accion). */
+const columnWidth = (module) => `${Math.max(84, module.resources.length * 92)}px`
+
+/** Tinte de cada modulo en la cabecera agrupada. */
+const MODULE_TONES = [
+  'border-accent/50 bg-accent/12',
+  'border-info/45 bg-info/10',
+  'border-line/45 bg-surface2/45',
+  'border-ok/45 bg-ok/10',
+]
 
 /**
- * Matriz de roles y permisos por sistema / recurso (SIS-321 · UCB).
- * Replica la planilla "SIS 321 U1 MatrizRoles EjLPQ.xlsx": sistemas agrupados
- * en el encabezado y roles como filas, con marca X por cada acceso concedido.
+ * Matriz de Permisos por Rol: modulos reales de LegalShield agrupados en la
+ * cabecera y los cinco roles de la base de datos como filas, con marca de
+ * aprobacion por cada permiso concedido.
  */
-export default function Sis321Matrix({ roles, matrix, onToggle, onToggleColumn, canEdit }) {
+export default function ModuleMatrix({ roles, matrix, onToggle, onToggleColumn, canEdit }) {
   return (
     <div className="ls-card overflow-hidden">
       <div className="overflow-x-auto">
         <table className="ls-table min-w-[1180px] border-separate border-spacing-0">
           <caption className="sr-only">
-            Matriz SIS-321 de permisos por rol y recurso para RED, CORREO, SISTEMA A y SISTEMA B
+            Matriz de Permisos por Rol: Gestión de Expedientes, Documentación Legal, Auditoría e
+            Historial y Administración de Usuarios (OSI)
           </caption>
 
           <thead>
-            {/* Fila 1: sistemas agrupados */}
+            {/* Fila 1: modulos agrupados */}
             <tr>
               <th
                 rowSpan={2}
                 scope="col"
                 className="!left-0 !z-30 w-[248px] min-w-[248px] !border-r !border-line/25"
               >
-                <span className="font-mono text-[9.5px] uppercase tracking-[0.18em]">Rol / Sistema</span>
+                <span className="font-mono text-[9.5px] uppercase tracking-[0.18em]">Rol / Módulo</span>
               </th>
-              {SIS321_SYSTEMS.map((system) => (
+              {MATRIX_MODULES.map((module, index) => (
                 <th
-                  key={system.id}
-                  colSpan={system.resources.length}
+                  key={module.id}
+                  colSpan={module.resources.length}
                   scope="colgroup"
-                  style={{ minWidth: columnWidth(system) }}
+                  style={{ minWidth: columnWidth(module) }}
                   className="!border-b-0 !py-3 !text-center"
                 >
-                  <div
-                    className={cn(
-                      'mx-1 rounded-lg border px-2 py-2',
-                      system.id === 'SISTEMA_A'
-                        ? 'border-accent/50 bg-accent/12'
-                        : system.id === 'SISTEMA_B'
-                          ? 'border-info/45 bg-info/10'
-                          : 'border-line/45 bg-surface2/45',
-                    )}
-                  >
-                    <p className="font-display text-[12px] font-bold tracking-tight text-ink">{system.label}</p>
+                  <div className={cn('mx-1 rounded-lg border px-2 py-2', MODULE_TONES[index % MODULE_TONES.length])}>
+                    <p className="font-display text-[12px] font-bold tracking-tight text-ink">{module.label}</p>
                     <p className="mt-0.5 font-mono text-[9px] normal-case tracking-normal text-muted">
-                      {system.resources.length} recursos
+                      {module.resources.length} permisos
                     </p>
                   </div>
                 </th>
               ))}
             </tr>
 
-            {/* Fila 2: recursos, con interruptor de columna completa */}
+            {/* Fila 2: acciones, con interruptor de columna completa */}
             <tr>
-              {SIS321_SYSTEMS.map((system) =>
-                system.resources.map((resource) => {
+              {MATRIX_MODULES.map((module) =>
+                module.resources.map((resource) => {
                   const granted = roles.filter((role) => (matrix[role.id] ?? []).includes(resource.id)).length
                   return (
                     <th key={resource.id} scope="col" className="!border-t !py-2.5 !text-center">
@@ -131,8 +131,8 @@ export default function Sis321Matrix({ roles, matrix, onToggle, onToggleColumn, 
                     </div>
                   </th>
 
-                  {SIS321_SYSTEMS.flatMap((system) =>
-                    system.resources.map((resource) => {
+                  {MATRIX_MODULES.flatMap((module) =>
+                    module.resources.map((resource) => {
                       const checked = list.includes(resource.id)
                       return (
                         <td key={resource.id} className="!px-1 !py-2 text-center">
@@ -140,7 +140,7 @@ export default function Sis321Matrix({ roles, matrix, onToggle, onToggleColumn, 
                             type="button"
                             role="checkbox"
                             aria-checked={checked}
-                            aria-label={`${resource.label} para ${role.label}`}
+                            aria-label={`${resource.label} · ${module.label} para ${role.label}`}
                             disabled={!canEdit}
                             onClick={() => onToggle(role.id, resource.id)}
                             className={cn(

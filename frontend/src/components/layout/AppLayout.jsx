@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bell, Menu, RefreshCcw, Scale, Search, ShieldAlert } from 'lucide-react'
+import { Bell, Menu, RefreshCcw, Scale, Search } from 'lucide-react'
 import Sidebar from './Sidebar'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 import EffectsToggle from '@/components/ui/EffectsToggle'
@@ -13,7 +13,7 @@ import { timeAgo } from '@/lib/format'
 
 const TITLES = {
   '/dashboard': ['Panel de control', 'Estado operativo del despacho en tiempo real'],
-  '/roles': ['Matriz de accesos SIS-321', 'Permisos por sistema, recurso y rol'],
+  '/roles': ['Matriz de Permisos por Rol', 'Módulos, acciones y roles configurados'],
   '/users': ['Gestión de Usuarios (ABM)', 'Alta, edicion, baja logica y desbloqueo granular'],
   '/cases': ['Expedientes judiciales', 'Gestion de prueba documental restringida'],
   '/audit': ['Logs de auditoria', 'Flujo forense en vivo · linterna de inspeccion activa'],
@@ -175,13 +175,6 @@ export default function AppLayout() {
             </motion.div>
           </AnimatePresence>
         </main>
-
-        <footer className="border-t border-line/40 px-4 py-4 text-center sm:px-6">
-          <p className="flex items-center justify-center gap-2 text-[11px] text-muted">
-            <ShieldAlert className="h-3.5 w-3.5" />
-            Datos persistidos en MySQL · los eventos de auditoria son inmutables
-          </p>
-        </footer>
       </div>
     </div>
   )

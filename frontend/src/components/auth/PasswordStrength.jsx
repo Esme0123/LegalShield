@@ -74,6 +74,10 @@ export default function PasswordStrength({ value, className = '' }) {
 }
 
 export function LockCounter({ attempts, max = 3, locked }) {
+  // El contador nunca sobrepasa el maximo: aunque la API informe mas fallos
+  // (o negativos), la interfaz fija el tope en `max` intentos.
+  const used = Math.min(Math.max(Number(attempts) || 0, 0), max)
+
   return (
     <div className="rounded-lg border border-line/50 bg-surface2/35 p-3">
       <div className="flex items-center justify-between">
@@ -82,24 +86,25 @@ export function LockCounter({ attempts, max = 3, locked }) {
         </p>
         <span
           className={cn(
-            'font-mono text-[11px] font-bold',
-            locked ? 'text-danger' : attempts >= max - 1 ? 'text-ok' : 'text-accent',
+            'font-mono font-bold',
+            locked ? 'text-[10.5px] text-danger' : 'text-[11px]',
+            !locked && (used >= max - 1 ? 'text-ok' : 'text-accent'),
           )}
         >
-          {locked ? 'BLOQUEADA' : `${max - attempts}/${max}`}
+          {locked ? `${max} de ${max} - Cuenta inhabilitada` : `${max - used}/${max}`}
         </span>
       </div>
 
       <div className="mt-2 grid grid-cols-3 gap-2">
         {Array.from({ length: max }).map((_, i) => {
-          const used = i < attempts
+          const consumed = i < used
           return (
             <div
               key={i}
               className={cn(
                 'h-2 rounded-full transition-all duration-500',
-                locked || used ? 'bg-danger' : 'bg-accent/40',
-                locked && i === attempts - 1 && 'animate-pulse',
+                locked || consumed ? 'bg-danger' : 'bg-accent/40',
+                locked && i === used - 1 && 'animate-pulse',
               )}
             />
           )
