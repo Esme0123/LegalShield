@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -14,6 +14,7 @@ import ConnectionError from '@/components/ui/ConnectionError'
 import { Badge, Progress, RiskBadge, SectionTitle, StatCard } from '@/components/ui/primitives'
 import { useAppStore } from '@/store/useAppStore'
 import { PERMISSIONS, ROLES } from '@/data/seed'
+import { displayNameFor } from '@/lib/identity'
 import { timeAgo, relativePercent } from '@/lib/format'
 
 function maturityScore(controls) {
@@ -42,11 +43,25 @@ export default function Dashboard() {
   }, [loadCases, loadActivityLogs, loadMatrix])
 
   const critical = useMemo(() => logs.filter((l) => l.severity === 'critico').length, [logs])
-  const maturity = maturityScore(riskControls)
-  const granted = Object.values(rbac).reduce((acc, list) => acc + list.length, 0)
-  const totalPossible = Object.keys(rbac).length * PERMISSIONS.length
-  const role = ROLES.find((r) => r.id === session?.role)
-  const seesSecurity = (session?.permissions ?? []).includes('SECURITY_LOGS_VIEW')
+  const [recentActivity, setRecentActivity] = useState([])
+  
+  useEffect(() => {
+    const fetchActivity = async () => {
+      try {
+        const res = await fetch('/api/audit/activity?limit=5')
+        if (res.ok) {
+          const data = await res.json()
+          setRecentActivity(data.data || data.activity || data.items || [])
+        } else {
+          setRecentActivity(logs.slice(0, 5))
+        }
+      } catch {
+        setRecentActivity(logs.slice(0, 5))
+      }
+    }
+    fetchActivity()
+  }, [logs])
+  const displayName = displayNameFor(session?.userId ?? session?.username)
 
   return (
     <div className="space-y-6">
@@ -59,10 +74,10 @@ export default function Dashboard() {
         <div className="relative grid gap-6 lg:items-center">
           <div>
             <h2 className="font-display text-2xl font-bold leading-tight tracking-tight text-balance sm:text-3xl">
-              Bienvenido, {session?.name ?? session?.username ?? 'usuario'}.
+              Bienvenido, {displayName}.
             </h2>
             <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-muted">
-              Bienvenido, {session?.name ?? session?.username ?? 'usuario'}. Panel operativo y supervisión del despacho.
+              Bienvenido, {displayName}. Panel operativo y supervisión del despacho.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
               <Link to="/cases" className="ls-btn-primary">
@@ -178,7 +193,7 @@ export default function Dashboard() {
             }
           />
           <ul className="divide-y divide-line/25">
-            {logs.slice(0, 6).map((l) => (
+            {recentActivity.slice(0, 5).map((l) => (
               <li key={l.id} className="flex items-start gap-3 py-2.5">
                 <span
                   className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
@@ -194,6 +209,7 @@ export default function Dashboard() {
                 </div>
               </li>
             ))}
+            {recentActivity.length === 0 && <p className="py-3 text-[12px] text-muted">Sin actividad registrada</p>}
           </ul>
         </div>
 

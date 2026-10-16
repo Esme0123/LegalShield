@@ -78,13 +78,19 @@ export default function Login() {
   // contador de intentos vuelve a 0 y se libera cualquier bloqueo local para
   // no arrastrar los fallos de otra cuenta.
   const handleUserChange = (value) => {
-    if (value !== userId) {
+    const changed = value !== userId
+    if (changed) {
       resetLock()
       setShowCaptcha(false)
       setCaptchaVerified(false)
       setCaptchaToken('')
       setLocalError('')
+      setPassword('')
+      setBusy(false)
+      setStep(-1)
     }
+    setUserId(value)
+  }
     setUserId(value)
   }
 

@@ -78,7 +78,7 @@ export default function Cases() {
 
   const startArchive = (id) => {
     if (!canArchive) {
-      toast.danger('Acceso denegado', 'El permiso CASES_ARCHIVE no esta asociado a tu rol')
+      toast.danger('Acceso denegado', 'No dispone de autorización para archivar este expediente.')
       return
     }
     setCrumpling(id)

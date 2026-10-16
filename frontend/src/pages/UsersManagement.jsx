@@ -394,7 +394,7 @@ export default function UsersManagement() {
                 <th className="text-left">Email</th>
                 <th className="text-left">Rol</th>
                 <th className="text-left">Estado</th>
-                <th className="text-right">Acciones</th>
+                <th className="text-center">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -493,15 +493,15 @@ export default function UsersManagement() {
                             <ShieldCheck className="h-3.5 w-3.5" />
                           </button>
                         ))}
-                        {can.unlock && user.isLocked && (
+                        {can.unlock && (user.isLocked || user.failedAttempts > 0) && (
                           <button
                             type="button"
                             disabled={busy}
                             onClick={() => unlock(user)}
-                            className="rounded-lg border border-line/50 p-2 text-muted transition hover:border-accent/60 hover:text-accent"
-                            title="Desbloquear y resetear clave"
+                            className="rounded-lg border border-accent/60 bg-accent/10 p-2 text-accent transition hover:bg-accent/15"
+                            title="Desbloquear Cuenta"
                           >
-                            <Unlock className="h-3.5 w-3.5" />
+                            <Unlock className="h-3.5 w-3.5" /> Desbloquear Cuenta
                           </button>
                         )}
                         {busy && (

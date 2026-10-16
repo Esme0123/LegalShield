@@ -8,6 +8,7 @@ import EffectsToggle from '@/components/ui/EffectsToggle'
 import ConnectionError from '@/components/ui/ConnectionError'
 import AeroShards from '@/components/reactbits/AeroShards'
 import { useAppStore } from '@/store/useAppStore'
+import { displayNameFor } from '@/lib/identity'
 import { cn } from '@/lib/cn'
 import { timeAgo } from '@/lib/format'
 
@@ -102,10 +103,10 @@ export default function AppLayout() {
               </span>
               <span className="text-left leading-none">
                 <span className="block text-[11px] font-semibold text-ink">
-                  {session?.name ?? session?.username ?? session?.userId ?? 'usuario'}
+                  {displayNameFor(session?.userId ?? session?.username)}
                 </span>
                 <span className="mt-0.5 block text-[9.5px] capitalize text-muted">
-                  {session?.roleId ?? session?.role ?? 'sesion'}
+                  {session?.role ?? 'sesion'}
                 </span>
               </span>
             </Link>

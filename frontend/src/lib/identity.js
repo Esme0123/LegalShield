@@ -35,3 +35,26 @@ export function previewUsername(firstName, lastName, used = []) {
   }
   return base
 }
+
+/** Nombres reales formateados para mostrar el usuario activo en saludos. */
+const DISPLAY_NAMES = {
+  'mariana.solis': 'Mariana Solís',
+  'diego.ferrer': 'Diego Ferrer',
+  'osi.seguridad': 'Oficial de Seguridad (OSI)',
+  'paula.sando': 'Paula Sando',
+  'carlos.cliente': 'Carlos Cliente',
+}
+
+export function displayNameFor(username) {
+  const token = String(username ?? '').trim().toLowerCase()
+  const normalized = token.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, '')
+  const known = Object.keys(DISPLAY_NAMES).find((key) => key === normalized)
+  if (known) return DISPLAY_NAMES[known]
+  const parts = token
+    .split('.')
+    .filter(Boolean)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+  const clean = parts.join(' ').replace(/[^A-Za-zÁÉÍÓÚÑ ]/g, '')
+  if (!clean) return 'Usuario'
+  return clean
+}
