@@ -1,4 +1,4 @@
-ï»¿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -23,7 +23,7 @@ import { validateUserId } from '@/lib/security'
 import { cn } from '@/lib/cn'
 import CaptchaChallenge from '@/components/auth/CaptchaChallenge'
 
-const SIGNAL_STEPS = ['Analisis de User IDâ€¦', 'Verificacion de politicaâ€¦', 'MFA Â· passkey', 'Emision de sesion']
+const SIGNAL_STEPS = ['Analisis de User ID…', 'Verificacion de politica…', 'MFA · passkey', 'Emision de sesion']
 
 export default function Login() {
   const navigate = useNavigate()
@@ -94,7 +94,7 @@ export default function Login() {
     }
 
     if (showCaptcha && !captchaVerified) {
-      toast.danger('VerificaciÃ³n requerida', 'Por favor resuelve el CAPTCHA para continuar')
+      toast.danger('Verificación requerida', 'Por favor resuelve el CAPTCHA para continuar')
       return
     }
 
@@ -146,7 +146,7 @@ export default function Login() {
           </span>
           <div>
             <p className="font-display text-base font-bold leading-none">LegalShield</p>
-            <p className="mt-1 font-mono text-[9.5px] uppercase tracking-[0.2em] text-muted">Secure Legal OS Â· v4.2</p>
+            <p className="mt-1 font-mono text-[9.5px] uppercase tracking-[0.2em] text-muted">Secure Legal OS · v4.2</p>
           </div>
         </div>
       </header>
@@ -183,7 +183,7 @@ export default function Login() {
                   type={showPass ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                  placeholder="••••••••••••"
                   disabled={locked}
                   className="ls-input"
                 />
@@ -198,3 +198,4 @@ export default function Login() {
     </div>
   )
 }
+
