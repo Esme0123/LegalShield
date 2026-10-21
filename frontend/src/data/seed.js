@@ -19,7 +19,7 @@ export const PERMISSIONS = [
   { id: 'USERS_CREATE', label: 'Registrar usuarios', group: 'Usuarios', severity: 'alta' },
   { id: 'USERS_UPDATE', label: 'Editar datos, rol o estado', group: 'Usuarios', severity: 'alta' },
   { id: 'USERS_DELETE', label: 'Dar de baja usuarios', group: 'Usuarios', severity: 'critica' },
-  { id: 'USERS_UNLOCK', label: 'Desbloquear usuarios y restablecer clave', group: 'Usuarios', severity: 'critica' },
+  { id: 'USERS_UNLOCK', label: 'Desbloquear usuarios (sin reset de clave)', group: 'Usuarios', severity: 'critica' },
   { id: 'USERS_MANAGE', label: 'Gestionar usuarios', group: 'Usuarios', severity: 'critica' },
   { id: 'ROLES_MANAGE', label: 'Modificar la matriz de permisos', group: 'Seguridad', severity: 'critica' },
   { id: 'ACCOUNT_UNLOCK', label: 'Desbloquear cuentas inhabilitadas', group: 'Seguridad', severity: 'critica' },

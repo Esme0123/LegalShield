@@ -73,6 +73,7 @@ const apiUserToSession = (user) => ({
   role: user.role,
   roleLabel: user.roleLabel ?? ROLES.find((r) => r.id === user.role)?.label ?? user.role,
   permissions: user.permissions ?? [],
+  mustChangePassword: Boolean(user.mustChangePassword),
   loginAt: nowIso(),
 })
 
@@ -164,6 +165,8 @@ const CONNECTION_ERROR = 'Error de conexión con el servidor MySQL'
  * respuestas de negocio esperadas; el resto marcan el estado de conexion.
  */
 function noteApiFailure(set, error, context) {
+  // Con la clave inicial pendiente el servidor veta la ruta a proposito: no es un fallo de API.
+  if (error instanceof ApiError && error.passwordChangeRequired) return
   if (error instanceof ApiError && error.status === 0) {
     set({ apiStatus: 'error', apiError: `${CONNECTION_ERROR} · verifique que el backend este en marcha` })
     return
@@ -186,8 +189,10 @@ const initialState = () => ({
   profile: null,
   attempts: 0,
   lockedUntil: null,
+  lockRequiresOsi: false,
   lastIdentifier: readLastIdentifier(),
   unlockRequest: null,
+  notifications: [],
   didactic: true,
   apiStatus: isApiEnabled() ? 'probeando' : 'error',
   apiError: isApiEnabled() ? null : 'API REST deshabilitada por configuracion (VITE_API_ENABLED=false)',
@@ -251,6 +256,7 @@ export const useAppStore = create((set, get) => ({
         const data = await authApi.me()
         set({ session: apiUserToSession(data.user) })
         await get().loadProfile()
+        get().loadNotifications().catch(() => {})
       } catch {
         clearTokens()
         set({ session: null })
@@ -274,8 +280,9 @@ export const useAppStore = create((set, get) => ({
       ok(set)
 
       const user = apiUserToSession(data.user)
-      set({ session: user, attempts: 0, lockedUntil: null })
+      set({ session: user, attempts: 0, lockedUntil: null, lockRequiresOsi: false })
       get().loadDirectory().catch(() => {})
+      get().loadNotifications().catch(() => {})
       return { ok: true, user }
     } catch (error) {
       if (error instanceof ApiError && error.status === 0) {
@@ -293,14 +300,17 @@ export const useAppStore = create((set, get) => ({
       // El contador de la UI nunca sobrepasa MAX_ATTEMPTS (3 intentos).
       if (error instanceof ApiError && error.isAuth) {
         const locked = error.isLocked
-        const remainingSeconds = locked ? Math.max(1, error.remainingSeconds) : 0
+        // Bloqueo por reincidencia: sin cuenta regresiva, solo el OSI lo libera.
+        const requiresOsi = locked && error.requiresOsi
+        const remainingSeconds = locked && !requiresOsi ? Math.max(1, error.remainingSeconds) : 0
         const attempts = Math.min(MAX_ATTEMPTS, Number(error.failedAttempts) || get().attempts + 1)
         set({
           attempts: locked ? MAX_ATTEMPTS : attempts,
-          lockedUntil: locked ? Date.now() + remainingSeconds * 1000 : null,
+          lockedUntil: requiresOsi ? Number.MAX_SAFE_INTEGER : locked ? Date.now() + remainingSeconds * 1000 : null,
+          lockRequiresOsi: requiresOsi,
           unlockRequest: locked ? get().unlockRequest : null,
         })
-        return { ok: false, locked, attempts, remainingSeconds, error: error.message }
+        return { ok: false, locked, requiresOsi, attempts, remainingSeconds, error: error.message }
       }
 
       noteApiFailure(set, error, 'login')
@@ -318,11 +328,13 @@ export const useAppStore = create((set, get) => ({
 
     try {
       const data = await authApi.lockStatus(code)
+      const requiresOsi = Boolean(data.isLocked && data.requiresOsi)
       const remainingSeconds = Math.max(0, Number(data.remainingSeconds ?? 0))
       const failedAttempts = Math.min(MAX_ATTEMPTS, Math.max(0, Number(data.failedAttempts ?? 0)))
       set({
         attempts: data.isLocked ? MAX_ATTEMPTS : failedAttempts,
-        lockedUntil: data.isLocked ? Date.now() + remainingSeconds * 1000 : null,
+        lockedUntil: requiresOsi ? Number.MAX_SAFE_INTEGER : data.isLocked ? Date.now() + remainingSeconds * 1000 : null,
+        lockRequiresOsi: requiresOsi,
         lastIdentifier: code,
       })
       return { ...data, remainingSeconds }
@@ -341,6 +353,37 @@ export const useAppStore = create((set, get) => ({
     } catch (error) {
       noteApiFailure(set, error, 'directory')
       return 0
+    }
+  },
+
+  /** Avisos de seguridad del titular (bloqueos, tokens, desbloqueos). */
+  loadNotifications: async () => {
+    try {
+      const data = await authApi.notifications()
+      set({ notifications: data.notifications ?? [] })
+      return data.notifications?.length ?? 0
+    } catch (error) {
+      noteApiFailure(set, error, 'notifications')
+      return 0
+    }
+  },
+
+  /**
+   * Marca un aviso como leido. El cambio es optimista y se revierte si el
+   * servidor lo rechaza (p. ej. 403 mientras la clave inicial siga pendiente).
+   */
+  markNotificationRead: async (id) => {
+    const target = get().notifications.find((n) => n.id === id)
+    if (!target || target.isRead) return
+    const setRead = (isRead) =>
+      set((s) => ({ notifications: s.notifications.map((n) => (n.id === id ? { ...n, isRead } : n)) }))
+
+    setRead(true)
+    try {
+      await authApi.readNotification(id)
+    } catch (error) {
+      setRead(false)
+      noteApiFailure(set, error, 'notifications')
     }
   },
 
@@ -415,14 +458,21 @@ export const useAppStore = create((set, get) => ({
     return true
   },
 
-  /** Desbloqueo + reset de clave (USERS_UNLOCK). */
-  unlockUserAdmin: async (id, tempPassword) => {
-    const data = await usersApi.unlock(id, { tempPassword })
+  /** Desbloqueo administrativo (USERS_UNLOCK): el titular conserva su clave. */
+  unlockUserAdmin: async (id) => {
+    const data = await usersApi.unlock(id, {})
     set((s) => ({
-      users: s.users.map((u) => (u.id === id ? { ...u, isLocked: false, failedAttempts: 0 } : u)),
+      users: s.users.map((u) => (u.id === id ? { ...u, isLocked: false, failedAttempts: 0, status: 'ACTIVE' } : u)),
     }))
     ok(set)
-    return { data, tempPassword: data.tempPassword }
+    return { data }
+  },
+
+  /** Emision de OTP por el OSI. El token se devuelve al componente y no se almacena. */
+  generateUnlockToken: async (id) => {
+    const data = await usersApi.generateUnlockToken(id)
+    ok(set)
+    return { token: data.token, expiresAt: data.expiresAt, expiresInMinutes: data.expiresInMinutes }
   },
 
   /* -------------------------------- PERFIL ------------------------------- */
@@ -463,6 +513,8 @@ export const useAppStore = create((set, get) => ({
   changePassword: async ({ current, next }) => {
     try {
       await authApi.changePassword(current, next)
+      // La clave inicial ya fue reemplazada: se levanta la restriccion de la sesion.
+      set((s) => ({ session: s.session ? { ...s.session, mustChangePassword: false } : null }))
       await get().loadProfile()
       ok(set)
       return { ok: true }
@@ -499,7 +551,30 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
-  resetLock: () => set({ attempts: 0, lockedUntil: null, unlockRequest: null }),
+  /**
+   * Desbloqueo autoservicio con el OTP emitido por el OSI. La clave del titular
+   * no cambia. El OTP nunca se guarda en el estado.
+   */
+  verifyUnlockToken: async (userCode, token) => {
+    const code = String(userCode ?? '').trim().toUpperCase()
+    try {
+      const data = await authApi.verifyUnlockToken({ userCode: code, token })
+      set({ attempts: 0, lockedUntil: null, lockRequiresOsi: false, unlockRequest: null })
+      ok(set)
+      return { ok: true, message: data.message }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 0) {
+        noteApiFailure(set, error, 'unlock-token')
+        return { ok: false, reason: CONNECTION_ERROR }
+      }
+      if (error instanceof ApiError && error.status === 429) {
+        return { ok: false, reason: 'Demasiados intentos. Espere unos minutos antes de reintentar' }
+      }
+      return { ok: false, reason: error.message ?? 'Token invalido o expirado' }
+    }
+  },
+
+  resetLock: () => set({ attempts: 0, lockedUntil: null, lockRequiresOsi: false, unlockRequest: null }),
 
   logout: async () => {
     const user = get().session
@@ -509,7 +584,7 @@ export const useAppStore = create((set, get) => ({
       /* el cierre local no depende de la respuesta del servidor */
     }
     clearTokens()
-    set({ session: null, profile: null, directory: [], users: [], logs: [], activityLogs: [], cases: [] })
+    set({ session: null, profile: null, directory: [], notifications: [], users: [], logs: [], activityLogs: [], cases: [] })
   },
 
   /* -------------------------------- RBAC --------------------------------- */

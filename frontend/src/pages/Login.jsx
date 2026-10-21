@@ -23,7 +23,7 @@ import { validateUserId } from '@/lib/security'
 import { cn } from '@/lib/cn'
 import CaptchaChallenge from '@/components/auth/CaptchaChallenge'
 
-const SIGNAL_STEPS = ['Analisis de User ID…', 'Verificacion de politica…', 'MFA · passkey', 'Emision de sesion']
+const SIGNAL_STEPS = ['Analisis de User IDâ€¦', 'Verificacion de politicaâ€¦', 'MFA Â· passkey', 'Emision de sesion']
 
 export default function Login() {
   const navigate = useNavigate()
@@ -36,6 +36,8 @@ export default function Login() {
   const unlockAccount = useAppStore((s) => s.unlockAccount)
   const checkLockStatus = useAppStore((s) => s.checkLockStatus)
   const resetLock = useAppStore((s) => s.resetLock)
+  const verifyUnlockToken = useAppStore((s) => s.verifyUnlockToken)
+  const lockRequiresOsi = useAppStore((s) => s.lockRequiresOsi)
   const lastIdentifier = useAppStore((s) => s.lastIdentifier)
 
   const [userId, setUserId] = useState(lastIdentifier || 'mariana.solis')
@@ -48,12 +50,14 @@ export default function Login() {
   const [captchaToken, setCaptchaToken] = useState('')
   const [captchaVerified, setCaptchaVerified] = useState(false)
   const [localError, setLocalError] = useState('')
+  const [otpCode, setOtpCode] = useState('')
+  const [verifyingOtp, setVerifyingOtp] = useState(false)
 
   const locked = Boolean(lockedUntil) && now < lockedUntil
   const idCheck = useMemo(() => validateUserId(userId), [userId])
 
   useEffect(() => {
-    if (session) navigate('/dashboard', { replace: true })
+    if (session) navigate(session.mustChangePassword ? '/profile' : '/dashboard', { replace: true })
   }, [session, navigate])
 
   useEffect(() => {
@@ -78,10 +82,32 @@ export default function Login() {
       setCaptchaToken('')
       setLocalError('')
       setPassword('')
+      setOtpCode('')
       setBusy(false)
       setStep(-1)
     }
     setUserId(value)
+  }
+
+  const handleVerifyOtp = async () => {
+    if (otpCode.length !== 6 || verifyingOtp) return
+    if (!idCheck.valid) {
+      toast.danger('User ID invalido', idCheck.message)
+      return
+    }
+    setVerifyingOtp(true)
+    const result = await verifyUnlockToken(idCheck.normalized, otpCode)
+    setVerifyingOtp(false)
+    // El OTP es de un solo uso: se descarta del campo acierte o no.
+    setOtpCode('')
+    if (result.ok) {
+      resetLock()
+      setLocalError('')
+      setShowCaptcha(false)
+      toast.mint('Cuenta desbloqueada', 'Inicie sesion con su contrasena habitual')
+    } else {
+      toast.danger('Token rechazado', result.reason)
+    }
   }
 
   const submit = async (e) => {
@@ -94,7 +120,7 @@ export default function Login() {
     }
 
     if (showCaptcha && !captchaVerified) {
-      toast.danger('Verificación requerida', 'Por favor resuelve el CAPTCHA para continuar')
+      toast.danger('VerificaciÃ³n requerida', 'Por favor resuelve el CAPTCHA para continuar')
       return
     }
 
@@ -111,6 +137,11 @@ export default function Login() {
         captchaToken: captchaToken || undefined,
       })
       if (result.ok) {
+        if (result.user.mustChangePassword) {
+          toast.pastel('Cambio de clave requerido', 'Debe definir una contrasena personal antes de continuar')
+          navigate('/profile', { replace: true })
+          return
+        }
         toast.mint('Acceso concedido', 'Rol asignado: ')
         navigate('/dashboard', { replace: true })
         return
@@ -146,7 +177,7 @@ export default function Login() {
           </span>
           <div>
             <p className="font-display text-base font-bold leading-none">LegalShield</p>
-            <p className="mt-1 font-mono text-[9.5px] uppercase tracking-[0.2em] text-muted">Secure Legal OS · v4.2</p>
+            <p className="mt-1 font-mono text-[9.5px] uppercase tracking-[0.2em] text-muted">Secure Legal OS Â· v4.2</p>
           </div>
         </div>
       </header>
@@ -183,15 +214,65 @@ export default function Login() {
                   type={showPass ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   disabled={locked}
                   className="ls-input"
                 />
               </div>
               <button type="submit" disabled={locked || busy} className="ls-btn-primary relative w-full overflow-hidden py-3">
-                {busy ? 'Verificando...' : locked ? 'Sesion bloqueada' : 'Iniciar sesion segura'}
+                {busy
+                  ? 'Verificando...'
+                  : locked
+                    ? lockRequiresOsi
+                      ? 'Requiere desbloqueo del OSI'
+                      : 'Sesion bloqueada'
+                    : 'Iniciar sesion segura'}
               </button>
             </form>
+
+            {/* Fuera del formulario: Enter en el campo del token no dispara el login */}
+            <AnimatePresence>
+              {locked && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  className="mt-4 rounded-xl border border-accent/30 bg-accent/5 p-4 backdrop-blur"
+                >
+                  <div className="flex items-center gap-2 text-accent">
+                    <KeyRound className="h-4 w-4" />
+                    <span className="text-xs font-bold uppercase tracking-wider">Desbloqueo con token OTP</span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted">
+                    {lockRequiresOsi
+                      ? 'Bloqueo por reincidencia: la cuenta solo se libera con un token emitido por el Oficial de Seguridad (OSI).'
+                      : `Se libera automaticamente en ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')} o ingrese el token de 6 digitos que le entrego el OSI.`}
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      onKeyDown={(e) => e.key === 'Enter' && handleVerifyOtp()}
+                      placeholder="000000"
+                      aria-label="Token OTP de desbloqueo"
+                      className="ls-input flex-1 text-center font-mono text-lg tracking-[0.35em]"
+                    />
+                    <button
+                      type="button"
+                      disabled={otpCode.length !== 6 || verifyingOtp}
+                      onClick={handleVerifyOtp}
+                      className="ls-btn-primary px-4 text-xs"
+                    >
+                      {verifyingOtp ? 'Verificando...' : 'Desbloquear'}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </motion.section>
       </div>

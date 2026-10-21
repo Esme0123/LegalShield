@@ -30,9 +30,12 @@ export default function AppLayout() {
   const logs = useAppStore((s) => s.logs)
   const session = useAppStore((s) => s.session)
   const refreshAll = useAppStore((s) => s.refreshAll)
+  const notifications = useAppStore((s) => s.notifications)
+  const markNotificationRead = useAppStore((s) => s.markNotificationRead)
 
   const [title, subtitle] = TITLES[location.pathname] ?? ['LegalShield', '']
   const critical = logs.filter((l) => l.severity === 'critico').slice(0, 6)
+  const unread = notifications.filter((n) => !n.isRead).length
 
   useEffect(() => {
     setSidebarOpen(false)
@@ -119,9 +122,9 @@ export default function AppLayout() {
                 aria-label="Alertas de seguridad"
               >
                 <Bell className="h-4 w-4" />
-                {critical.length > 0 && (
+                {critical.length + unread > 0 && (
                   <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-danger px-1 text-[9px] font-bold text-white">
-                    {critical.length}
+                    {critical.length + unread}
                   </span>
                 )}
               </button>
@@ -133,8 +136,29 @@ export default function AppLayout() {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -8, scale: 0.97 }}
                     transition={{ duration: 0.2 }}
-                    className="absolute right-0 top-11 z-50 w-[min(90vw,20rem)] rounded-xl border border-line/60 bg-surface/95 p-2 shadow-lift backdrop-blur-xl"
+                    className="absolute right-0 top-11 z-50 w-[min(90vw,20rem)] max-h-[70vh] overflow-y-auto rounded-xl border border-line/60 bg-surface/95 p-2 shadow-lift backdrop-blur-xl"
                   >
+                    <p className="px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+                      Avisos de mi cuenta
+                    </p>
+                    {notifications.length === 0 ? (
+                      <p className="px-2 pb-2 text-[12px] text-muted">Sin avisos en su cuenta.</p>
+                    ) : (
+                      notifications.map((n) => (
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={() => !n.isRead && markNotificationRead(n.id)}
+                          className="block w-full rounded-lg px-2 py-1.5 text-left transition hover:bg-surface2/50"
+                        >
+                          <p className={cn('font-mono text-[10px] font-bold', n.isRead ? 'text-muted' : 'text-warn')}>
+                            {n.title}
+                          </p>
+                          <p className="text-[11.5px] leading-snug text-ink">{n.message}</p>
+                          <p className="font-mono text-[9.5px] text-muted">{timeAgo(n.createdAt)}</p>
+                        </button>
+                      ))
+                    )}
                     <p className="px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
                       Eventos criticos recientes
                     </p>
