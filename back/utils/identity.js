@@ -62,7 +62,9 @@ async function generateUserCode(client) {
 
   try {
     const { rows: result } = await client.query(
-      `SELECT COALESCE(MAX(CAST(NULLIF(REGEXP_REPLACE(user_code, '[^0-9]', ''), '') AS UNSIGNED)), 0) AS serial
+      // Solo el sufijo tras el ultimo guion: quitar todos los no digitos mezclaria el anio
+      // (2026) con el correlativo y el codigo crece sin limite hasta romper el VARCHAR.
+      `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(user_code, '-', -1) AS UNSIGNED)), 0) AS serial
          FROM users
         WHERE user_code LIKE ?`,
       [`${PREFIX}-${YEAR}-%`],

@@ -302,8 +302,10 @@ async function setUserStatus(req, res) {
 
   await withTransaction(async (client) => {
     if (active) {
+      // Un bloqueo indefinido (sin fecha) solo debe levantarlo el OSI con traza y aviso al titular:
+      // si volviera como LOCKED, el login lo liberaria al instante y baja + alta seria un desbloqueo encubierto.
       await client.query(
-        "UPDATE users SET is_active = TRUE, deactivated_at = NULL, status = CASE WHEN is_locked = TRUE THEN 'LOCKED' ELSE 'ACTIVE' END WHERE id = ?",
+        "UPDATE users SET is_active = TRUE, deactivated_at = NULL, status = CASE WHEN is_locked = TRUE AND locked_until IS NULL THEN 'LOCKED_OSI' WHEN is_locked = TRUE THEN 'LOCKED' ELSE 'ACTIVE' END WHERE id = ?",
         [id],
       )
     } else {
