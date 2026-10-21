@@ -22,7 +22,20 @@ function secret() {
   if (!value || value.length < 32 || value.startsWith('reemplazar_por_')) {
     throw new Error('Configure UNLOCK_TOKEN_SECRET en back/.env con un valor aleatorio de al menos 32 caracteres')
   }
+  // Separacion de claves (ISO 27002 8.24): si coincide con un secreto JWT, la fuga
+  // de ese secreto permitiria tambien revertir offline los OTP guardados en la BD.
+  if (value === process.env.JWT_SECRET || value === process.env.JWT_REFRESH_SECRET) {
+    throw new Error('UNLOCK_TOKEN_SECRET debe ser distinto de JWT_SECRET y de JWT_REFRESH_SECRET')
+  }
   return value
+}
+
+/**
+ * Valida el secreto del HMAC al arrancar (fallo seguro): con una configuracion
+ * invalida el servidor no inicia, en lugar de fallar en el primer desbloqueo.
+ */
+function assertUnlockSecretConfigured() {
+  secret()
 }
 
 /** OTP de 6 digitos con CSPRNG del sistema operativo (espacio completo 000000-999999). */
@@ -46,6 +59,7 @@ function otpMatches(userId, otp, storedHex) {
 }
 
 module.exports = {
+  assertUnlockSecretConfigured,
   generateOtp,
   hashOtp,
   otpMatches,

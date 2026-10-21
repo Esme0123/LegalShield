@@ -44,6 +44,12 @@ const EVENT = {
   USER_UNLOCKED: { status: 'INFO', stream: 'security' },
   ACCOUNT_UNLOCK_TOKEN_GENERATED: { status: 'INFO', stream: 'security' },
   ACCOUNT_UNLOCKED_VIA_TOKEN: { status: 'INFO', stream: 'security' },
+  UNLOCK_TOKEN_FAILED: { status: 'WARN', stream: 'security' },
+  UNLOCK_TOKEN_EXPIRED_ATTEMPT: { status: 'WARN', stream: 'security' },
+  UNLOCK_TOKEN_REUSE_ATTEMPT: { status: 'WARN', stream: 'security' },
+  UNLOCK_TOKEN_EXHAUSTED: { status: 'CRITICO', stream: 'security' },
+  UNLOCK_TOKEN_ISSUE_LIMITED: { status: 'WARN', stream: 'security' },
+  PASSWORD_CHANGE_REQUIRED: { status: 'INFO', stream: 'security' },
   PERMISSION_CHANGED: { status: 'WARN', stream: 'security' },
   // Operacion del negocio (actividad)
   CASE_CREATED: { status: 'INFO', stream: 'activity' },
