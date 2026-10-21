@@ -62,6 +62,18 @@ npm run dev               # http://localhost:4000
 
 Comprobar salud: `curl http://localhost:4000/health`
 
+### Secretos obligatorios en `.env`
+
+`JWT_SECRET`, `JWT_REFRESH_SECRET` y `UNLOCK_TOKEN_SECRET` son obligatorios.
+Cada uno debe ser un valor aleatorio propio de al menos 32 caracteres, distinto
+de los otros dos, y no puede conservar el valor de ejemplo de `.env.example`
+(los que empiezan por `reemplazar_por_`). Si alguno falta o no cumple estas
+reglas, el servidor no arranca e indica cual corregir. Generar cada uno con:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
 La contrasena inicial de las cuentas de demostracion es la de `DEMO_PASSWORD`
 (por defecto `Juris2026!Abg`).
 

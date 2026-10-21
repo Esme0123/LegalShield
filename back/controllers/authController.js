@@ -288,7 +288,13 @@ async function login(req, res) {
     }
 
     await releaseExpiredLock(user.id)
+    // El estado en memoria se alinea con la fila liberada: sin esto el contador
+    // previo exigiria CAPTCHA y contaria un fallo inexistente tras el vencimiento.
     user.is_locked = false
+    user.failed_attempts = 0
+    user.status = 'ACTIVE'
+    user.locked_until = null
+    user.remaining_seconds = null
   }
 
   // Validación CAPTCHA si hay intentos fallidos previos (Mecanismo Menos Común)

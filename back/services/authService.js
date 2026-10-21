@@ -13,15 +13,25 @@ const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d'
 const JWT_ISSUER = process.env.JWT_ISSUER || 'legalshield-api'
 
+/** Prefijo de los valores de ejemplo de .env.example: publicos, nunca validos. */
+const PLACEHOLDER_PREFIX = 'reemplazar_por_'
+
 /** Si un JWT no esta firmado con el secreto esperado, aborta el arranque. */
 function assertSecretsConfigured() {
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
     throw new Error('JWT_SECRET ausente o demasiado corto: define uno de al menos 32 caracteres en .env')
   }
+  // Un secreto publicado en el repositorio permitiria falsificar sesiones (fallo seguro).
+  if (process.env.JWT_SECRET.startsWith(PLACEHOLDER_PREFIX)) {
+    throw new Error('JWT_SECRET conserva el valor de ejemplo de .env.example: reemplacelo por uno aleatorio propio')
+  }
   // Separacion de claves: un secreto de refresh derivado de JWT_SECRET caeria
   // junto con el y escaparia a la comparacion contra UNLOCK_TOKEN_SECRET.
   if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET.length < 32) {
     throw new Error('JWT_REFRESH_SECRET ausente o demasiado corto: define uno propio de al menos 32 caracteres en .env')
+  }
+  if (process.env.JWT_REFRESH_SECRET.startsWith(PLACEHOLDER_PREFIX)) {
+    throw new Error('JWT_REFRESH_SECRET conserva el valor de ejemplo de .env.example: reemplacelo por uno aleatorio propio')
   }
   if (process.env.JWT_SECRET === process.env.JWT_REFRESH_SECRET) {
     throw new Error('JWT_REFRESH_SECRET debe ser distinto de JWT_SECRET')
