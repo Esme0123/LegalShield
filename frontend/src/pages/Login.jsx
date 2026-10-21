@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -45,6 +45,9 @@ export default function Login() {
   const [showCaptcha, setShowCaptcha] = useState(false)
   const [captchaToken, setCaptchaToken] = useState('')
   const [captchaVerified, setCaptchaVerified] = useState(false)
+  // Cambiar la key vuelve a montar el desafio: cada fallo exige uno nuevo
+  const [captchaKey, setCaptchaKey] = useState(0)
+  const passwordRef = useRef(null)
   const [, setLocalError] = useState('')
   const [otpCode, setOtpCode] = useState('')
   const [verifyingOtp, setVerifyingOtp] = useState(false)
@@ -173,11 +176,15 @@ export default function Login() {
       if (result.showCaptcha || result.attempts >= 1) {
         setShowCaptcha(true)
         setCaptchaVerified(false)
+        setCaptchaToken('')
+        setCaptchaKey((k) => k + 1)
       }
     } catch (error) {
       toast.danger('Fallo de autenticacion', error.message ?? 'No fue posible validar la credencial')
       setShowCaptcha(true)
       setCaptchaVerified(false)
+      setCaptchaToken('')
+      setCaptchaKey((k) => k + 1)
     } finally {
       setBusy(false)
       setStep(-1)
@@ -316,6 +323,7 @@ export default function Login() {
                   <div className="relative">
                     <input
                       id="password"
+                      ref={passwordRef}
                       type={showPass ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
@@ -338,18 +346,21 @@ export default function Login() {
                 <LockCounter attempts={attempts} max={MAX_ATTEMPTS} locked={locked} />
 
                 <AnimatePresence>
-                  {showCaptcha && !locked && (
+                  {showCaptcha && !captchaVerified && !locked && (
                     <motion.div
+                      key={captchaKey}
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden"
                     >
-                      <CaptchaChallenge 
+                      <CaptchaChallenge
                         onVerify={(verified, token) => {
                           setCaptchaVerified(verified)
                           if (verified) {
                             setCaptchaToken(token)
+                            // Resuelto el desafio, el bloque se oculta y se continua con la clave
+                            passwordRef.current?.focus()
                           }
                         }}
                         disabled={busy}
@@ -377,7 +388,7 @@ export default function Login() {
                         </div>
                         <div className="relative">
                           <p className="flex items-center gap-2 font-display text-sm font-bold text-danger">
-                            <Lock className="h-4 w-4" /> Acceso suspendido temporalmente por seguridad
+                            <Lock className="h-4 w-4" /> {lockRequiresOsi ? 'Acceso suspendido por seguridad' : 'Acceso suspendido temporalmente por seguridad'}
                           </p>
                           {!lockRequiresOsi && (
                             <p className="mt-1 text-[11.5px] leading-snug text-ink/80">

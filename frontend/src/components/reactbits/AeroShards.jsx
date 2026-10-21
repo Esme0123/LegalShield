@@ -14,7 +14,10 @@ export default function AeroShards({ density = 0.00009, className = '', showConn
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return undefined
-    const ctx = canvas.getContext('2d', { alpha: true })
+    // El contenedor (no el canvas) fija el tamano: un canvas con dimension
+    // intrinseca crece en cada medicion cuando devicePixelRatio != 1.
+    const container = canvas.parentElement
+    const ctx = container ? canvas.getContext('2d', { alpha: true }) : null
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
     let width = 0
@@ -22,6 +25,9 @@ export default function AeroShards({ density = 0.00009, className = '', showConn
     let dpr = 1
     let shards = []
     let raf = 0
+    let observer = null
+    let disabled = false
+    const MAX_SIDE = 4096
     const tokens = {
       accent: themeToken('--ls-accent', '110 204 175'),
       info: themeToken('--ls-info', '67 130 223'),
@@ -46,15 +52,38 @@ export default function AeroShards({ density = 0.00009, className = '', showConn
       }))
     }
 
+    // Ante cualquier fallo el fondo decorativo se apaga: nunca debe tapar la pagina.
+    const stop = () => {
+      disabled = true
+      cancelAnimationFrame(raf)
+      if (observer) observer.disconnect()
+      window.removeEventListener('pointermove', onPointerMove)
+    }
+
+    const disable = () => {
+      if (disabled) return
+      stop()
+      canvas.style.display = 'none'
+    }
+
     const resize = () => {
+      const rect = container.getBoundingClientRect()
+      if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height)) return
+      if (rect.width < 1 || rect.height < 1) return
       dpr = Math.min(window.devicePixelRatio || 1, 2)
-      const rect = canvas.getBoundingClientRect()
-      width = Math.max(1, rect.width)
-      height = Math.max(1, rect.height)
-      canvas.width = Math.round(width * dpr)
-      canvas.height = Math.round(height * dpr)
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      spawn()
+      const pixelW = Math.min(MAX_SIDE, Math.round(rect.width * dpr))
+      const pixelH = Math.min(MAX_SIDE, Math.round(rect.height * dpr))
+      if (!Number.isFinite(pixelW) || !Number.isFinite(pixelH) || pixelW < 1 || pixelH < 1) return
+      const sizeChanged = pixelW !== canvas.width || pixelH !== canvas.height
+      if (sizeChanged) {
+        canvas.width = pixelW
+        canvas.height = pixelH
+      }
+      width = rect.width
+      height = rect.height
+      // La escala sale de los pixeles reales: si se aplico el tope sigue encajando.
+      ctx.setTransform(pixelW / width, 0, 0, pixelH / height, 0, 0)
+      if (sizeChanged || shards.length === 0) spawn()
     }
 
     const drawShard = (s) => {
@@ -85,7 +114,7 @@ export default function AeroShards({ density = 0.00009, className = '', showConn
       ctx.stroke()
     }
 
-    const frame = () => {
+    const paint = () => {
       ctx.clearRect(0, 0, width, height)
 
       pointer.current.x += (pointer.current.tx - pointer.current.x) * 0.06
@@ -132,31 +161,60 @@ export default function AeroShards({ density = 0.00009, className = '', showConn
         }
       }
 
-      if (!reduced) raf = requestAnimationFrame(frame)
     }
 
-    const onPointerMove = (event) => {
-      const rect = canvas.getBoundingClientRect()
-      pointer.current.tx = (event.clientX - rect.left) / rect.width
-      pointer.current.ty = (event.clientY - rect.top) / rect.height
+    const frame = () => {
+      if (disabled) return
+      try {
+        paint()
+        if (!reduced) raf = requestAnimationFrame(frame)
+      } catch {
+        disable()
+      }
     }
 
-    const observer = new ResizeObserver(resize)
-    observer.observe(canvas)
+    function onPointerMove(event) {
+      const rect = container.getBoundingClientRect()
+      if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height)) return
+      if (rect.width === 0 || rect.height === 0) return
+      const tx = (event.clientX - rect.left) / rect.width
+      const ty = (event.clientY - rect.top) / rect.height
+      if (!Number.isFinite(tx) || !Number.isFinite(ty)) return
+      pointer.current.tx = tx
+      pointer.current.ty = ty
+    }
+
+    if (!ctx) {
+      disable()
+      return undefined
+    }
+
+    observer = new ResizeObserver(() => {
+      if (disabled) return
+      try {
+        resize()
+        // Redimensionar el canvas lo vacia; en movimiento reducido no hay bucle que lo repinte.
+        if (reduced) frame()
+      } catch {
+        disable()
+      }
+    })
+    observer.observe(container)
     window.addEventListener('pointermove', onPointerMove, { passive: true })
-    resize()
-    frame()
-
-    return () => {
-      cancelAnimationFrame(raf)
-      observer.disconnect()
-      window.removeEventListener('pointermove', onPointerMove)
+    try {
+      resize()
+      frame()
+    } catch {
+      disable()
     }
+
+    // La limpieza no oculta el canvas: el efecto puede montarse de nuevo (StrictMode).
+    return stop
   }, [density, showConnections])
 
   return (
     <div className={`pointer-events-none absolute inset-0 overflow-hidden ${className}`} aria-hidden="true">
-      <canvas ref={canvasRef} className="h-full w-full" />
+      <canvas ref={canvasRef} className="absolute inset-0 block h-full w-full" />
       <div className="ls-noise absolute inset-0 opacity-[0.05] mix-blend-overlay" />
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-bg/70" />
     </div>

@@ -104,14 +104,15 @@ function normalizeUsername(value) {
 
 /**
  * User ID estandarizado (punto 9.1): primer nombre + primer apellido.
- * "Marta Jose Perez" -> "marta.perez"; "Marta" + "Jose Perez" -> "marta.perez".
- * Se descartan segundos nombres para que el identificador sea estable y corto.
+ * Se usa el primer nombre y el primer apellido: "Marta Jose" + "Perez Rojas" ->
+ * "marta.perez". Los demas nombres y apellidos se descartan para que el
+ * identificador sea estable y corto.
  */
 function buildUsername(firstName, lastName) {
   const firstTokens = normalizeUsername(firstName).split('.').filter(Boolean)
   const lastTokens = normalizeUsername(lastName).split('.').filter(Boolean)
   const first = firstTokens[0] ?? ''
-  const last = lastTokens[lastTokens.length - 1] ?? ''
+  const last = lastTokens[0] ?? ''
   return [first, last].filter(Boolean).join('.')
 }
 
