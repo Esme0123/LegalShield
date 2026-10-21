@@ -105,15 +105,18 @@ async function listUsers(req, res) {
   }
 
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
-  const limit = Math.min(Number(req.query.limit || 100), 200)
-  const offset = Math.max(Number(req.query.offset || 0), 0)
+  // Paginacion normalizada a enteros: un valor no numerico no debe llegar al SQL.
+  const rawLimit = Math.trunc(Number(req.query.limit))
+  const rawOffset = Math.trunc(Number(req.query.offset))
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : 100
+  const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : 0
 
   const result = await rows(
     `${SELECT_USER}
      ${clause}
      ORDER BY u.created_at DESC, u.id DESC
-     LIMIT ${limit} OFFSET ${offset}`,
-    params,
+     LIMIT ? OFFSET ?`,
+    [...params, limit, offset],
   )
 
   res.json({ total: result.length, limit, offset, users: result.map(userPayload) })

@@ -2,6 +2,7 @@
 
 require('dotenv').config()
 
+const net = require('net')
 const express = require('express')
 const cors = require('cors')
 const helmet = require('helmet')
@@ -27,7 +28,46 @@ const PORT = Number(process.env.PORT || 4000)
 /* Cabeceras de seguridad                                                     */
 /* -------------------------------------------------------------------------- */
 
-app.set('trust proxy', 1) // detras de un balanceador/ingress: X-Forwarded-For es confiable
+/**
+ * Politica de confianza en proxies a partir de TRUST_PROXY (apagada por defecto).
+ * Con ella apagada req.ip es la IP del socket y X-Forwarded-For se ignora, de modo
+ * que un cliente directo no puede falsificar su IP para evadir los limitadores ni
+ * escribir una IP falsa en la bitacora (no repudio, ISO 27001 A.8.15).
+ * - sin definir, vacia o 'false': desactivada.
+ * - entero (p. ej. '1'): numero de saltos de proxy de confianza.
+ * - 'true': confia en cualquier proxy; no se recomienda (equivale a creer el header).
+ * - lista separada por comas de IP, CIDR o 'loopback' | 'linklocal' | 'uniquelocal'.
+ * Cualquier otro valor aborta el arranque (fallo seguro): una politica mal escrita
+ * no debe quedar aplicada a medias ni desactivarse sin que nadie lo note.
+ */
+function resolveTrustProxy(raw) {
+  const value = String(raw ?? '').trim()
+  if (value === '' || value.toLowerCase() === 'false') return false
+  if (value.toLowerCase() === 'true') return true
+  if (/^\d+$/.test(value)) return Number(value)
+
+  const RESERVED = ['loopback', 'linklocal', 'uniquelocal']
+  const entries = value.split(',').map((e) => e.trim())
+  const isValidEntry = (entry) => {
+    if (RESERVED.includes(entry)) return true
+    const [ip, prefix, extra] = entry.split('/')
+    const family = net.isIP(ip)
+    if (!family || extra !== undefined) return false
+    if (prefix === undefined) return true
+    const maxPrefix = family === 4 ? 32 : 128
+    return /^\d+$/.test(prefix) && Number(prefix) <= maxPrefix
+  }
+  const invalid = entries.filter((entry) => !isValidEntry(entry))
+  if (invalid.length > 0) {
+    throw new Error(
+      `TRUST_PROXY invalido (${invalid.map((e) => e || '(vacio)').join(', ')}): use 'false', un numero de saltos, 'true' ` +
+        "o una lista de IP/CIDR/'loopback'/'linklocal'/'uniquelocal' separada por comas",
+    )
+  }
+  return entries
+}
+
+app.set('trust proxy', resolveTrustProxy(process.env.TRUST_PROXY))
 
 app.use(
   helmet({

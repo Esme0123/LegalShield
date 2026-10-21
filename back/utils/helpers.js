@@ -1,14 +1,13 @@
 'use strict'
 
 /**
- * Extrae la IP real del cliente respetando el proxy inverso (X-Forwarded-For).
- * Se usa para security_logs.ip_address, que en PostgreSQL admite VARCHAR(45).
+ * IP del cliente segun req.ip, que Express calcula aplicando la politica
+ * 'trust proxy' (TRUST_PROXY). No se lee X-Forwarded-For directamente: sin un
+ * proxy de confianza ese header lo controla el cliente y permitiria falsificar la
+ * IP de la bitacora y evadir los limitadores por IP.
+ * Se usa para security_logs.ip_address y activity_logs.ip_address (MySQL, VARCHAR(45)).
  */
 function getClientIp(req) {
-  const forwarded = req.headers['x-forwarded-for']
-  if (typeof forwarded === 'string' && forwarded.length > 0) {
-    return forwarded.split(',')[0].trim()
-  }
   return req.ip ?? req.socket?.remoteAddress ?? null
 }
 

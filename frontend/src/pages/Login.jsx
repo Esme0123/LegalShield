@@ -144,6 +144,7 @@ export default function Login() {
         userId: idCheck.normalized,
         password,
         captchaToken: captchaToken || undefined,
+        captchaResponse: captchaToken || undefined,
       })
       if (result.ok) {
         if (result.user.mustChangePassword) {
@@ -159,12 +160,15 @@ export default function Login() {
         toast.danger('Demasiados intentos', result.error)
         return
       }
+      const lockMessage = result.requiresOsi
+        ? 'Cuenta bloqueada por reincidencia: solo el Oficial de Seguridad puede habilitarla'
+        : '3 de 3 - Cuenta inhabilitada temporalmente'
       toast.danger(
         result.locked ? 'Acceso suspendido' : 'Credencial invalida',
-        result.locked ? '3 de 3 - Cuenta inhabilitada temporalmente' : `Intento ${Math.min(result.attempts, MAX_ATTEMPTS)} de ${MAX_ATTEMPTS}`,
+        result.locked ? lockMessage : `Intento ${Math.min(result.attempts, MAX_ATTEMPTS)} de ${MAX_ATTEMPTS}`,
       )
       if (result.locked) {
-        setLocalError('3 de 3 - Cuenta inhabilitada temporalmente')
+        setLocalError(lockMessage)
       }
       if (result.showCaptcha || result.attempts >= 1) {
         setShowCaptcha(true)
@@ -266,7 +270,9 @@ export default function Login() {
                 <KeyRound className="h-5 w-5 shrink-0 text-ok" />
               </div>
 
-              <form onSubmit={submit} className="mt-5 space-y-4">
+              {/* El CAPTCHA trae su propio <form>: se monta fuera del de login para no anidarlos */}
+              <div className="mt-5 space-y-4">
+              <form id="login-form" onSubmit={submit} className="space-y-4">
                 <div>
                     <label className="ls-label" htmlFor="userId">
                       USER ID / USUARIO
@@ -327,6 +333,7 @@ export default function Login() {
                   </div>
                   <PasswordStrength value={password} className="mt-3" />
                 </div>
+              </form>
 
                 <LockCounter attempts={attempts} max={MAX_ATTEMPTS} locked={locked} />
 
@@ -379,7 +386,9 @@ export default function Login() {
                             </p>
                           )}
                           <div className="mt-2 text-[12px] font-bold text-danger">
-                            3 de 3 - Cuenta inhabilitada temporalmente
+                            {lockRequiresOsi
+                              ? 'Cuenta bloqueada por reincidencia: solo el Oficial de Seguridad puede habilitarla'
+                              : '3 de 3 - Cuenta inhabilitada temporalmente'}
                           </div>
                         </div>
                       </div>
@@ -389,6 +398,7 @@ export default function Login() {
 
                 <button
                   type="submit"
+                  form="login-form"
                   disabled={locked || busy}
                   className="ls-btn-primary relative w-full overflow-hidden py-3"
                 >
@@ -444,7 +454,7 @@ export default function Login() {
                 <p className="text-center font-mono text-[10px] text-muted">
                   Tres intentos fallidos bloquean la cuenta 15 minutos (30 si se repite) · al tercer bloqueo solo el Oficial de Seguridad puede habilitarla
                 </p>
-              </form>
+              </div>
 
               {/* Fuera del formulario: Enter en el campo del token no dispara el login */}
               <AnimatePresence>
