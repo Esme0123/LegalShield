@@ -12,17 +12,14 @@ const { notifyUser, NOTICE } = require('../services/notificationService')
 const { hashOtp, otpMatches, OTP_PATTERN, MAX_OTP_ATTEMPTS } = require('../utils/unlockToken')
 const { getClientIp } = require('../utils/helpers')
 const { badRequest, conflict, forbidden, notFound, unauthorized, unprocessable } = require('../utils/errors')
-const { evaluatePassword, PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
+const { PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
 const {
   USER_CODE_RE,
   USER_CODE_CI_RE,
   USERNAME_RE,
   normalizeUserCode,
   normalizeLoginIdentifier,
-  generateUserCode,
   sanitizeEmail,
-  buildUsername,
-  findAvailableUsername,
 } = require('../utils/identity')
 
 const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12)
@@ -41,9 +38,6 @@ const LOCK_OSI_MESSAGE = 'Cuenta bloqueada por reincidencia. Requiere desbloqueo
 /** Unico mensaje para todo rechazo del OTP: el motivo real solo va a security_logs. */
 const UNLOCK_TOKEN_REJECTED = 'Token de desbloqueo invalido, expirado o agotado. Solicite uno nuevo al Oficial de Seguridad'
 const CAPTCHA_THRESHOLD = Number(process.env.CAPTCHA_THRESHOLD || 1)
-
-/** Roles que un usuario puede solicitar al registrarse. */
-const REGISTERABLE_ROLES = ['abogado', 'asistente', 'socio']
 
 /** Segundos restantes del bloqueo persistido en MySQL (locked_until). */
 function remainingSecondsFrom(lockedUntil, sqlSeconds) {
@@ -87,97 +81,24 @@ async function invalidateUnlockToken(userId, expectedHash) {
 /* POST /api/auth/register                                                     */
 /* -------------------------------------------------------------------------- */
 
-async function register(req, res) {
-  const { firstName, lastName, email, password, role, firm, department, phone } = req.body ?? {}
+/**
+ * Registro publico deshabilitado (menor privilegio, ISO 27001 A.5.16 / A.5.18):
+ * el alta de cuentas es exclusiva del Oficial de Seguridad via POST /api/users,
+ * que asigna el rol y una clave inicial de cambio obligatorio. Un auto-registro
+ * permitiria a cualquiera crear una cuenta con rol privilegiado (p. ej. socio)
+ * sin intervencion del OSI. No se escribe nada en users ni se consume el
+ * correlativo del User ID; solo queda la evidencia del intento en security_logs.
+ */
+async function register(req, _res) {
+  const details = { ip: getClientIp(req), path: req.originalUrl }
+  // Solo datos de contexto saneados: nunca la contrasena ni el cuerpo completo.
+  const requestedEmail = sanitizeEmail(req.body?.email)
+  if (requestedEmail && requestedEmail.length <= 254) details.requestedEmail = requestedEmail
+  const requestedRole = String(req.body?.role ?? '').trim().toLowerCase()
+  if (/^[a-z_]{1,32}$/.test(requestedRole)) details.requestedRole = requestedRole
 
-  const missing = ['firstName', 'lastName', 'email', 'password', 'role'].filter((f) => !String(req.body?.[f] ?? '').trim())
-  if (missing.length > 0) {
-    throw badRequest('Campos obligatorios incompletos', { missing })
-  }
-
-  const cleanEmail = sanitizeEmail(email)
-  if (!cleanEmail) throw unprocessable('Correo institucional invalido')
-
-  const code = normalizeUserCode(role)
-  if (!REGISTERABLE_ROLES.includes(code)) {
-    throw unprocessable('Rol no valido para registro', { allowed: REGISTERABLE_ROLES })
-  }
-
-  const policy = evaluatePassword(password)
-  if (!policy.valid) {
-    throw unprocessable('La contrasena no cumple la politica de seguridad', {
-      failed: policy.failed,
-      rules: policy.rules.map(({ id, label }) => ({ id, label })),
-    })
-  }
-
-  // User ID estandarizado (punto 9.1): primer nombre + primer apellido, en
-  // minusculas y sin acentos. La disponibilidad se confirma dentro de la
-  // transaccion (marta.perez, marta.perez1, ...) para no pisar un duplicado.
-  const baseUsername = buildUsername(firstName, lastName)
-  const roleRow = await one('SELECT id, code FROM roles WHERE code = ?', [code])
-  if (!roleRow) throw unprocessable('El rol solicitado no existe en el catalogo', { role: code })
-
-  const existingEmail = await one('SELECT user_code FROM users WHERE email = ?', [cleanEmail])
-  if (existingEmail) throw conflict(`El correo ya esta registrado como ${existingEmail.user_code}`)
-
-  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
-
-  const user = await withTransaction(async (client) => {
-    // El correlativo se calcula dentro de la transaccion y con un lock consultivo
-    // (GET_LOCK) para que dos altas simultaneas no emitan el mismo User ID.
-    const userCode = await generateUserCode(client)
-    const username = await findAvailableUsername(client, baseUsername)
-    const { insertId } = await client.query(
-      `INSERT INTO users (user_code, username, email, password_hash, role_id, firm, department, phone, password_updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())`,
-      [
-        userCode,
-        username,
-        cleanEmail,
-        passwordHash,
-        roleRow.id,
-        String(firm ?? '').trim() || null,
-        String(department ?? '').trim() || null,
-        String(phone ?? '').trim() || null,
-      ],
-    )
-
-    // MySQL no soporta RETURNING: se recupera la fila por LAST insert id.
-    const { rows: inserted } = await client.query(
-      `SELECT id, user_code, username, email, role_id, firm, department, phone, password_updated_at
-         FROM users WHERE id = ?`,
-      [insertId],
-    )
-
-    // El primer registro de contrasena entra al historico (punto 9.3).
-    await client.query('INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)', [
-      inserted[0].id,
-      passwordHash,
-    ])
-
-    return inserted[0]
-  })
-
-  record('REGISTER', {
-    userCode: user.user_code,
-    req,
-    details: { email: user.email, role: roleRow.code, firm: user.firm },
-  })
-
-  res.status(201).json({
-    message: 'Alta registrada correctamente',
-    user: {
-      userCode: user.user_code,
-      username: user.username,
-      email: user.email,
-      role: roleRow.code,
-      firm: user.firm,
-      department: user.department,
-      phone: user.phone,
-      passwordUpdatedAt: user.password_updated_at,
-    },
-  })
+  record('REGISTRATION_BLOCKED', { userCode: null, req, details })
+  throw forbidden('El alta de cuentas la realiza el Oficial de Seguridad de la Información')
 }
 
 /* -------------------------------------------------------------------------- */

@@ -43,6 +43,7 @@ export default function Dashboard() {
   }, [loadCases, loadActivityLogs, loadMatrix])
 
   const critical = useMemo(() => logs.filter((l) => l.severity === 'critico').length, [logs])
+  const seesSecurity = (session?.permissions ?? []).includes('SECURITY_LOGS_VIEW')
   const [recentActivity, setRecentActivity] = useState([])
   
   useEffect(() => {

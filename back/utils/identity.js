@@ -3,7 +3,7 @@
 /**
  * Normalizacion de identidad institucional:
  *   · User ID con formato LEG-AAAA-NNNN
- *   · generacion del correlativo sin colisiones bajo concurrencia
+ *   · generacion del correlativo (la unicidad final la garantiza la restriccion UNIQUE)
  *   · saneamiento de correo y nombre de usuario
  */
 
@@ -52,9 +52,14 @@ function describeUserCodePattern() {
  *
  * `MAX(...)` es una funcion de agregado y MySQL no admite FOR UPDATE sobre ella,
  * ademas de que un MAX seguido de un INSERT deja una ventana de carrera entre
- * lecturas. La solucion es un lock consultivo de sesion (`GET_LOCK`): serializa
- * a los emisores concurrentes y funciona tambien con la tabla vacia. El lock se
- * libera explicitamente en el `finally` para no mantenerlo en la sesion del pool.
+ * lecturas. Se usa un lock consultivo de sesion (`GET_LOCK`) que serializa solo
+ * el calculo del correlativo y funciona tambien con la tabla vacia. El lock se
+ * libera en el `finally` para no mantenerlo en la sesion del pool, es decir, al
+ * salir de esta funcion y antes del INSERT y del COMMIT de quien la llama. Con
+ * aislamiento REPEATABLE READ, dos altas simultaneas pueden obtener el mismo
+ * codigo: la segunda falla por la restriccion UNIQUE de `user_code` (409), sin
+ * duplicar datos. El alta de cuentas es exclusiva del OSI y se hace de una en
+ * una, por lo que se acepta y el operador reintenta.
  */
 async function generateUserCode(client) {
   const lockName = `${PREFIX}-${YEAR}-correlative`

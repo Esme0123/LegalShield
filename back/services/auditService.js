@@ -30,6 +30,7 @@ const EVENT = {
   AUTH_DISABLED: { status: 'WARN', stream: 'security' },
   AUTH_UNLOCK: { status: 'INFO', stream: 'security' },
   REGISTER: { status: 'INFO', stream: 'security' },
+  REGISTRATION_BLOCKED: { status: 'WARN', stream: 'security' },
   LOGOUT: { status: 'INFO', stream: 'security' },
   TOKEN_REFRESH: { status: 'INFO', stream: 'security' },
   PASSWORD_CHANGED: { status: 'INFO', stream: 'security' },

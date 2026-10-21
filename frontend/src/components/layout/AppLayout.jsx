@@ -31,11 +31,11 @@ export default function AppLayout() {
   const session = useAppStore((s) => s.session)
   const refreshAll = useAppStore((s) => s.refreshAll)
   const notifications = useAppStore((s) => s.notifications)
+  const unread = useAppStore((s) => s.unreadNotifications)
   const markNotificationRead = useAppStore((s) => s.markNotificationRead)
 
   const [title, subtitle] = TITLES[location.pathname] ?? ['LegalShield', '']
   const critical = logs.filter((l) => l.severity === 'critico').slice(0, 6)
-  const unread = notifications.filter((n) => !n.isRead).length
 
   useEffect(() => {
     setSidebarOpen(false)
@@ -114,7 +114,7 @@ export default function AppLayout() {
               </span>
             </Link>
 
-            <div className="relative">
+            <div className="sm:relative">
               <button
                 type="button"
                 onClick={() => setBellOpen((v) => !v)}
@@ -136,7 +136,7 @@ export default function AppLayout() {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -8, scale: 0.97 }}
                     transition={{ duration: 0.2 }}
-                    className="absolute right-0 top-11 z-50 w-[min(90vw,20rem)] max-h-[70vh] overflow-y-auto rounded-xl border border-line/60 bg-surface/95 p-2 shadow-lift backdrop-blur-xl"
+                    className="absolute right-3 top-14 z-50 sm:right-0 sm:top-11 w-[min(90vw,20rem)] max-h-[70vh] overflow-y-auto rounded-xl border border-line/60 bg-surface/95 p-2 shadow-lift backdrop-blur-xl"
                   >
                     <p className="px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
                       Avisos de mi cuenta

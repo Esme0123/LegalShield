@@ -191,8 +191,8 @@ const initialState = () => ({
   lockedUntil: null,
   lockRequiresOsi: false,
   lastIdentifier: readLastIdentifier(),
-  unlockRequest: null,
   notifications: [],
+  unreadNotifications: 0,
   didactic: true,
   apiStatus: isApiEnabled() ? 'probeando' : 'error',
   apiError: isApiEnabled() ? null : 'API REST deshabilitada por configuracion (VITE_API_ENABLED=false)',
@@ -290,6 +290,11 @@ export const useAppStore = create((set, get) => ({
         return { ok: false, locked: false, attempts: get().attempts, error: `${CONNECTION_ERROR}` }
       }
 
+      // 429: limitador de peticiones; no es una credencial incorrecta ni cuenta intento.
+      if (error instanceof ApiError && error.status === 429) {
+        return { ok: false, locked: false, rateLimited: true, attempts: get().attempts, error: error.message }
+      }
+
       // 403 = cuenta desactivada por un administrador (baja logica).
       if (error instanceof ApiError && error.isForbidden) {
         return { ok: false, locked: false, attempts: get().attempts, error: error.message }
@@ -308,7 +313,6 @@ export const useAppStore = create((set, get) => ({
           attempts: locked ? MAX_ATTEMPTS : attempts,
           lockedUntil: requiresOsi ? Number.MAX_SAFE_INTEGER : locked ? Date.now() + remainingSeconds * 1000 : null,
           lockRequiresOsi: requiresOsi,
-          unlockRequest: locked ? get().unlockRequest : null,
         })
         return { ok: false, locked, requiresOsi, attempts, remainingSeconds, error: error.message }
       }
@@ -338,8 +342,11 @@ export const useAppStore = create((set, get) => ({
         lastIdentifier: code,
       })
       return { ...data, remainingSeconds }
-    } catch {
+    } catch (error) {
       // Sin conexion o cuenta inexistente: no se altera el estado de bloqueo.
+      if (error instanceof ApiError && error.status === 429) {
+        return { isLocked: false, remainingSeconds: 0, failedAttempts: 0, rateLimited: true, error: error.message }
+      }
       return { isLocked: false, remainingSeconds: 0, failedAttempts: 0 }
     }
   },
@@ -360,7 +367,11 @@ export const useAppStore = create((set, get) => ({
   loadNotifications: async () => {
     try {
       const data = await authApi.notifications()
-      set({ notifications: data.notifications ?? [] })
+      const list = data.notifications ?? []
+      set({
+        notifications: list,
+        unreadNotifications: Number(data.unread ?? list.filter((n) => !n.isRead).length),
+      })
       return data.notifications?.length ?? 0
     } catch (error) {
       noteApiFailure(set, error, 'notifications')
@@ -376,7 +387,10 @@ export const useAppStore = create((set, get) => ({
     const target = get().notifications.find((n) => n.id === id)
     if (!target || target.isRead) return
     const setRead = (isRead) =>
-      set((s) => ({ notifications: s.notifications.map((n) => (n.id === id ? { ...n, isRead } : n)) }))
+      set((s) => ({
+        notifications: s.notifications.map((n) => (n.id === id ? { ...n, isRead } : n)),
+        unreadNotifications: Math.max(0, s.unreadNotifications + (isRead ? -1 : 1)),
+      }))
 
     setRead(true)
     try {
@@ -530,27 +544,6 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
-  requestUnlock: async (userCode) => {
-    set({ unlockRequest: { ts: nowIso(), ticket: `UNB-${userCode ?? 'ANONIMO'}` } })
-  },
-
-  /**
-   * Desbloqueo real contra la API. Exige el permiso ACCOUNT_UNLOCK: lo restringe
-   * al Oficial de Seguridad (OSI); no es una autoayuda del titular bloqueado.
-   */
-  unlockAccount: async (userCode) => {
-    try {
-      const data = await authApi.unlock(userCode)
-      set({ attempts: 0, lockedUntil: null, unlockRequest: null })
-      ok(set)
-      return { ok: true, message: data.message }
-    } catch (error) {
-      if (error instanceof ApiError && error.isForbidden) return { ok: false, reason: 'forbidden' }
-      noteApiFailure(set, error, 'unlock')
-      return { ok: false, reason: 'error' }
-    }
-  },
-
   /**
    * Desbloqueo autoservicio con el OTP emitido por el OSI. La clave del titular
    * no cambia. El OTP nunca se guarda en el estado.
@@ -559,7 +552,7 @@ export const useAppStore = create((set, get) => ({
     const code = String(userCode ?? '').trim().toUpperCase()
     try {
       const data = await authApi.verifyUnlockToken({ userCode: code, token })
-      set({ attempts: 0, lockedUntil: null, lockRequiresOsi: false, unlockRequest: null })
+      set({ attempts: 0, lockedUntil: null, lockRequiresOsi: false })
       ok(set)
       return { ok: true, message: data.message }
     } catch (error) {
@@ -568,13 +561,13 @@ export const useAppStore = create((set, get) => ({
         return { ok: false, reason: CONNECTION_ERROR }
       }
       if (error instanceof ApiError && error.status === 429) {
-        return { ok: false, reason: 'Demasiados intentos. Espere unos minutos antes de reintentar' }
+        return { ok: false, reason: error.message || 'Demasiados intentos. Espere unos minutos antes de reintentar' }
       }
       return { ok: false, reason: error.message ?? 'Token invalido o expirado' }
     }
   },
 
-  resetLock: () => set({ attempts: 0, lockedUntil: null, lockRequiresOsi: false, unlockRequest: null }),
+  resetLock: () => set({ attempts: 0, lockedUntil: null, lockRequiresOsi: false }),
 
   logout: async () => {
     const user = get().session
@@ -584,7 +577,7 @@ export const useAppStore = create((set, get) => ({
       /* el cierre local no depende de la respuesta del servidor */
     }
     clearTokens()
-    set({ session: null, profile: null, directory: [], notifications: [], users: [], logs: [], activityLogs: [], cases: [] })
+    set({ session: null, profile: null, directory: [], notifications: [], unreadNotifications: 0, users: [], logs: [], activityLogs: [], cases: [] })
   },
 
   /* -------------------------------- RBAC --------------------------------- */

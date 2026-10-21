@@ -59,7 +59,11 @@ export default function Login() {
   // Tras un F5 el estado del bloqueo se recupera de MySQL: el servidor recalcula
   // los segundos restantes exactos y la cuenta regresiva continua donde iba.
   useEffect(() => {
-    if (lastIdentifier) checkLockStatus(lastIdentifier)
+    if (lastIdentifier) {
+      checkLockStatus(lastIdentifier).then((status) => {
+        if (status?.rateLimited) toast.danger('Demasiados intentos', status.error)
+      })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -149,6 +153,10 @@ export default function Login() {
         }
         toast.mint('Acceso concedido', `Rol asignado: ${String(result.user.role).toUpperCase()}`)
         navigate('/dashboard', { replace: true })
+        return
+      }
+      if (result.rateLimited) {
+        toast.danger('Demasiados intentos', result.error)
         return
       }
       toast.danger(
@@ -434,7 +442,7 @@ export default function Login() {
                 </AnimatePresence>
 
                 <p className="text-center font-mono text-[10px] text-muted">
-                  Tres intentos fallidos inhabilitan la cuenta 2 minutos · el desbloqueo lo realiza el OSI
+                  Tres intentos fallidos bloquean la cuenta 15 minutos (30 si se repite) · al tercer bloqueo solo el Oficial de Seguridad puede habilitarla
                 </p>
               </form>
 
@@ -492,10 +500,14 @@ export default function Login() {
           <span className="text-ink">osi.seguridad</span>, <span className="text-ink">mariana.solis</span> o{' '}
           <span className="text-ink">diego.ferrer</span>
         </p>
+        <p className="mt-1 font-mono text-[11px] text-muted">
+          Contraseña Demo: <span className="text-ink">Juris2026!Abg</span>
+        </p>
         <button
           type="button"
           onClick={() => {
             setUserId('osi.seguridad')
+            setPassword('Juris2026!Abg')
           }}
           className="mt-3 w-full rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-semibold text-accent transition hover:bg-accent/15"
         >

@@ -50,15 +50,22 @@ back/
 ```bash
 cd back
 npm install
-cp .env.example .env      # ajustar credenciales y JWT_SECRET
+cp .env.example .env      # ajustar DB_* y los tres secretos obligatorios (ver abajo)
 
-# Crear la base (una vez) en PostgreSQL
-psql -U postgres -c "CREATE DATABASE legalshield;"
-
-npm run db:setup          # aplica database/schema.sql
-npm run db:seed           # catalogo + usuarios + expedientes, con hashes bcrypt reales
-npm run dev               # http://localhost:4000
+# Requiere MySQL 8 o MariaDB 10.4+ en marcha (p. ej. XAMPP) con los datos DB_* de .env
+npm run init-db           # crea la base y el esquema, aplica migraciones y siembra datos demo
+npm run start             # http://localhost:4000 (npm run dev para recarga automatica)
 ```
+
+`npm run init-db` es idempotente: puede ejecutarse cuantas veces sea sin duplicar
+datos. Crea la base `DB_NAME` si no existe, crea las tablas, triggers y vista,
+aplica las migraciones pendientes sobre una base ya existente y siembra roles,
+permisos, la matriz rol x permiso y las cuentas de demostracion.
+
+`npm run db:setup` solo aplica `database/schema.sql`: crea la base y las tablas
+(con triggers y el catalogo de roles y permisos), pero sin matriz rol x permiso
+ni usuarios, y no migra una base existente. Para una base utilizable, o para
+actualizar una creada con una version anterior, usar `npm run init-db`.
 
 Comprobar salud: `curl http://localhost:4000/health`
 
@@ -75,7 +82,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
 La contrasena inicial de las cuentas de demostracion es la de `DEMO_PASSWORD`
-(por defecto `Juris2026!Abg`).
+(ver su valor por defecto en `back/scripts/initDb.js`).
 
 ## Endpoints
 
@@ -83,8 +90,9 @@ La contrasena inicial de las cuentas de demostracion es la de `DEMO_PASSWORD`
 
 | Metodo | Ruta | Auth | Descripcion |
 |---|---|---|---|
-| POST | `/register` | publica | Emite `LEG-2026-XXXX`, valida complejidad (12 chars, mayuscula, minuscula, numero, simbolo), hashea con bcrypt 12 rounds y guarda el primer hash en `password_history`. |
-| POST | `/login` | publica | Bloquea con 403 si `is_locked`; si la clave falla incrementa `failed_attempts`; al llegar a 3 marca `is_locked` y escribe `AUTH_LOCKED`; si es correcta reinicia el contador y emite JWT con User ID + permisos RBAC, registrando `AUTH_SUCCESS`. |
+| POST | `/register` | publica | Deshabilitado: responde siempre 403 "El alta de cuentas la realiza el Oficial de Seguridad de la Información", sin crear la cuenta ni consumir el correlativo del User ID, y registra `REGISTRATION_BLOCKED`. El alta la hace el OSI con `POST /api/users` (menor privilegio). |
+| POST | `/login` | publica | Acepta User ID, username o correo. Cuenta desactivada: 403 (`AUTH_DISABLED`). Clave incorrecta: 401 con `failedAttempts`, `maxAttempts` y `showCaptcha`; desde el primer fallo exige CAPTCHA (`captchaToken` + `captchaResponse`) y uno ausente o incorrecto responde 401 y suma a `failed_attempts`. Bloqueo progresivo: al 3.er fallo la cuenta se bloquea 15 min (`LOCK_MINUTES`); el 2.º bloqueo sin login exitoso intermedio dura 30 min (`LOCK_MINUTES_SECOND`) y el 3.º es indefinido (`status = LOCKED_OSI`), que solo levanta el OSI o un OTP valido. Al bloquearse se registra `LOGIN_LOCKED` y se avisa al titular; todo intento sobre una cuenta bloqueada responde 401 con `isLocked`, `requiresOsi` y `remainingSeconds` (`null` si es indefinido) y registra `AUTH_LOCKED`. Clave correcta: reinicia contadores y backoff, emite JWT + refresh con User ID y permisos RBAC (`AUTH_SUCCESS`) e informa `mustChangePassword`; si es `true`, la sesion solo admite `GET /me`, `GET /profile`, `PUT /password`, `POST /logout` y `GET /notifications` (el resto responde 403 `PASSWORD_CHANGE_REQUIRED`). |
+| POST | `/verify-unlock-token` | publica | Desbloqueo por OTP con `{ userCode, token }`: OTP de 6 digitos emitido por el OSI (`POST /api/users/:id/generate-unlock-token`). La base guarda solo su HMAC-SHA256 con `UNLOCK_TOKEN_SECRET`, ligado al usuario, y se compara en tiempo constante; vence a los 15 min (`UNLOCK_TOKEN_TTL_MINUTES`), admite 5 intentos (`UNLOCK_TOKEN_MAX_ATTEMPTS`) y es de un solo uso. Formato invalido: 400. Todo rechazo (usuario inexistente, token incorrecto, expirado, agotado o ya usado) responde el mismo 401; el motivo solo queda en `security_logs`. Si es valido desbloquea la cuenta (tambien `LOCKED_OSI`) y reinicia el backoff sin tocar la clave (`ACCOUNT_UNLOCKED_VIA_TOKEN`). |
 | POST | `/refresh` | refresh token | Rota el refresh token y devuelve un access token nuevo. |
 | POST | `/unlock` | `TOKEN_RESET` | Desbloquea la cuenta: `is_locked = FALSE`, `failed_attempts = 0`. |
 | GET | `/me` | sesion | Identidad y permisos vigentes del titular. |
@@ -152,7 +160,10 @@ El trigger `trg_users_updated_at` mantiene `updated_at` sin intervencion de la A
 - **SQL parametrizado** en todos los controllers; los identificadores dinamicos
   (`ORDER BY`, `LIMIT`) se validan contra listas blancas antes de interpolarse.
 - **Secrets fuera del repositorio**: `.env` esta en `.gitignore` y el arranque
-  aborta si `JWT_SECRET` es corto o si coincide con `JWT_REFRESH_SECRET`.
+  aborta (fallo seguro) si falta o es invalido cualquiera de los tres secretos:
+  `JWT_SECRET`, `JWT_REFRESH_SECRET` y `UNLOCK_TOKEN_SECRET` deben tener al menos
+  32 caracteres, no conservar el valor de ejemplo (prefijo `reemplazar_por_`) y
+  ser distintos entre si.
 
 ## Puntos a revisar antes de produccion
 

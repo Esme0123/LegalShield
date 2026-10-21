@@ -125,14 +125,22 @@ app.use((_req, res) => {
 app.use((err, req, res, _next) => {
   // Violaciones de restricciones de MySQL que el codigo no anticipa.
   // 1062 = duplicate entry (ER_DUP_ENTRY), 1452 = FK inexistente, 3819 = CHECK.
-  if (err.errno === 1062 || err.code === 'ER_DUP_ENTRY') {
-    return res.status(409).json({ error: 'El registro ya existe', detail: err.sqlMessage })
+  // sqlMessage revela nombres de restricciones y valores (OWASP A05): solo va al
+  // logger del servidor; el cliente recibe un mensaje generico.
+  const isDuplicate = err.errno === 1062 || err.code === 'ER_DUP_ENTRY'
+  const isMissingRef = err.errno === 1452 || err.code === 'ER_NO_REFERENCED_ROW_2'
+  const isCheck = err.errno === 3819
+  if (isDuplicate || isMissingRef || isCheck) {
+    logger.warn('Restriccion de integridad violada', { path: req.originalUrl, code: err.code, detail: err.sqlMessage })
   }
-  if (err.errno === 1452 || err.code === 'ER_NO_REFERENCED_ROW_2') {
-    return res.status(400).json({ error: 'Referencia invalida a un registro inexistente', detail: err.sqlMessage })
+  if (isDuplicate) {
+    return res.status(409).json({ error: 'El registro ya existe' })
   }
-  if (err.errno === 3819) {
-    return res.status(422).json({ error: 'Violacion de restriccion de integridad', detail: err.sqlMessage })
+  if (isMissingRef) {
+    return res.status(400).json({ error: 'Referencia invalida a un registro inexistente' })
+  }
+  if (isCheck) {
+    return res.status(422).json({ error: 'Violacion de restriccion de integridad' })
   }
 
   const status = err.status || 500

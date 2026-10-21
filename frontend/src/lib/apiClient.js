@@ -209,7 +209,6 @@ export const authApi = {
   changePassword: (currentPassword, newPassword) =>
     put('/auth/password', { currentPassword, newPassword }),
   passwordHistory: () => get('/auth/password-history'),
-  unlock: (userCode) => post('/auth/unlock', { userCode }),
   /** Estado del bloqueo temporal de una cuenta (restaura el conteo tras F5). */
   lockStatus: (userCode) => post('/auth/lock-status', { userCode }, { auth: false }),
   verifyUnlockToken: (payload) => post('/auth/verify-unlock-token', payload, { auth: false }),
