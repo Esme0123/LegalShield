@@ -7,7 +7,12 @@
  *   POST  /api/users            -> USERS_CREATE (regla nombre.apellido, 9.1)
  *   PUT   /api/users/:id        -> USERS_UPDATE (datos personales, rol o estado)
  *   PATCH /api/users/:id/status -> USERS_DELETE (baja logica / reactivacion)
- *   POST  /api/users/:id/unlock -> USERS_UNLOCK (desbloquear y resetear clave)
+ *   POST  /api/users/:id/unlock -> USERS_UNLOCK (desbloqueo sin reset de clave)
+ *   POST  /api/users/:id/generate-unlock-token -> ACCOUNT_UNLOCK | TOKEN_RESET (emite OTP)
+ *
+ * El OSI nunca conoce ni sustituye la clave de un titular: el desbloqueo no
+ * toca password_hash y la unica clave que ve es la inicial del alta, que queda
+ * neutralizada por must_change_password.
  *
  * La baja es logica: `is_active = FALSE`. Las cuentas desactivadas no pueden
  * iniciar sesion (los comprueba authController) pero conservan su historial.
@@ -15,10 +20,12 @@
 
 const crypto = require('crypto')
 const bcrypt = require('bcryptjs')
-const { one, rows, withTransaction } = require('../config/db')
+const { one, rows, query, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
-const { badRequest, conflict, notFound, unprocessable } = require('../utils/errors')
-const { evaluatePassword, PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
+const { notifyUser, NOTICE } = require('../services/notificationService')
+const { badRequest, conflict, notFound, unprocessable, tooManyRequests } = require('../utils/errors')
+const { generateOtp, hashOtp, OTP_TTL_MINUTES, MAX_OTP_ISSUES_PER_HOUR } = require('../utils/unlockToken')
+const { evaluatePassword } = require('../utils/passwordPolicy')
 const {
   generateUserCode,
   sanitizeEmail,
@@ -31,12 +38,6 @@ const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12)
 /** Clave temporal que cumple la politica 9.3 (>= 12 chars, 4 clases). */
 function generateTempPassword() {
   return `${crypto.randomBytes(9).toString('base64url')}Aa1!`
-}
-
-/** Genera token numérico de 6 dígitos para desbloqueo */
-function generateSixDigitToken() {
-  // Generar token de 6 dígitos (numérico)
-  return Math.floor(100000 + Math.random() * 900000).toString()
 }
 
 /** Columnas del directorio expuestas al ABM (nunca hashes). */
@@ -164,8 +165,10 @@ async function createUser(req, res) {
     const username = await findAvailableUsername(client, baseUsername)
 
     const { insertId } = await client.query(
-      `INSERT INTO users (user_code, username, email, password_hash, role_id, firm, department, phone, password_updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())`,
+      // must_change_password = TRUE siempre: la clave inicial la conoce el OSI y
+      // caduca en el primer acceso del titular (el middleware limita la sesion).
+      `INSERT INTO users (user_code, username, email, password_hash, role_id, firm, department, phone, password_updated_at, must_change_password)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, now(), TRUE)`,
       [
         userCode,
         username,
@@ -198,13 +201,14 @@ async function createUser(req, res) {
   record('USER_CREATED', {
     userCode: req.user.user_code,
     req,
-    details: { target: user.userCode, email: user.email, role: user.role },
+    details: { target: user.userCode, email: user.email, role: user.role, mustChangePassword: true },
   })
 
   res.status(201).json({
     message: 'Usuario creado correctamente',
     tempPasswordCreated: Boolean(tempPassword),
     tempPassword,
+    mustChangePassword: true,
     user: userPayload(user),
   })
 }
@@ -323,61 +327,39 @@ async function setUserStatus(req, res) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* POST /api/users/:id/unlock  Desbloqueo + reset de clave                    */
+/* POST /api/users/:id/unlock  Desbloqueo sin reset de clave                  */
 /* -------------------------------------------------------------------------- */
 
 async function unlockUser(req, res) {
   const id = parseId(req)
-  const existing = await one('SELECT id, user_code, is_locked FROM users WHERE id = ?', [id])
+  const existing = await one('SELECT id, user_code, is_locked, is_active FROM users WHERE id = ?', [id])
   if (!existing) throw notFound(`No existe el usuario #${id}`)
+  if (!existing.is_active) throw conflict('La cuenta esta desactivada; reactivela antes de desbloquearla')
 
-  const requested = req.body?.tempPassword
-  const password =
-    typeof requested === 'string' && requested.trim().length > 0
-      ? requested.trim()
-      : generateTempPassword()
-
-  const policy = evaluatePassword(password)
-  if (!policy.valid) {
-    throw unprocessable('La contrasena temporal no cumple la politica de seguridad', {
-      failed: policy.failed,
-      rules: policy.rules.map(({ id, label }) => ({ id, label })),
-    })
-  }
-
-  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
-
+  // Secreto profesional: el OSI restablece el acceso pero jamas toca ni conoce
+  // la clave del titular, por eso aqui no se genera, recibe ni guarda ninguna.
   await withTransaction(async (client) => {
     await client.query(
       `UPDATE users
-          SET is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0,
+          SET is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0, lock_count = 0,
               locked_at = NULL, locked_until = NULL,
-              password_hash = ?, password_updated_at = now(),
-              unlock_token = NULL, unlock_token_expires_at = NULL, unlock_token_used = FALSE
+              unlock_token = NULL, unlock_token_expires_at = NULL,
+              unlock_token_used = FALSE, unlock_token_attempts = 0
         WHERE id = ?`,
-      [passwordHash, id],
+      [id],
     )
-    await client.query('INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)', [id, passwordHash])
-    await client.query(
-      `DELETE FROM password_history
-        WHERE user_id = ?
-          AND id NOT IN (
-            SELECT id FROM (SELECT id FROM password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?) keep
-          )`,
-      [id, id, PASSWORD_HISTORY_LIMIT],
-    )
+    await notifyUser(existing.id, NOTICE.UNLOCKED_BY_OSI(), client)
   })
 
   record('USER_UNLOCKED', {
     userCode: req.user.user_code,
     req,
-    details: { target: existing.user_code, resetPassword: true },
+    details: { target: existing.user_code, method: 'desbloqueo_administrativo', resetPassword: false },
   })
 
   res.json({
-    message: `Cuenta ${existing.user_code} desbloqueada y clave reiniciada`,
-    user: { id, userCode: existing.user_code, isLocked: false, failedAttempts: 0, isActive: true },
-    tempPassword: password,
+    message: `Cuenta ${existing.user_code} desbloqueada. El titular conserva su contrasena actual`,
+    user: { id, userCode: existing.user_code, isLocked: false, failedAttempts: 0, isActive: true, status: 'ACTIVE' },
   })
 }
 
@@ -389,30 +371,54 @@ async function generateUnlockToken(req, res) {
   const id = parseId(req)
   const existing = await one('SELECT id, user_code, is_locked, is_active FROM users WHERE id = ?', [id])
   if (!existing) throw notFound(`No existe el usuario #${id}`)
+  if (!existing.is_active) throw conflict('La cuenta esta desactivada; no se emiten tokens')
+  if (!existing.is_locked) throw conflict('La cuenta no esta bloqueada; no se requiere token')
 
-  const token = generateSixDigitToken()
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000) // 15 minutos
+  // Tope de emisiones por cuenta: impide barrer el espacio de 10^6 re-emitiendo tokens.
+  // user_code (LEG-YYYY-NNNN) no contiene comodines de LIKE y details es JSON.stringify,
+  // asi que el patron sobre "target" es exacto.
+  const issued = await one(
+    `SELECT COUNT(*) AS total FROM security_logs
+      WHERE action = 'ACCOUNT_UNLOCK_TOKEN_GENERATED'
+        AND details LIKE ?
+        AND timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
+    [`%"target":"${existing.user_code}"%`],
+  )
+  if (Number(issued.total) >= MAX_OTP_ISSUES_PER_HOUR) {
+    record('UNLOCK_TOKEN_ISSUE_LIMITED', {
+      userCode: req.user.user_code,
+      req,
+      details: { target: existing.user_code, limit: MAX_OTP_ISSUES_PER_HOUR },
+    })
+    throw tooManyRequests(`Se alcanzo el limite de ${MAX_OTP_ISSUES_PER_HOUR} tokens por hora para esta cuenta`)
+  }
 
-  await withTransaction(async (client) => {
-    await client.query(
-      `UPDATE users
-          SET unlock_token = ?, unlock_token_expires_at = ?, unlock_token_used = FALSE
-        WHERE id = ?`,
-      [token, expiresAt, id],
-    )
-  })
+  const token = generateOtp()
+  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000)
 
-  record('ACCOUNT_UNLOCK_TOKEN_GENERATED', {
+  // En reposo solo se guarda el HMAC del OTP: una fuga de la BD no lo revela.
+  await query(
+    `UPDATE users
+        SET unlock_token = ?, unlock_token_expires_at = ?,
+            unlock_token_used = FALSE, unlock_token_attempts = 0
+      WHERE id = ?`,
+    [hashOtp(existing.id, token), expiresAt, id],
+  )
+
+  // Se espera la escritura: el conteo de emisiones depende de este registro.
+  await record('ACCOUNT_UNLOCK_TOKEN_GENERATED', {
     userCode: req.user.user_code,
     req,
-    details: { target: existing.user_code, expiresInMinutes: 15 },
+    details: { target: existing.user_code, expiresInMinutes: OTP_TTL_MINUTES },
   })
+  await notifyUser(existing.id, NOTICE.TOKEN_ISSUED())
 
+  // Unica salida del OTP en claro: al OSI, una sola vez, por TLS.
   res.json({
     message: `Token de desbloqueo generado para ${existing.user_code}`,
     token,
     expiresAt,
-    expiresInMinutes: 15,
+    expiresInMinutes: OTP_TTL_MINUTES,
   })
 }
 
