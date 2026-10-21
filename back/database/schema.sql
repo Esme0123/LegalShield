@@ -4,6 +4,9 @@
 -- Compatible con MySQL 5.7+ / MariaDB 10.4+. Importable directamente desde
 -- phpMyAdmin: crea la base `legalshield_db` si no existe.
 --
+-- ADVERTENCIA: este script solo crea (CREATE TABLE IF NOT EXISTS) y no migra una
+-- base existente. Para migrar una BD ya creada use `npm run init-db`.
+--
 -- Convenciones:
 --   · PK AUTO_INCREMENT
 --   · Timestamps en DATETIME con DEFAULT CURRENT_TIMESTAMP
@@ -73,13 +76,19 @@ CREATE TABLE IF NOT EXISTS users (
   department          VARCHAR(120),
   phone               VARCHAR(40),
   failed_attempts     INT NOT NULL DEFAULT 0,
+  lock_count          INT NOT NULL DEFAULT 0,
   is_locked           BOOLEAN NOT NULL DEFAULT FALSE,
-  status              VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
   locked_at           DATETIME,
   locked_until        DATETIME,
+  status              VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
   is_active           BOOLEAN NOT NULL DEFAULT TRUE,
   deactivated_at      DATETIME,
   password_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+  unlock_token        CHAR(64),
+  unlock_token_expires_at DATETIME,
+  unlock_token_used   BOOLEAN NOT NULL DEFAULT FALSE,
+  unlock_token_attempts INT NOT NULL DEFAULT 0,
   created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT,
@@ -172,6 +181,23 @@ CREATE TABLE IF NOT EXISTS activity_logs (
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
+-- 7c. user_notifications
+--     Avisos de seguridad dirigidos al titular de la cuenta (bloqueo, emision
+--     de OTP, reactivacion). Cada usuario solo consulta los propios.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_notifications (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT NOT NULL,
+  type       VARCHAR(40)  NOT NULL,
+  title      VARCHAR(200) NOT NULL,
+  message    TEXT NOT NULL,
+  is_read    BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_notif_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_notif_user_unread (user_id, is_read, created_at)
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------------
 -- Triggers: inmovilizan la bitacora (UPDATE y DELETE lanzan excepcion).
 -- Se recrean en cada importacion para que schema.sql sea idempotente.
 -- ---------------------------------------------------------------------------
@@ -244,7 +270,7 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('USERS_CREATE',  'Registrar usuarios (User ID nombre.apellido)'),
   ('USERS_UPDATE',  'Editar datos, rol o estado de usuarios'),
   ('USERS_DELETE',  'Dar de baja (desactivar) usuarios'),
-  ('USERS_UNLOCK',  'Desbloquear usuarios y resetear clave'),
+  ('USERS_UNLOCK',  'Desbloquear usuarios (sin reset de clave)'),
   ('USERS_MANAGE',  'Gestionar el ABM completo de usuarios'),
   ('ROLES_MANAGE',  'Modificar la matriz de roles y permisos'),
   ('ACCOUNT_UNLOCK', 'Desbloquear cuentas inhabilitadas temporalmente'),
