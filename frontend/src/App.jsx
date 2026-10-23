@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AppLayout from '@/components/layout/AppLayout'
 import GlowCursor from '@/components/reactbits/GlowCursor'
 import Login from '@/pages/Login'
-import Register from '@/pages/Register'
 import Dashboard from '@/pages/Dashboard'
 import Roles from '@/pages/Roles'
 import UsersManagement from '@/pages/UsersManagement'
@@ -19,6 +18,10 @@ function RequireSession({ children }) {
 
   if (!session) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  }
+  // Clave inicial pendiente: el servidor veta el resto de rutas, la UI no las ofrece.
+  if (session.mustChangePassword && location.pathname !== '/profile') {
+    return <Navigate to="/profile" replace />
   }
   return children
 }
@@ -37,7 +40,8 @@ export default function App() {
       <GlowCursor />
       <Routes>
         <Route path="/login" element={session ? <Navigate to="/dashboard" replace /> : <Login />} />
-        <Route path="/register" element={session ? <Navigate to="/dashboard" replace /> : <Register />} />
+        {/* El alta de cuentas es exclusiva del OSI: no hay auto-registro. */}
+        <Route path="/register" element={<Navigate to="/login" replace />} />
         <Route
           element={
             <RequireSession>

@@ -40,7 +40,8 @@ router.post(
 )
 router.post(
   '/:id/generate-unlock-token',
-  checkAnyPermission(['USERS_MANAGE', 'ACCOUNT_UNLOCK', 'TOKEN_RESET']),
+  // Emitir credenciales de acceso es funcion exclusiva de seguridad: sin USERS_MANAGE.
+  checkAnyPermission(['ACCOUNT_UNLOCK', 'TOKEN_RESET']),
   asyncHandler(controller.generateUnlockToken),
 )
 

@@ -36,7 +36,7 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('USERS_CREATE',  'Registrar usuarios (User ID nombre.apellido)'),
   ('USERS_UPDATE',  'Editar datos, rol o estado de usuarios'),
   ('USERS_DELETE',  'Dar de baja (desactivar) usuarios'),
-  ('USERS_UNLOCK',  'Desbloquear usuarios y resetear clave'),
+  ('USERS_UNLOCK',  'Desbloquear usuarios (sin reset de clave)'),
   ('USERS_MANAGE',  'Gestionar el ABM completo de usuarios'),
   ('ROLES_MANAGE',  'Modificar la matriz de roles y permisos'),
   ('ACCOUNT_UNLOCK', 'Desbloquear cuentas inhabilitadas temporalmente'),

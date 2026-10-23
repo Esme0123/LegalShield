@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
+  AlertTriangle,
   IdCard,
   KeyRound,
   Lock,
@@ -19,6 +20,7 @@ import { Badge, EmptyState, SectionTitle } from '@/components/ui/primitives'
 import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { cn } from '@/lib/cn'
+import { formatDateTime } from '@/lib/format'
 import { previewUsername } from '@/lib/identity'
 import { ROLES } from '@/data/seed'
 
@@ -45,7 +47,7 @@ function statusOf(user) {
 /* Modal compartido: Alta (con preview 9.1) y Edicion                          */
 /* -------------------------------------------------------------------------- */
 
-function UserModal({ mode, user, onClose }) {
+function UserModal({ mode, user, onClose, onSecret }) {
   const users = useAppStore((s) => s.users)
   const createUserAdmin = useAppStore((s) => s.createUserAdmin)
   const updateUserAdmin = useAppStore((s) => s.updateUserAdmin)
@@ -91,10 +93,11 @@ function UserModal({ mode, user, onClose }) {
           phone: form.phone.trim(),
           password: form.password,
         })
-        toast.mint(
-          'Usuario registrado',
-          `User ID ${created.username} · codigo ${created.userCode}${tempPassword ? ` · clave temporal: ${tempPassword}` : ''}`,
-        )
+        toast.mint('Usuario registrado', `User ID ${created.username} · codigo ${created.userCode}`)
+        // La clave temporal solo se muestra en el modal efimero, nunca en el toast.
+        if (tempPassword) {
+          onSecret({ kind: 'password', value: tempPassword, userLabel: `${created.username} · ${created.userCode}` })
+        }
       } else {
         await updateUserAdmin(user.id, {
           firstName: form.firstName.trim(),
@@ -225,7 +228,7 @@ function UserModal({ mode, user, onClose }) {
                 onChange={set('password')}
                 type="password"
                 className="ls-input"
-                placeholder="Si se deja vacia, el servidor genera una temporal"
+                placeholder="Si se deja vacia, el servidor genera una temporal (cambio obligatorio al primer acceso)"
               />
             </label>
           )}
@@ -246,6 +249,91 @@ function UserModal({ mode, user, onClose }) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Modal efimero: OTP de desbloqueo o clave inicial (se muestra una sola vez)   */
+/* -------------------------------------------------------------------------- */
+
+function OneTimeSecretModal({ secret, onClose }) {
+  const isOtp = secret.kind === 'otp'
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(secret.value)
+      toast.mint('Copiado', 'Valor copiado al portapapeles')
+    } catch {
+      toast.danger('No se pudo copiar', 'Copie el valor manualmente')
+    }
+  }
+
+  return (
+    // Sin onClick en el overlay: un clic accidental no debe descartar un valor irrecuperable.
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[70] grid place-items-center bg-navy/70 p-4 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 18, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -10, scale: 0.98 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+        className="ls-card max-h-[90vh] w-full max-w-md overflow-y-auto p-5 sm:p-6"
+      >
+        <div className="mb-5">
+          <h3 className="flex items-center gap-2 font-display text-base font-bold text-ink">
+            <KeyRound className="h-4 w-4 text-accent" />
+            {isOtp ? 'Token OTP de desbloqueo' : 'Contraseña inicial'}
+          </h3>
+          <p className="mt-0.5 text-[11.5px] text-muted">{secret.userLabel}</p>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-xl border border-accent/40 bg-accent/10 p-4 text-center">
+            <p
+              className={cn(
+                'font-mono font-bold text-accent',
+                isOtp ? 'text-2xl tracking-[0.35em]' : 'break-all text-lg tracking-normal',
+              )}
+            >
+              {secret.value}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {secret.expiresAt ? (
+              <p className="font-mono text-[11px] text-muted">
+                Vence a las {formatDateTime(secret.expiresAt).time.slice(0, 5)}
+                {secret.expiresInMinutes ? ` (${secret.expiresInMinutes} min)` : ''}
+              </p>
+            ) : (
+              <span />
+            )}
+            <button type="button" onClick={copy} className="ls-btn-secondary text-xs">
+              Copiar
+            </button>
+          </div>
+
+          <div className="flex items-start gap-2 rounded-xl border border-warn/50 bg-warn/10 p-3 text-[12px]">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+            <p className="leading-snug text-ink/80">
+              Se muestra una sola vez. Entréguelo al titular por un canal verificado (presencial o llamada a
+              número registrado). No lo envíe por correo ni chat.
+              {isOtp ? '' : ' El titular deberá cambiarla en su primer inicio de sesión.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="ls-btn-primary text-xs">
+            Entendido
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
 /* Pagina /users                                                               */
 /* -------------------------------------------------------------------------- */
 
@@ -254,6 +342,7 @@ export default function UsersManagement() {
   const loadUsers = useAppStore((s) => s.loadUsers)
   const setUserStatusAdmin = useAppStore((s) => s.setUserStatusAdmin)
   const unlockUserAdmin = useAppStore((s) => s.unlockUserAdmin)
+  const generateUnlockToken = useAppStore((s) => s.generateUnlockToken)
   const hasPermission = useAppStore((s) => s.hasPermission)
   const session = useAppStore((s) => s.session)
 
@@ -261,12 +350,15 @@ export default function UsersManagement() {
   const [filter, setFilter] = useState('todos')
   const [modal, setModal] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  // OTP o clave inicial: vive solo aqui y se descarta al cerrar el modal (nunca en el store).
+  const [secret, setSecret] = useState(null)
 
   const can = {
     create: hasPermission('USERS_CREATE'),
     update: hasPermission('USERS_UPDATE'),
     remove: hasPermission('USERS_DELETE'),
     unlock: hasPermission('USERS_UNLOCK'),
+    token: hasPermission('ACCOUNT_UNLOCK') || hasPermission('TOKEN_RESET'),
   }
 
   useEffect(() => {
@@ -319,13 +411,22 @@ export default function UsersManagement() {
   const unlock = async (user) => {
     setBusyId(user.id)
     try {
-      const { tempPassword } = await unlockUserAdmin(user.id, '')
-      toast.pastel(
-        'Cuenta desbloqueada',
-        `${user.username} puede volver a iniciar sesion${tempPassword ? ` · clave temporal: ${tempPassword}` : ''}`,
-      )
+      await unlockUserAdmin(user.id)
+      toast.pastel('Cuenta desbloqueada', `${user.username} conserva su contrasena actual`)
     } catch (error) {
       toast.danger('No se pudo desbloquear', error.message ?? 'Permiso insuficiente o fallo de API')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const issueOtp = async (user) => {
+    setBusyId(user.id)
+    try {
+      const { token, expiresAt, expiresInMinutes } = await generateUnlockToken(user.id)
+      setSecret({ kind: 'otp', value: token, userLabel: `${user.username} · ${user.userCode}`, expiresAt, expiresInMinutes })
+    } catch (error) {
+      toast.danger('No se emitio el token', error.message ?? 'Permiso insuficiente o fallo de API')
     } finally {
       setBusyId(null)
     }
@@ -336,7 +437,7 @@ export default function UsersManagement() {
       <SectionTitle
         icon={Users}
         title="Gestión de Usuarios (ABM)"
-        subtitle="Alta con User ID nombre.apellido (9.1), edicion granular, baja logica y desbloqueo con reset de clave."
+        subtitle="Alta con User ID nombre.apellido (9.1), edicion granular, baja logica, desbloqueo sin exposicion de credenciales y emision de token OTP."
         actions={
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => loadUsers()} className="ls-btn-secondary text-xs">
@@ -493,6 +594,17 @@ export default function UsersManagement() {
                             <ShieldCheck className="h-3.5 w-3.5" />
                           </button>
                         ))}
+                        {can.token && user.isLocked && user.isActive && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => issueOtp(user)}
+                            className="rounded-lg border border-line/50 p-2 text-muted transition hover:border-accent/60 hover:text-accent"
+                            title="Emitir token OTP de desbloqueo"
+                          >
+                            <KeyRound className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         {can.unlock && (user.isLocked || user.failedAttempts > 0) && (
                           <button
                             type="button"
@@ -527,8 +639,14 @@ export default function UsersManagement() {
             mode={modal.mode}
             user={modal.user}
             onClose={() => setModal(null)}
+            onSecret={setSecret}
           />
         )}
+      </AnimatePresence>
+
+      {/* Modal efimero: OTP o clave inicial */}
+      <AnimatePresence>
+        {secret && <OneTimeSecretModal secret={secret} onClose={() => setSecret(null)} />}
       </AnimatePresence>
     </div>
   )

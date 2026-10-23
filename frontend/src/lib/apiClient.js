@@ -75,6 +75,11 @@ export class ApiError extends Error {
     return Boolean(this.payload?.isLocked ?? this.details?.isLocked)
   }
 
+  /** Bloqueo por reincidencia: solo lo libera el OSI. */
+  get requiresOsi() {
+    return Boolean(this.payload?.requiresOsi ?? this.details?.requiresOsi)
+  }
+
   /** Segundos restantes de la inhabilitacion temporal, calculados en el servidor. */
   get remainingSeconds() {
     return Number(this.payload?.remainingSeconds ?? this.details?.remainingSeconds ?? 0)
@@ -102,6 +107,11 @@ export class ApiError extends Error {
 
   get isConflict() {
     return this.status === 409
+  }
+
+  /** 403 por clave inicial pendiente: la ruta se habilita al cambiarla. */
+  get passwordChangeRequired() {
+    return this.status === 403 && this.details?.code === 'PASSWORD_CHANGE_REQUIRED'
   }
 }
 
@@ -199,10 +209,11 @@ export const authApi = {
   changePassword: (currentPassword, newPassword) =>
     put('/auth/password', { currentPassword, newPassword }),
   passwordHistory: () => get('/auth/password-history'),
-  unlock: (userCode) => post('/auth/unlock', { userCode }),
   /** Estado del bloqueo temporal de una cuenta (restaura el conteo tras F5). */
   lockStatus: (userCode) => post('/auth/lock-status', { userCode }, { auth: false }),
   verifyUnlockToken: (payload) => post('/auth/verify-unlock-token', payload, { auth: false }),
+  notifications: () => get('/auth/notifications'),
+  readNotification: (id) => patch(`/auth/notifications/${id}/read`),
 }
 
 /* -------------------------------------------------------------------------- */

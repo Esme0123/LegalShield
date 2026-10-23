@@ -113,7 +113,7 @@ export function LockCounter({ attempts, max = 3, locked }) {
 
       <p className="mt-2.5 flex items-start gap-1.5 text-[11px] leading-snug text-muted">
         <Lock className="mt-0.5 h-3 w-3 shrink-0 text-ok" />
-        Al tercer fallo la cuenta se inhabilita durante 120 s por seguridad.
+        Al tercer fallo la cuenta se bloquea 15 minutos por seguridad.
       </p>
 
       {locked && (

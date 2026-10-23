@@ -48,6 +48,9 @@ router.get('/password-history', authenticate, asyncHandler(controller.passwordHi
 router.get('/profile', authenticate, asyncHandler(profile.getProfile))
 router.put('/profile', authenticate, auditAction('PROFILE_UPDATED'), asyncHandler(profile.updateProfile))
 router.put('/password', authenticate, auditAction('PASSWORD_CHANGED'), asyncHandler(profile.changePassword))
+// Avisos de seguridad del titular: cada usuario solo ve y marca los propios.
+router.get('/notifications', authenticate, asyncHandler(profile.listNotifications))
+router.patch('/notifications/:id/read', authenticate, asyncHandler(profile.markNotificationRead))
 
 // Desbloqueo: exclusivo del Oficial de Seguridad (OSI) via ACCOUNT_UNLOCK.
 router.post('/unlock', authenticate, checkPermission('ACCOUNT_UNLOCK'), auditAction('AUTH_UNLOCK'), asyncHandler(controller.unlock))

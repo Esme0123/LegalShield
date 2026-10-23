@@ -9,12 +9,14 @@
  *                                  lo concede el administrador, no el usuario.
  * PUT  /api/auth/password       -> cambio de clave con validacion de la actual y
  *                                  bloqueo de reutilizacion de las ultimas 5.
+ * GET  /api/auth/notifications  -> ultimos avisos de seguridad del titular
+ * PATCH /api/auth/notifications/:id/read -> marca un aviso propio como leido
  */
 
 const bcrypt = require('bcryptjs')
-const { one, rows, withTransaction } = require('../config/db')
+const { one, rows, query, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
-const { badRequest, conflict, unauthorized, unprocessable } = require('../utils/errors')
+const { badRequest, conflict, notFound, unauthorized, unprocessable } = require('../utils/errors')
 const { evaluatePassword, PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
 const { sanitizeEmail, normalizeUsername } = require('../utils/identity')
 
@@ -193,22 +195,28 @@ async function changePassword(req, res) {
 
   await withTransaction(async (client) => {
     await client.query(
-      'UPDATE users SET password_hash = ?, password_updated_at = now() WHERE id = ?',
+      // La clave nueva la eligio el titular: deja de regir el cambio obligatorio.
+      'UPDATE users SET password_hash = ?, password_updated_at = now(), must_change_password = FALSE WHERE id = ?',
       [passwordHash, user.id],
     )
     await client.query('INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)', [
       user.id,
       passwordHash,
     ])
-    // Poda: conserva solo las N contrasenas mas recientes.
+    // Poda: conserva solo las N contrasenas mas recientes. La tabla derivada es
+    // necesaria: MySQL/MariaDB no admiten LIMIT dentro de una subconsulta IN ni
+    // leer en ella la misma tabla del DELETE; el desempate por id cubre dos
+    // cambios en el mismo segundo.
     await client.query(
       `DELETE FROM password_history
         WHERE user_id = ?
           AND id NOT IN (
-            SELECT id FROM password_history
-             WHERE user_id = ?
-             ORDER BY created_at DESC
-             LIMIT ?
+            SELECT id FROM (
+              SELECT id FROM password_history
+               WHERE user_id = ?
+               ORDER BY created_at DESC, id DESC
+               LIMIT ?
+            ) AS keep_recent
           )`,
       [user.id, user.id, PASSWORD_HISTORY_LIMIT],
     )
@@ -223,4 +231,48 @@ async function changePassword(req, res) {
   res.json({ message: 'Contrasena actualizada correctamente', passwordUpdatedAt: new Date().toISOString() })
 }
 
-module.exports = { getProfile, updateProfile, changePassword }
+/* -------------------------------------------------------------------------- */
+/* GET /api/auth/notifications · PATCH /api/auth/notifications/:id/read        */
+/* -------------------------------------------------------------------------- */
+
+const NOTIFICATIONS_LIMIT = 20
+
+/** Avisos de seguridad del titular autenticado (ISO 27001 A.5.26). */
+async function listNotifications(req, res) {
+  const result = await rows(
+    `SELECT id, type, title, message, is_read AS "isRead", created_at AS "createdAt"
+       FROM user_notifications
+      WHERE user_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?`,
+    [req.user.id, NOTIFICATIONS_LIMIT],
+  )
+  const counter = await one(
+    'SELECT COUNT(*) AS unread FROM user_notifications WHERE user_id = ? AND is_read = FALSE',
+    [req.user.id],
+  )
+
+  res.json({
+    notifications: result.map((n) => ({ ...n, isRead: Boolean(n.isRead) })),
+    unread: Number(counter?.unread ?? 0),
+  })
+}
+
+/**
+ * Marca un aviso como leido. El filtro por user_id impide marcar avisos ajenos
+ * (IDOR): un id de otro titular responde igual que uno inexistente.
+ */
+async function markNotificationRead(req, res) {
+  const id = Number(req.params.id)
+  if (!Number.isInteger(id) || id <= 0) throw badRequest('Identificador de aviso invalido')
+
+  const result = await query(
+    'UPDATE user_notifications SET is_read = TRUE WHERE id = ? AND user_id = ?',
+    [id, req.user.id],
+  )
+  if (result.affectedRows === 0) throw notFound('Aviso no encontrado')
+
+  res.json({ message: 'Aviso marcado como leido', id, isRead: true })
+}
+
+module.exports = { getProfile, updateProfile, changePassword, listNotifications, markNotificationRead }

@@ -9,7 +9,7 @@
  *
  *   1. CREATE DATABASE IF NOT EXISTS legalshield_db (utf8mb4 / unicode_ci)
  *   2. USE legalshield_db
- *   3. CREATE TABLE IF NOT EXISTS de las 9 tablas relacionales
+ *   3. CREATE TABLE IF NOT EXISTS de las tablas relacionales
  *   4. Triggers + vista de conveniencia (idempotentes)
  *   5. Seed: roles (incluye OSI), permisos, matriz rol x permiso y usuarios
  *   6. Mensaje final + process.exit(0) para no dejar el terminal colgado
@@ -79,6 +79,7 @@ const TABLES = [
      department          VARCHAR(120),
      phone               VARCHAR(40),
      failed_attempts     INT NOT NULL DEFAULT 0,
+     lock_count          INT NOT NULL DEFAULT 0,
      is_locked           BOOLEAN NOT NULL DEFAULT FALSE,
      locked_at           DATETIME,
      locked_until        DATETIME,
@@ -86,16 +87,17 @@ const TABLES = [
      is_active           BOOLEAN NOT NULL DEFAULT TRUE,
      deactivated_at      DATETIME,
      password_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-     unlock_token        VARCHAR(12),
+     must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+     unlock_token        CHAR(64),
      unlock_token_expires_at DATETIME,
      unlock_token_used   BOOLEAN NOT NULL DEFAULT FALSE,
+     unlock_token_attempts INT NOT NULL DEFAULT 0,
      created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT,
      CONSTRAINT chk_failed_attempts CHECK (failed_attempts >= 0),
      INDEX idx_users_role (role_id),
-     INDEX idx_users_active (is_active),
-     INDEX idx_users_unlock_token (unlock_token)
+     INDEX idx_users_active (is_active)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
   // 3.5 password_history
@@ -166,6 +168,20 @@ const TABLES = [
      INDEX idx_activity_action (action),
      INDEX idx_activity_user (user_code)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  // 3.9 user_notifications · avisos de seguridad dirigidos al titular de la cuenta
+  //     (bloqueo, emision de OTP, reactivacion). Cada usuario solo ve los propios.
+  `CREATE TABLE IF NOT EXISTS user_notifications (
+     id         INT AUTO_INCREMENT PRIMARY KEY,
+     user_id    INT NOT NULL,
+     type       VARCHAR(40)  NOT NULL,
+     title      VARCHAR(200) NOT NULL,
+     message    TEXT NOT NULL,
+     is_read    BOOLEAN NOT NULL DEFAULT FALSE,
+     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     CONSTRAINT fk_notif_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+     INDEX idx_notif_user_unread (user_id, is_read, created_at)
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ]
 
 const TRIGGERS = [
@@ -224,7 +240,7 @@ const PERMISSIONS = [
   ['USERS_CREATE', 'Registrar usuarios (User ID nombre.apellido)'],
   ['USERS_UPDATE', 'Editar datos, rol o estado de usuarios'],
   ['USERS_DELETE', 'Dar de baja (desactivar) usuarios'],
-  ['USERS_UNLOCK', 'Desbloquear usuarios y resetear clave'],
+  ['USERS_UNLOCK', 'Desbloquear usuarios (sin reset de clave)'],
   // Segregacion OSI: estos cuatro permisos son exclusivos del rol OSI.
   ['USERS_MANAGE', 'Gestionar el ABM completo de usuarios'],
   ['ROLES_MANAGE', 'Modificar la matriz de roles y permisos'],
@@ -508,9 +524,28 @@ async function main() {
     await run('ALTER TABLE users ADD COLUMN unlock_token_used BOOLEAN NOT NULL DEFAULT FALSE AFTER unlock_token_expires_at')
     logger.info('Columna agregada: users.unlock_token_used')
   }
-  if (!(await indexExists('users', 'idx_users_unlock_token'))) {
-    await run('CREATE INDEX idx_users_unlock_token ON users (unlock_token)')
-    logger.info('Indice agregado: users.idx_users_unlock_token')
+
+  // 4d. Recuperacion de cuentas: el OTP se guarda como HMAC-SHA256 (64 hex), por lo que
+  //     no se indexa el secreto; se agregan contador de intentos del OTP, cambio de clave
+  //     obligatorio y contador de bloqueos para el bloqueo progresivo (OWASP A07, ISO 27001 A.8.5).
+  await run('ALTER TABLE users MODIFY COLUMN unlock_token CHAR(64) NULL DEFAULT NULL')
+  // Los tokens previos estaban en claro: se invalidan al migrar.
+  await run('UPDATE users SET unlock_token = NULL, unlock_token_expires_at = NULL WHERE CHAR_LENGTH(unlock_token) <> 64')
+  if (await indexExists('users', 'idx_users_unlock_token')) {
+    await run('DROP INDEX idx_users_unlock_token ON users')
+    logger.info('Indice retirado: users.idx_users_unlock_token (no se indexan secretos)')
+  }
+  if (!(await columnExists('users', 'unlock_token_attempts'))) {
+    await run('ALTER TABLE users ADD COLUMN unlock_token_attempts INT NOT NULL DEFAULT 0 AFTER unlock_token_used')
+    logger.info('Columna agregada: users.unlock_token_attempts')
+  }
+  if (!(await columnExists('users', 'must_change_password'))) {
+    await run('ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE AFTER password_updated_at')
+    logger.info('Columna agregada: users.must_change_password')
+  }
+  if (!(await columnExists('users', 'lock_count'))) {
+    await run('ALTER TABLE users ADD COLUMN lock_count INT NOT NULL DEFAULT 0 AFTER failed_attempts')
+    logger.info('Columna agregada: users.lock_count')
   }
 
   // 5. Seed data.
@@ -655,7 +690,7 @@ async function main() {
   }
   logger.info(`Expedientes de demostracion listos: ${DEMO_CASES.length}`)
 
-  // 6. Verificacion final: 8 tablas visibles en phpMyAdmin.
+  // 6. Verificacion final: tablas visibles en phpMyAdmin.
   const [tables] = await conn.query(
     'SELECT table_name AS nombre FROM information_schema.tables WHERE table_schema = ? ORDER BY table_name',
     [DB_NAME],

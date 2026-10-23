@@ -199,7 +199,7 @@ function PersonalDataForm({ user, onSave }) {
   )
 }
 
-function PasswordModule({ user, onChange }) {
+function PasswordModule({ user, mustChange, onChange }) {
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -224,6 +224,16 @@ function PasswordModule({ user, onChange }) {
         title="Cambio de contrasena"
         subtitle={`Se valida la clave actual y se bloquea la reutilizacion de las ultimas ${PASSWORD_HISTORY_LIMIT} contrasenas (punto 9.3).`}
       />
+
+      {mustChange ? (
+        <div className="mt-5 flex items-start gap-3 rounded-xl border border-warn/50 bg-warn/10 p-4">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+          <p className="text-[12px] leading-snug text-ink/80">
+            Su contraseña fue asignada por el Oficial de Seguridad. Por secreto profesional debe
+            reemplazarla ahora; el resto del sistema permanecerá bloqueado hasta entonces.
+          </p>
+        </div>
+      ) : null}
 
       <div className="mt-5 grid gap-5 lg:grid-cols-2">
         <div className="space-y-4">
@@ -354,6 +364,11 @@ export default function Profile() {
       await updateProfile(payload)
       toast.mint('Ficha actualizada', `${user.userId} · evento PROFILE_UPDATED sellado en auditoria`)
     } catch (error) {
+      // Con la clave inicial pendiente la ficha queda vetada: se orienta, no se alarma.
+      if (error?.passwordChangeRequired) {
+        toast.pastel('Cambio de clave requerido', 'Defina su contrasena personal antes de editar la ficha')
+        return
+      }
       toast.danger('No se pudo guardar', error.message ?? 'Revise los datos e intente nuevamente')
     }
   }
@@ -399,7 +414,7 @@ export default function Profile() {
 
       <IdentityCard user={user} />
       <PersonalDataForm user={user} onSave={handleSave} />
-      <PasswordModule user={user} onChange={handleChange} />
+      <PasswordModule user={user} mustChange={Boolean(session?.mustChangePassword)} onChange={handleChange} />
 
       <p className="flex items-start gap-2 text-[11.5px] leading-snug text-muted">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" />

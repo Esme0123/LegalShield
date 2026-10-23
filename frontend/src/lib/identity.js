@@ -23,7 +23,7 @@ export function previewUsername(firstName, lastName, used = []) {
   const firstTokens = normalizeToken(firstName).split('.').filter(Boolean)
   const lastTokens = normalizeToken(lastName).split('.').filter(Boolean)
   const first = firstTokens[0] ?? ''
-  const last = lastTokens[lastTokens.length - 1] ?? ''
+  const last = lastTokens[0] ?? ''
   const base = [first, last].filter(Boolean).join('.')
   if (!base) return ''
 

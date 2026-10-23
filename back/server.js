@@ -2,6 +2,7 @@
 
 require('dotenv').config()
 
+const net = require('net')
 const express = require('express')
 const cors = require('cors')
 const helmet = require('helmet')
@@ -27,7 +28,46 @@ const PORT = Number(process.env.PORT || 4000)
 /* Cabeceras de seguridad                                                     */
 /* -------------------------------------------------------------------------- */
 
-app.set('trust proxy', 1) // detras de un balanceador/ingress: X-Forwarded-For es confiable
+/**
+ * Politica de confianza en proxies a partir de TRUST_PROXY (apagada por defecto).
+ * Con ella apagada req.ip es la IP del socket y X-Forwarded-For se ignora, de modo
+ * que un cliente directo no puede falsificar su IP para evadir los limitadores ni
+ * escribir una IP falsa en la bitacora (no repudio, ISO 27001 A.8.15).
+ * - sin definir, vacia o 'false': desactivada.
+ * - entero (p. ej. '1'): numero de saltos de proxy de confianza.
+ * - 'true': confia en cualquier proxy; no se recomienda (equivale a creer el header).
+ * - lista separada por comas de IP, CIDR o 'loopback' | 'linklocal' | 'uniquelocal'.
+ * Cualquier otro valor aborta el arranque (fallo seguro): una politica mal escrita
+ * no debe quedar aplicada a medias ni desactivarse sin que nadie lo note.
+ */
+function resolveTrustProxy(raw) {
+  const value = String(raw ?? '').trim()
+  if (value === '' || value.toLowerCase() === 'false') return false
+  if (value.toLowerCase() === 'true') return true
+  if (/^\d+$/.test(value)) return Number(value)
+
+  const RESERVED = ['loopback', 'linklocal', 'uniquelocal']
+  const entries = value.split(',').map((e) => e.trim())
+  const isValidEntry = (entry) => {
+    if (RESERVED.includes(entry)) return true
+    const [ip, prefix, extra] = entry.split('/')
+    const family = net.isIP(ip)
+    if (!family || extra !== undefined) return false
+    if (prefix === undefined) return true
+    const maxPrefix = family === 4 ? 32 : 128
+    return /^\d+$/.test(prefix) && Number(prefix) <= maxPrefix
+  }
+  const invalid = entries.filter((entry) => !isValidEntry(entry))
+  if (invalid.length > 0) {
+    throw new Error(
+      `TRUST_PROXY invalido (${invalid.map((e) => e || '(vacio)').join(', ')}): use 'false', un numero de saltos, 'true' ` +
+        "o una lista de IP/CIDR/'loopback'/'linklocal'/'uniquelocal' separada por comas",
+    )
+  }
+  return entries
+}
+
+app.set('trust proxy', resolveTrustProxy(process.env.TRUST_PROXY))
 
 app.use(
   helmet({
@@ -125,14 +165,22 @@ app.use((_req, res) => {
 app.use((err, req, res, _next) => {
   // Violaciones de restricciones de MySQL que el codigo no anticipa.
   // 1062 = duplicate entry (ER_DUP_ENTRY), 1452 = FK inexistente, 3819 = CHECK.
-  if (err.errno === 1062 || err.code === 'ER_DUP_ENTRY') {
-    return res.status(409).json({ error: 'El registro ya existe', detail: err.sqlMessage })
+  // sqlMessage revela nombres de restricciones y valores (OWASP A05): solo va al
+  // logger del servidor; el cliente recibe un mensaje generico.
+  const isDuplicate = err.errno === 1062 || err.code === 'ER_DUP_ENTRY'
+  const isMissingRef = err.errno === 1452 || err.code === 'ER_NO_REFERENCED_ROW_2'
+  const isCheck = err.errno === 3819
+  if (isDuplicate || isMissingRef || isCheck) {
+    logger.warn('Restriccion de integridad violada', { path: req.originalUrl, code: err.code, detail: err.sqlMessage })
   }
-  if (err.errno === 1452 || err.code === 'ER_NO_REFERENCED_ROW_2') {
-    return res.status(400).json({ error: 'Referencia invalida a un registro inexistente', detail: err.sqlMessage })
+  if (isDuplicate) {
+    return res.status(409).json({ error: 'El registro ya existe' })
   }
-  if (err.errno === 3819) {
-    return res.status(422).json({ error: 'Violacion de restriccion de integridad', detail: err.sqlMessage })
+  if (isMissingRef) {
+    return res.status(400).json({ error: 'Referencia invalida a un registro inexistente' })
+  }
+  if (isCheck) {
+    return res.status(422).json({ error: 'Violacion de restriccion de integridad' })
   }
 
   const status = err.status || 500
