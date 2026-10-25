@@ -11,9 +11,9 @@
  * PERMISSION_CHANGED en la bitacora, attributando el User ID que los hizo.
  */
 
-const { rows, withTransaction } = require('../config/db')
+const { one, query, rows, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
-const { badRequest, unprocessable } = require('../utils/errors')
+const { badRequest, conflict, notFound, unprocessable } = require('../utils/errors')
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/roles/matrix                                                       */
@@ -202,4 +202,78 @@ async function resetMatrix(req, res) {
   res.json({ message: 'Matriz restaurada a la configuracion base' })
 }
 
-module.exports = { getMatrix, updatePermissions, resetMatrix }
+/* -------------------------------------------------------------------------- */
+/* POST /api/roles · DELETE /api/roles/:code                                   */
+/* -------------------------------------------------------------------------- */
+
+const ROLE_CODE_RE = /^[a-z][a-z_]{2,31}$/
+/** Rol del Oficial de Seguridad: eliminarlo dejaria el sistema sin administrador. */
+const PROTECTED_ROLES = ['osi']
+
+/** Crea un rol sin permisos: el OSI los concede despues de forma explicita (menor privilegio). */
+async function createRole(req, res) {
+  const code = String(req.body?.code ?? '').trim().toLowerCase()
+  const name = String(req.body?.name ?? '').trim()
+  const description = String(req.body?.description ?? '').trim()
+
+  if (!ROLE_CODE_RE.test(code)) {
+    throw unprocessable('Codigo de rol invalido', { pattern: ROLE_CODE_RE.source })
+  }
+  if (name.length < 3 || name.length > 80) {
+    throw unprocessable('El nombre del rol debe tener entre 3 y 80 caracteres')
+  }
+  if (description.length > 500) {
+    throw unprocessable('La descripcion no puede superar 500 caracteres')
+  }
+
+  const existing = await one('SELECT id FROM roles WHERE code = ? OR name = ?', [code, name])
+  if (existing) throw conflict('Ya existe un rol con ese codigo o nombre')
+
+  const created = await withTransaction(async (client) => {
+    const { insertId } = await client.query(
+      'INSERT INTO roles (code, name, description) VALUES (?, ?, ?)',
+      [code, name, description || null],
+    )
+    return insertId
+  })
+
+  record('ROLE_CREATED', {
+    userCode: req.user.user_code,
+    req,
+    details: { role: code, name },
+  })
+
+  res.status(201).json({
+    message: `Rol ${code} creado`,
+    role: { id: created, code, name, description: description || null },
+  })
+}
+
+/** Elimina un rol sin usuarios asignados. El rol osi es intocable. */
+async function deleteRole(req, res) {
+  const code = String(req.params.code ?? '').trim().toLowerCase()
+  if (PROTECTED_ROLES.includes(code)) {
+    throw conflict('El rol osi no puede eliminarse')
+  }
+
+  const role = await one('SELECT id, code, name FROM roles WHERE code = ?', [code])
+  if (!role) throw notFound(`No existe el rol ${code}`)
+
+  const assigned = await one('SELECT COUNT(*) AS total FROM users WHERE role_id = ?', [role.id])
+  if (Number(assigned.total) > 0) {
+    throw conflict(`El rol ${code} tiene ${assigned.total} usuario(s) asignado(s)`)
+  }
+
+  // role_permissions cae por ON DELETE CASCADE; users usa RESTRICT como red de seguridad.
+  await query('DELETE FROM roles WHERE id = ?', [role.id])
+
+  record('ROLE_DELETED', {
+    userCode: req.user.user_code,
+    req,
+    details: { role: code, name: role.name },
+  })
+
+  res.json({ message: `Rol ${code} eliminado` })
+}
+
+module.exports = { getMatrix, updatePermissions, resetMatrix, createRole, deleteRole }

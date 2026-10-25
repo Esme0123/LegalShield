@@ -52,6 +52,8 @@ const EVENT = {
   UNLOCK_TOKEN_ISSUE_LIMITED: { status: 'WARN', stream: 'security' },
   PASSWORD_CHANGE_REQUIRED: { status: 'INFO', stream: 'security' },
   PERMISSION_CHANGED: { status: 'WARN', stream: 'security' },
+  ROLE_CREATED: { status: 'WARN', stream: 'security' },
+  ROLE_DELETED: { status: 'WARN', stream: 'security' },
   // Operacion del negocio (actividad)
   CASE_CREATED: { status: 'INFO', stream: 'activity' },
   CASE_READ: { status: 'INFO', stream: 'activity' },

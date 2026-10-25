@@ -3,7 +3,7 @@
 const { Router } = require('express')
 const controller = require('../controllers/rolesController')
 const { authenticate } = require('../middlewares/authMiddleware')
-const { checkAnyPermission } = require('../middlewares/rbacMiddleware')
+const { checkAnyPermission, checkPermission } = require('../middlewares/rbacMiddleware')
 const { auditAction } = require('../middlewares/auditMiddleware')
 const { asyncHandler } = require('../utils/helpers')
 
@@ -14,6 +14,18 @@ const router = Router()
 router.use(authenticate)
 
 router.get('/matrix', asyncHandler(controller.getMatrix))
+router.post(
+  '/',
+  checkPermission('ROLES_MANAGE'),
+  auditAction('ROLE_CREATED'),
+  asyncHandler(controller.createRole),
+)
+router.delete(
+  '/:code',
+  checkPermission('ROLES_MANAGE'),
+  auditAction('ROLE_DELETED'),
+  asyncHandler(controller.deleteRole),
+)
 router.post(
   '/permissions',
   checkAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE']),
