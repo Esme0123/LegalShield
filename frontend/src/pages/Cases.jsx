@@ -37,13 +37,19 @@ function DocumentPreview({ doc }) {
       </div>
       <div className="space-y-1">
         <p className="font-display text-[11px] font-bold">{doc.name}</p>
-        {lines.map((l, i) => (
-          <span
-            key={i}
-            className={cn('block h-1 rounded-full', l.o ? 'bg-indigo/60' : 'bg-navy/25')}
-            style={{ width: `${l.w}%` }}
-          />
-        ))}
+        {doc.content ? (
+          <p className="max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[9.5px] leading-relaxed">
+            {doc.content}
+          </p>
+        ) : (
+          lines.map((l, i) => (
+            <span
+              key={i}
+              className={cn('block h-1 rounded-full', l.o ? 'bg-indigo/60' : 'bg-navy/25')}
+              style={{ width: `${l.w}%` }}
+            />
+          ))
+        )}
       </div>
       <p className="mt-2 font-mono text-[8.5px] opacity-70">
         Clasificacion: {doc.classification} · sello SHA-256 pendiente de firma
@@ -56,6 +62,8 @@ export default function Cases() {
   const cases = useAppStore((s) => s.cases)
   const archiveCase = useAppStore((s) => s.archiveCase)
   const loadCases = useAppStore((s) => s.loadCases)
+  const loadCaseDocuments = useAppStore((s) => s.loadCaseDocuments)
+  const updateCaseProgress = useAppStore((s) => s.updateCaseProgress)
   const revealedDocs = useAppStore((s) => s.revealedDocs)
   const revealDocument = useAppStore((s) => s.revealDocument)
   const concealDocument = useAppStore((s) => s.concealDocument)
@@ -66,6 +74,8 @@ export default function Cases() {
 
   const [selectedId, setSelectedId] = useState(null)
   const [crumpling, setCrumpling] = useState(null)
+  const [progressDraft, setProgressDraft] = useState(0)
+  const [savingProgress, setSavingProgress] = useState(false)
 
   useEffect(() => {
     loadCases()
@@ -74,6 +84,16 @@ export default function Cases() {
 
   const selected = cases.find((c) => c.id === selectedId) ?? cases[0]
   const canArchive = hasPermission('CASES_ARCHIVE')
+  const canWrite = hasPermission('CASES_WRITE')
+  const canRevealDocs = hasPermission('DOCS_REVEAL')
+
+  useEffect(() => {
+    if (selected?.dbId) loadCaseDocuments(selected.dbId)
+  }, [selected?.dbId, loadCaseDocuments])
+
+  useEffect(() => {
+    setProgressDraft(selected?.progress ?? 0)
+  }, [selected?.id, selected?.progress])
 
   const handleArchiveCase = (id) => {
     if (!canArchive) {
@@ -101,13 +121,36 @@ export default function Cases() {
     }
   }
 
-  const onReveal = (docId, meta) => {
-    revealDocument(docId, meta)
-    toast.info(
-      'Documento revelado',
-      `Rol ${String(meta.roleId).toUpperCase()} autorizado · justificacion registrada en auditoria`,
-      ShieldCheck,
-    )
+  const handleSaveProgress = async () => {
+    if (!selected) return
+    setSavingProgress(true)
+    try {
+      const saved = await updateCaseProgress(selected.id, progressDraft)
+      setProgressDraft(saved)
+      toast.mint(
+        'Avance actualizado',
+        `${selected.id} · ${saved}% registrado en activity_logs`,
+      )
+    } catch (error) {
+      setProgressDraft(selected.progress)
+      toast.danger('No se pudo guardar el avance', error.message)
+    } finally {
+      setSavingProgress(false)
+    }
+  }
+
+  const onReveal = async (docId, meta) => {
+    try {
+      const data = await revealDocument(docId, meta)
+      toast.info(
+        'Documento revelado',
+        `${docId} · ${data.justification} · justificacion registrada en activity_logs`,
+        ShieldCheck,
+      )
+    } catch (error) {
+      toast.danger('No se pudo revelar el documento', error.message)
+      throw error
+    }
   }
 
   const exportRows = cases.map((c) => ({
@@ -219,7 +262,7 @@ export default function Cases() {
 
                 <div className="mt-2.5 flex items-center justify-between">
                   <span className="font-mono text-[10px] text-muted">
-                    {c.docs.length} docs · {c.privileged ? 'privilegiado' : 'no privilegiado'}
+                    {c.documentCount} docs · {c.privileged ? 'privilegiado' : 'no privilegiado'}
                   </span>
                   <button
                     type="button"
@@ -288,18 +331,80 @@ export default function Cases() {
                 ))}
               </div>
 
+              {canWrite && (
+                <div className="ls-panel mt-4 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <label
+                      htmlFor="case-progress"
+                      className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted"
+                    >
+                      Avance del expediente
+                    </label>
+                    <span className="font-mono text-[12.5px] font-bold text-ink tabular-nums">
+                      {progressDraft}%
+                    </span>
+                  </div>
+                  <input
+                    id="case-progress"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={progressDraft}
+                    disabled={savingProgress}
+                    onChange={(event) => setProgressDraft(Number(event.target.value))}
+                    style={{ '--fill': `${progressDraft}%` }}
+                    className="mt-2"
+                  />
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-[8rem] flex-1">
+                      <Progress value={progressDraft} />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSaveProgress}
+                      disabled={savingProgress || progressDraft === selected.progress}
+                      className="ls-btn-primary text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {savingProgress ? 'Guardando…' : 'Guardar Avance'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="mt-5">
                 <div className="mb-3 flex items-center gap-2">
                   <FileText className="h-4 w-4 text-accent" />
                   <p className="font-display text-sm font-bold">Prueba documental</p>
                   <span className="font-mono text-[10px] text-muted">
-                    · {selected.docs.length} documentos · cobertura por rol activa
+                    · {selected.documentCount} documentos · cobertura por rol activa
                   </span>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {selected.docs.map((doc) => {
-                    const restricted = doc.classification !== 'Publica'
+                    const restricted = doc.isPrivileged || doc.classification !== 'Publica'
+                    const card = (
+                      <div className="p-1">
+                        <div className="mb-1.5 flex items-center justify-between font-mono text-[9.5px] text-muted">
+                          <span>{doc.id}</span>
+                          <span className="flex items-center gap-1">
+                            {restricted ? <Lock className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                            {doc.classification}
+                          </span>
+                        </div>
+                        <DocumentPreview doc={doc} />
+                      </div>
+                    )
+
+                    if (!restricted) {
+                      return (
+                        <div key={doc.id} className="rounded-lg border border-line/50">
+                          {card}
+                        </div>
+                      )
+                    }
+
                     return (
                       <DitherVeil
                         key={doc.id}
@@ -307,24 +412,15 @@ export default function Cases() {
                         docName={doc.name}
                         classification={doc.classification}
                         revealed={revealedDocs.includes(doc.id)}
+                        canReveal={canRevealDocs}
                         sessionRole={session?.role}
-                        allowedRoles={['socio', 'abogado']}
                         onReveal={onReveal}
                         onConceal={(id) => {
                           concealDocument(id)
                           toast.info('Documento re-cubierto', `${id} vuelve a estado restringido`)
                         }}
                       >
-                        <div className="p-1">
-                          <div className="mb-1.5 flex items-center justify-between font-mono text-[9.5px] text-muted">
-                            <span>{doc.id}</span>
-                            <span className="flex items-center gap-1">
-                              {restricted ? <Lock className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                              {doc.classification}
-                            </span>
-                          </div>
-                          <DocumentPreview doc={doc} />
-                        </div>
+                        {card}
                       </DitherVeil>
                     )
                   })}

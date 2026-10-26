@@ -17,6 +17,8 @@ router.get('/', checkPermission('CASES_READ'), asyncHandler(controller.listCases
 router.post('/', checkPermission('CASES_CREATE'), asyncHandler(controller.createCase))
 
 router.get('/:id', checkPermission('CASES_READ'), asyncHandler(controller.getCase))
+router.get('/:id/documents', checkPermission('CASES_READ'), asyncHandler(controller.listDocuments))
+router.post('/:id/documents/reveal', checkPermission('DOCS_REVEAL'), asyncHandler(controller.revealDocument))
 router.put('/:id', checkPermission('CASES_WRITE'), asyncHandler(controller.updateCase))
 router.delete('/:id', checkPermission('CASES_ARCHIVE'), asyncHandler(controller.archiveCase))
 

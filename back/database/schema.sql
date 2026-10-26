@@ -147,6 +147,30 @@ CREATE TABLE IF NOT EXISTS legal_cases (
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
+-- 6b. case_documents
+--     Prueba documental del expediente. El contenido sensible solo se entrega
+--     via POST /api/cases/:id/documents/reveal (permiso DOCS_REVEAL).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS case_documents (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  case_id        INT NOT NULL,
+  document_code  VARCHAR(40)  NOT NULL UNIQUE,
+  filename       VARCHAR(200) NOT NULL,
+  classification VARCHAR(30)  NOT NULL DEFAULT 'Publica',
+  is_privileged  BOOLEAN      NOT NULL DEFAULT FALSE,
+  mime_type      VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+  page_count     INT          NOT NULL DEFAULT 1,
+  checksum       CHAR(64),
+  content        LONGTEXT,
+  created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_docs_case FOREIGN KEY (case_id) REFERENCES legal_cases(id) ON DELETE CASCADE,
+  CONSTRAINT chk_doc_classification CHECK (classification IN ('Publica', 'Uso interno', 'Restringida', 'Confidencial')),
+  CONSTRAINT chk_doc_pages CHECK (page_count >= 1),
+  INDEX idx_docs_case (case_id),
+  INDEX idx_docs_privileged (case_id, is_privileged)
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------------
 -- 7. security_logs
 --    Bitacora inmutable de seguridad. Solo admite INSERT (ver triggers).
 -- ---------------------------------------------------------------------------

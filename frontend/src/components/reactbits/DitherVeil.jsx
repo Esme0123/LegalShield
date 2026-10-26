@@ -21,6 +21,7 @@ export default function DitherVeil({
   docName,
   classification = 'Restringida',
   sessionRole,
+  canReveal,
   allowedRoles = ['socio', 'abogado'],
   onReveal,
   onConceal,
@@ -29,6 +30,7 @@ export default function DitherVeil({
 }) {
   const [open, setOpen] = useState(false)
   const [justification, setJustification] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const { isDark } = useTheme()
   const didactic = useAppStore((s) => s.didactic)
 
@@ -43,11 +45,21 @@ export default function DitherVeil({
     [isDark],
   )
 
-  const eligible = allowedRoles.includes(sessionRole)
+  const eligible = canReveal ?? allowedRoles.includes(sessionRole)
 
-  const submit = () => {
-    onReveal?.(docId, { roleId: sessionRole, justification: justification.trim() || 'sin justificacion' })
-    setOpen(false)
+  const submit = async () => {
+    setSubmitting(true)
+    try {
+      await onReveal?.(docId, {
+        roleId: sessionRole,
+        justification: justification.trim() || 'sin justificacion',
+      })
+      setOpen(false)
+    } catch {
+      // El contenedor muestra el error; se mantiene abierto para corregir la justificacion.
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -129,11 +141,11 @@ export default function DitherVeil({
                     </button>
                     <button
                       type="button"
-                      disabled={!eligible}
+                      disabled={!eligible || submitting}
                       onClick={submit}
-                      className="ls-btn-primary flex-1 text-[11px]"
+                      className="ls-btn-primary flex-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <KeyRound className="h-3.5 w-3.5" /> Revelar
+                      <KeyRound className="h-3.5 w-3.5" /> {submitting ? 'Revelando…' : 'Revelar'}
                     </button>
                   </div>
                 </div>

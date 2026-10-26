@@ -136,10 +136,25 @@ const apiCaseToCase = (row) => ({
   stage: row.stage ?? '',
   risk: row.riskLevel === 'critica' ? 'critico' : row.riskLevel,
   deadline: row.deadline ? String(row.deadline).slice(0, 10) : null,
-  progress: row.progress,
+  progress: Number(row.progress ?? 0),
   owner: row.ownerUserCode ?? '',
   privileged: row.isPrivileged,
   docs: [],
+  documentCount: Number(row.documentCount ?? 0),
+})
+
+/** Fila de GET /api/cases/:id/documents -> tarjeta de prueba documental. */
+const apiDocumentToDoc = (row) => ({
+  dbId: Number(row.id),
+  id: row.documentCode,
+  name: row.name,
+  classification: row.classification,
+  isPrivileged: Boolean(row.isPrivileged),
+  mimeType: row.mimeType,
+  pages: Number(row.pages ?? 0),
+  checksum: row.checksum,
+  createdAt: row.createdAt,
+  content: row.content ?? null,
 })
 
 /** Fila de security_logs -> entrada de bitacora del frontend. */
@@ -738,11 +753,51 @@ export const useAppStore = create((set, get) => ({
     await get().loadCases({ status: 'abierto,en_tramite,suspendido' })
   },
 
+  /** Actualiza el avance con respuesta optimista y refresco de activity_logs. */
+  updateCaseProgress: async (caseId, progress) => {
+    const target = get().cases.find((c) => c.id === caseId)
+    if (!target?.dbId) throw new Error('No se pudo identificar el expediente en el servidor')
+
+    const nextProgress = Math.min(100, Math.max(0, Math.round(Number(progress))))
+    if (!Number.isFinite(nextProgress)) throw new Error('El avance debe ser un numero entre 0 y 100')
+    if (target.progress === nextProgress) return nextProgress
+
+    const previousProgress = target.progress
+    set((s) => ({
+      cases: s.cases.map((c) => (c.id === caseId ? { ...c, progress: nextProgress } : c)),
+    }))
+
+    try {
+      const data = await casesApi.update(target.dbId, { progress: nextProgress })
+      const serverProgress = Number(data.case?.progress ?? nextProgress)
+      set((s) => ({
+        cases: s.cases.map((c) => (c.id === caseId ? { ...c, progress: serverProgress } : c)),
+      }))
+      ok(set)
+      if (get().hasPermission('LOGS_VIEW')) await get().loadActivityLogs()
+      return serverProgress
+    } catch (error) {
+      set((s) => ({
+        cases: s.cases.map((c) => (c.id === caseId ? { ...c, progress: previousProgress } : c)),
+      }))
+      throw error
+    }
+  },
+
   /** Carga los expedientes respetando el alcance por ambito del servidor. */
   loadCases: async (filters = {}) => {
     try {
       const data = await casesApi.list({ limit: 60, ...filters })
-      set({ cases: data.cases.map(apiCaseToCase) })
+      set((s) => {
+        const cachedDocs = new Map(s.cases.map((c) => [c.dbId, c.docs]))
+        return {
+          cases: data.cases.map((row) => {
+            const mapped = apiCaseToCase(row)
+            const docs = cachedDocs.get(mapped.dbId)
+            return docs?.length ? { ...mapped, docs } : mapped
+          }),
+        }
+      })
       ok(set)
       return data.cases.length
     } catch (error) {
@@ -751,15 +806,69 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
-  /* --------------------------- DOCUMENTOS RESTRINGIDOS -------------------- */
-  revealDocument: (docId) => {
-    if (!get().revealedDocs.includes(docId)) {
-      set((s) => ({ revealedDocs: [...s.revealedDocs, docId] }))
+  /** Carga la prueba documental de un expediente bajo demanda. */
+  loadCaseDocuments: async (caseDbId) => {
+    try {
+      const data = await casesApi.documents(caseDbId)
+      set((s) => ({
+        cases: s.cases.map((c) =>
+          c.dbId === caseDbId
+            ? { ...c, docs: data.documents.map(apiDocumentToDoc), documentCount: Number(data.total) }
+            : c,
+        ),
+      }))
+      ok(set)
+      return data.total
+    } catch (error) {
+      noteApiFailure(set, error, 'case-documents')
+      return 0
     }
   },
 
+  /* --------------------------- DOCUMENTOS RESTRINGIDOS -------------------- */
+  revealDocument: async (docId, meta = {}) => {
+    if (!get().hasPermission('DOCS_REVEAL')) {
+      throw new Error('Permiso DOCS_REVEAL requerido para revelar documentos restringidos')
+    }
+
+    const container = get().cases.find((c) => c.docs.some((doc) => doc.id === docId))
+    const document = container?.docs.find((doc) => doc.id === docId)
+    if (!container?.dbId || !document?.dbId) {
+      throw new Error('El documento no esta disponible en la lista del expediente')
+    }
+
+    const data = await casesApi.revealDocument(container.dbId, {
+      documentId: document.dbId,
+      justification: meta.justification ?? 'sin justificacion',
+    })
+
+    set((s) => ({
+      revealedDocs: s.revealedDocs.includes(docId) ? s.revealedDocs : [...s.revealedDocs, docId],
+      cases: s.cases.map((c) =>
+        c.dbId === container.dbId
+          ? {
+              ...c,
+              docs: c.docs.map((doc) =>
+                doc.id === docId
+                  ? { ...doc, content: data.document?.content ?? doc.content, revealedAt: new Date().toISOString() }
+                  : doc,
+              ),
+            }
+          : c,
+      ),
+    }))
+    if (get().hasPermission('LOGS_VIEW')) await get().loadActivityLogs()
+    return data
+  },
+
   concealDocument: (docId) =>
-    set((s) => ({ revealedDocs: s.revealedDocs.filter((id) => id !== docId) })),
+    set((s) => ({
+      revealedDocs: s.revealedDocs.filter((id) => id !== docId),
+      cases: s.cases.map((c) => ({
+        ...c,
+        docs: c.docs.map((doc) => (doc.id === docId ? { ...doc, content: null } : doc)),
+      })),
+    })),
 
   /* --------------------------- COMPROBANTES / TOKENS --------------------- */
   issueReceipt: ({ title, subject, logId }) => {

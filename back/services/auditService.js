@@ -65,7 +65,9 @@ const EVENT = {
   CASE_CREATED: { status: 'INFO', stream: 'activity' },
   CASE_READ: { status: 'INFO', stream: 'activity' },
   CASE_UPDATED: { status: 'WARN', stream: 'activity' },
+  CASE_PROGRESS_UPDATED: { status: 'INFO', stream: 'activity' },
   CASE_ARCHIVED: { status: 'WARN', stream: 'activity' },
+  DOCUMENT_REVEALED: { status: 'WARN', stream: 'activity' },
   PROFILE_UPDATED: { status: 'INFO', stream: 'activity' },
 }
 

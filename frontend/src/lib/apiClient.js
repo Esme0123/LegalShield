@@ -248,6 +248,8 @@ export const casesApi = {
   create: (payload) => post('/cases', payload),
   update: (id, payload) => put(`/cases/${id}`, payload),
   archiveCase: (id) => del(`/cases/${id}`),
+  documents: (id) => get(`/cases/${id}/documents`),
+  revealDocument: (id, payload) => post(`/cases/${id}/documents/reveal`, payload),
 }
 
 /* -------------------------------------------------------------------------- */

@@ -21,6 +21,7 @@
 
 require('dotenv').config()
 
+const crypto = require('crypto')
 const mysql = require('mysql2/promise')
 const bcrypt = require('bcryptjs')
 const { logger } = require('../utils/logger')
@@ -140,6 +141,27 @@ const TABLES = [
      INDEX idx_cases_lawyer (assigned_lawyer_id),
      INDEX idx_cases_status (status),
      INDEX idx_cases_created (created_at DESC)
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  // 3.6b case_documents · prueba documental del expediente. El contenido
+  //      sensible solo se entrega con DOCS_REVEAL via endpoint de revelacion.
+  `CREATE TABLE IF NOT EXISTS case_documents (
+     id             INT AUTO_INCREMENT PRIMARY KEY,
+     case_id        INT NOT NULL,
+     document_code  VARCHAR(40)  NOT NULL UNIQUE,
+     filename       VARCHAR(200) NOT NULL,
+     classification VARCHAR(30)  NOT NULL DEFAULT 'Publica',
+     is_privileged  BOOLEAN      NOT NULL DEFAULT FALSE,
+     mime_type      VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+     page_count     INT          NOT NULL DEFAULT 1,
+     checksum       CHAR(64),
+     content        LONGTEXT,
+     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     CONSTRAINT fk_docs_case FOREIGN KEY (case_id) REFERENCES legal_cases(id) ON DELETE CASCADE,
+     CONSTRAINT chk_doc_classification CHECK (classification IN ('Publica', 'Uso interno', 'Restringida', 'Confidencial')),
+     CONSTRAINT chk_doc_pages CHECK (page_count >= 1),
+     INDEX idx_docs_case (case_id),
+     INDEX idx_docs_privileged (case_id, is_privileged)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
   // 3.7 security_logs · eventos de acceso y control (ciberseguridad), visibles
@@ -376,6 +398,145 @@ const DEMO_CASES = [
     progress: 71,
     deadline: '2026-10-27',
     isPrivileged: false,
+  },
+]
+
+/** Prueba documental de demostracion: 2 publicos + 1 privilegiado por expediente. */
+const DEMO_DOCUMENTS = [
+  {
+    caseNumber: 'EXP-2026-0014',
+    code: 'DOC-2026-0014-01',
+    filename: 'Peticion_Formal.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 6,
+    content: 'Peticion formal presentada ante el Juzgado 12 Laboral de Bogota. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0014',
+    code: 'DOC-2026-0014-02',
+    filename: 'Poder_Representacion.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 3,
+    content: 'Poder notarial otorgado a la firma para representar a Metalurgia Andes S.A.S. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0014',
+    code: 'DOC-2026-0014-03',
+    filename: 'Dictamen_Estrategico_Secreto.pdf',
+    classification: 'Confidencial',
+    isPrivileged: true,
+    pages: 18,
+    content: 'Dictamen reservado sobre la estrategia probatoria y exposicion patrimonial. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0021',
+    code: 'DOC-2026-0021-01',
+    filename: 'Demanda_Nulidad.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 22,
+    content: 'Demanda de nulidad contractual presentada ante el Tribunal Superior. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0021',
+    code: 'DOC-2026-0021-02',
+    filename: 'Poder_Representacion.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 4,
+    content: 'Poder especial para actuar en el proceso de nulidad contractual. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0021',
+    code: 'DOC-2026-0021-03',
+    filename: 'Auditoria_Financiera.pdf',
+    classification: 'Confidencial',
+    isPrivileged: true,
+    pages: 31,
+    content: 'Auditoria financiera reservada del consorcio y analisis de riesgo de credito. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0033',
+    code: 'DOC-2026-0033-01',
+    filename: 'Peticion_Formal.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 5,
+    content: 'Derecho de peticion radicado ante el Ministerio de Salud. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0033',
+    code: 'DOC-2026-0033-02',
+    filename: 'Acuse_Recibido.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 2,
+    content: 'Acuse de recibo y constancia de radicacion ministerial. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0033',
+    code: 'DOC-2026-0033-03',
+    filename: 'Informe_Reservado_Prensa.pdf',
+    classification: 'Confidencial',
+    isPrivileged: true,
+    pages: 12,
+    content: 'Informe reservado sobre fuentes periodisticas y proteccion de identidad. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0047',
+    code: 'DOC-2026-0047-01',
+    filename: 'Solicitud_Sucesion.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 8,
+    content: 'Solicitud de apertura del proceso de sucesion intestada. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0047',
+    code: 'DOC-2026-0047-02',
+    filename: 'Poder_Representacion.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 3,
+    content: 'Poder de representacion de los herederos reconocidos. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0047',
+    code: 'DOC-2026-0047-03',
+    filename: 'Avaluo_Patrimonial_Confidencial.pdf',
+    classification: 'Confidencial',
+    isPrivileged: true,
+    pages: 26,
+    content: 'Avaluo patrimonial reservado de bienes relictos y pasivos declarados. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0058',
+    code: 'DOC-2026-0058-01',
+    filename: 'Solicitud_Registro_Marca.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 7,
+    content: 'Solicitud de registro de marca presentada ante la SIC. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0058',
+    code: 'DOC-2026-0058-02',
+    filename: 'Poder_Representacion.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 4,
+    content: 'Poder para tramitar la oposicion y el registro marcario. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0058',
+    code: 'DOC-2026-0058-03',
+    filename: 'Dictamen_Colision_Marcaria.pdf',
+    classification: 'Confidencial',
+    isPrivileged: true,
+    pages: 19,
+    content: 'Dictamen reservado sobre riesgo de confusion y estrategia de defensa marcaria. Documento de demostracion.',
   },
 ]
 
@@ -661,6 +822,28 @@ async function main() {
   }
   logger.info(`Expedientes de demostracion listos: ${DEMO_CASES.length}`)
 
+  // Prueba documental de demostracion (2 publicos + 1 privilegiado por caso).
+  for (const doc of DEMO_DOCUMENTS) {
+    const checksum = crypto.createHash('sha256').update(`${doc.code}|legalshield-enterprise`).digest('hex')
+    await run(
+      `INSERT INTO case_documents
+         (case_id, document_code, filename, classification, is_privileged, mime_type, page_count, checksum, content)
+       VALUES ((SELECT id FROM legal_cases WHERE case_number = ?), ?, ?, ?, ?, 'application/pdf', ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         filename = VALUES(filename),
+         classification = VALUES(classification),
+         is_privileged = VALUES(is_privileged),
+         page_count = VALUES(page_count),
+         checksum = VALUES(checksum),
+         content = VALUES(content)`,
+      [
+        doc.caseNumber, doc.code, doc.filename, doc.classification, doc.isPrivileged,
+        doc.pages, checksum, doc.content,
+      ],
+    )
+  }
+  logger.info(`Documentos de demostracion listos: ${DEMO_DOCUMENTS.length}`)
+
   // 6. Verificacion final: tablas visibles en phpMyAdmin.
   const [tables] = await conn.query(
     'SELECT table_name AS nombre FROM information_schema.tables WHERE table_schema = ? ORDER BY table_name',
@@ -670,6 +853,7 @@ async function main() {
   const [[{ total: permCount }]] = await conn.query('SELECT COUNT(*) AS total FROM permissions')
   const [[{ total: grantCount }]] = await conn.query('SELECT COUNT(*) AS total FROM role_permissions')
   const [[{ total: userCount }]] = await conn.query('SELECT COUNT(*) AS total FROM users')
+  const [[{ total: documentCount }]] = await conn.query('SELECT COUNT(*) AS total FROM case_documents')
 
   logger.info(`Tablas creadas (${tables.length}): ${tables.map((t) => t.nombre).join(', ')}`)
   logger.info('Seed verificado', {
@@ -677,6 +861,7 @@ async function main() {
     permisos: permCount,
     asignaciones: grantCount,
     usuarios: userCount,
+    documentos: documentCount,
   })
 
   await conn.end()
