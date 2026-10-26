@@ -65,7 +65,8 @@ export default function Dashboard() {
     }
     fetchActivity()
   }, [logs])
-  const displayName = displayNameFor(session?.userId ?? session?.username)
+  // session.userId es el codigo LEG-AAAA-NNNN; el saludo se arma con el username.
+  const displayName = displayNameFor(session?.name ?? session?.username)
 
   return (
     <div className="space-y-6">
