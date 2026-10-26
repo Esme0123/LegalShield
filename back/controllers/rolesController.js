@@ -53,6 +53,9 @@ async function getMatrix(_req, res) {
   })
 }
 
+/** Concesiones que el rol indicado nunca puede perder desde la matriz. */
+const PROTECTED_GRANTS = { osi: ['ROLES_MANAGE', 'RBAC_MANAGE'] }
+
 /* -------------------------------------------------------------------------- */
 /* POST /api/roles/permissions                                                 */
 /* -------------------------------------------------------------------------- */
@@ -78,6 +81,20 @@ async function updatePermissions(req, res) {
 
   const invalid = entries.find((g) => !g.role || !g.permission)
   if (invalid) throw unprocessable('Cada entrada debe traer role y permission', { entry: invalid })
+
+  // Proteccion contra el autobloqueo: si el OSI perdiera ROLES_MANAGE o RBAC_MANAGE,
+  // nadie podria volver a administrar la matriz. Se rechaza el lote completo.
+  const blocked = entries.filter((g) => !g.granted && PROTECTED_GRANTS[g.role]?.includes(g.permission))
+  if (blocked.length > 0) {
+    record('PERMISSION_CHANGE_BLOCKED', {
+      userCode: req.user.user_code,
+      req,
+      details: { blocked: blocked.map(({ role, permission }) => ({ role, permission })) },
+    })
+    throw unprocessable('El rol osi no puede perder ROLES_MANAGE ni RBAC_MANAGE: nadie podria administrar la seguridad', {
+      blocked: blocked.map(({ role, permission }) => ({ role, permission })),
+    })
+  }
 
   const roleCodes = [...new Set(entries.map((g) => g.role))]
   const permissionCodes = [...new Set(entries.map((g) => g.permission))]

@@ -200,6 +200,9 @@ const initialState = () => ({
   directory: [],
   users: [],
   rbac: {},
+  // Roles y permisos tal como los devuelve GET /api/roles/matrix (fuente de la pantalla de roles).
+  rbacRoles: [],
+  rbacPermissions: [],
   cases: [],
   logs: [],
   activityLogs: [],
@@ -669,7 +672,11 @@ export const useAppStore = create((set, get) => ({
   loadMatrix: async () => {
     try {
       const data = await rolesApi.matrix()
-      set({ rbac: structuredClone(data.assignments) })
+      set({
+        rbac: structuredClone(data.assignments),
+        rbacRoles: data.roles ?? [],
+        rbacPermissions: data.permissions ?? [],
+      })
       ok(set)
       return data
     } catch (error) {

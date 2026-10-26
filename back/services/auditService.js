@@ -57,6 +57,7 @@ const EVENT = {
   PASSWORD_RESET_FAILED: { status: 'WARN', stream: 'security' },
   PASSWORD_RESET_EXHAUSTED: { status: 'CRITICO', stream: 'security' },
   PERMISSION_CHANGED: { status: 'WARN', stream: 'security' },
+  PERMISSION_CHANGE_BLOCKED: { status: 'WARN', stream: 'security' },
   ROLE_CREATED: { status: 'WARN', stream: 'security' },
   ROLE_UPDATED: { status: 'WARN', stream: 'security' },
   ROLE_DELETED: { status: 'WARN', stream: 'security' },
