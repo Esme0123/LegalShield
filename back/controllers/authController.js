@@ -12,6 +12,7 @@ const { notifyUser, NOTICE } = require('../services/notificationService')
 const { hashOtp, otpMatches, OTP_PATTERN, MAX_OTP_ATTEMPTS } = require('../utils/unlockToken')
 const { getClientIp } = require('../utils/helpers')
 const { issueChallenge, verifyChallenge } = require('../utils/captcha')
+const ghostAttempts = require('../utils/ghostAttempts')
 const { badRequest, conflict, forbidden, notFound, unauthorized, unprocessable } = require('../utils/errors')
 const { PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
 const {
@@ -39,6 +40,67 @@ const LOCK_OSI_MESSAGE = 'Cuenta bloqueada por reincidencia. Requiere desbloqueo
 /** Unico mensaje para todo rechazo del OTP: el motivo real solo va a security_logs. */
 const UNLOCK_TOKEN_REJECTED = 'Token de desbloqueo invalido, expirado o agotado. Solicite uno nuevo al Oficial de Seguridad'
 const CAPTCHA_THRESHOLD = Number(process.env.CAPTCHA_THRESHOLD || 1)
+
+/**
+ * Cuerpos de respuesta compartidos por cuentas reales e identificadores
+ * inexistentes: usar el mismo constructor garantiza que ambos casos respondan
+ * identico (CWE-204, enumeracion de cuentas).
+ */
+function lockedBody({ requiresOsi, remainingSeconds, failedAttempts }) {
+  if (requiresOsi) {
+    return {
+      message: LOCK_OSI_MESSAGE,
+      error: LOCK_OSI_MESSAGE,
+      isLocked: true,
+      locked: true,
+      requiresOsi: true,
+      remainingSeconds: null,
+      failedAttempts,
+      maxAttempts: MAX_FAILED_ATTEMPTS,
+      showCaptcha: false,
+      details: { isLocked: true, requiresOsi: true, remainingSeconds: null },
+    }
+  }
+  return {
+    message: LOCK_MESSAGE,
+    error: LOCK_MESSAGE,
+    isLocked: true,
+    requiresOsi: false,
+    remainingSeconds,
+    locked: true,
+    failedAttempts,
+    maxAttempts: MAX_FAILED_ATTEMPTS,
+    showCaptcha: false,
+    details: { isLocked: true, remainingSeconds, locked: true, failedAttempts },
+  }
+}
+
+function failureBody({ failedAttempts, lockedNow, requiresOsi, remainingSeconds }) {
+  const lockMessage = requiresOsi ? LOCK_OSI_MESSAGE : LOCK_MESSAGE
+  return {
+    message: lockedNow ? lockMessage : 'Credencial inválida',
+    error: lockedNow ? lockMessage : 'Credencial inválida',
+    failedAttempts,
+    maxAttempts: MAX_FAILED_ATTEMPTS,
+    locked: lockedNow,
+    isLocked: lockedNow,
+    requiresOsi,
+    remainingSeconds,
+    showCaptcha: !lockedNow && failedAttempts >= CAPTCHA_THRESHOLD,
+    details: { failedAttempts, maxAttempts: MAX_FAILED_ATTEMPTS, locked: lockedNow, isLocked: lockedNow, requiresOsi, remainingSeconds },
+  }
+}
+
+/** Politica de backoff que el contador de identificadores inexistentes replica. */
+const GHOST_POLICY = {
+  maxAttempts: MAX_FAILED_ATTEMPTS,
+  hardThreshold: LOCK_HARD_THRESHOLD,
+  lockMinutes: LOCK_MINUTES,
+  lockMinutesSecond: LOCK_MINUTES_SECOND,
+}
+
+/** Hash de relleno: iguala el costo de bcrypt cuando el usuario no existe (CWE-208). */
+const DUMMY_HASH = bcrypt.hashSync('relleno-sin-usuario', BCRYPT_ROUNDS)
 
 /** Segundos restantes del bloqueo persistido en MySQL (locked_until). */
 function remainingSecondsFrom(lockedUntil, sqlSeconds) {
@@ -140,12 +202,42 @@ async function login(req, res) {
   )
 
   // Respuesta uniforme para usuario inexistente y clave incorrecta: no revela
-  // que User IDs existen en el directorio (enumeracion de cuentas).
-  const genericError = unauthorized('User ID o contrasena incorrectos')
-
+  // que User IDs existen en el directorio (enumeracion de cuentas). El
+  // identificador inexistente sigue el mismo ciclo que una cuenta real
+  // (contador, CAPTCHA y bloqueo) con un estado en memoria.
   if (!user) {
-    record('AUTH_FAILED', { userCode: identifier, req, details: { reason: 'usuario_no_existe', ip } })
-    throw genericError
+    const ghostKey = identifier.toLowerCase()
+    const state = ghostAttempts.peek(ghostKey)
+    if (state.locked) {
+      record('AUTH_LOCKED', {
+        userCode: identifier,
+        req,
+        details: { reason: 'usuario_no_existe', remainingSeconds: state.remainingSeconds, ip },
+      })
+      return res.status(401).json(lockedBody({
+        requiresOsi: state.requiresOsi,
+        remainingSeconds: state.remainingSeconds,
+        failedAttempts: state.failed,
+      }))
+    }
+    if (state.failed >= CAPTCHA_THRESHOLD && !verifyChallenge(captchaToken, captchaResponse)) {
+      ghostAttempts.addFailure(ghostKey)
+      record('AUTH_FAILED', { userCode: identifier, req, details: { reason: 'usuario_no_existe', ip } })
+      throw unauthorized('Validación CAPTCHA requerida o incorrecta')
+    }
+    await bcrypt.compare(password, DUMMY_HASH)
+    const after = ghostAttempts.registerFailure(ghostKey, GHOST_POLICY)
+    record(after.locked ? 'LOGIN_LOCKED' : 'AUTH_FAILED', {
+      userCode: identifier,
+      req,
+      details: { reason: 'usuario_no_existe', ip },
+    })
+    return res.status(401).json(failureBody({
+      failedAttempts: after.failed,
+      lockedNow: after.locked,
+      requiresOsi: after.requiresOsi,
+      remainingSeconds: after.remainingSeconds,
+    }))
   }
 
   // La baja logica y el bloqueo se evaluan ANTES del CAPTCHA: una cuenta
@@ -173,18 +265,11 @@ async function login(req, res) {
         req,
         details: { reason: 'intento_sobre_bloqueo_indefinido', requiresOsi: true, ip },
       })
-      return res.status(401).json({
-        message: LOCK_OSI_MESSAGE,
-        error: LOCK_OSI_MESSAGE,
-        isLocked: true,
-        locked: true,
+      return res.status(401).json(lockedBody({
         requiresOsi: true,
         remainingSeconds: null,
         failedAttempts: Number(user.failed_attempts),
-        maxAttempts: MAX_FAILED_ATTEMPTS,
-        showCaptcha: false,
-        details: { isLocked: true, requiresOsi: true, remainingSeconds: null },
-      })
+      }))
     }
 
     const remainingSeconds = remainingSecondsFrom(user.locked_until, user.remaining_seconds)
@@ -195,18 +280,11 @@ async function login(req, res) {
         req,
         details: { reason: 'intento_sobre_cuenta_bloqueada', remainingSeconds, ip },
       })
-    return res.status(401).json({
-       message: LOCK_MESSAGE,
-       error: LOCK_MESSAGE,
-       isLocked: true,
-       requiresOsi: false,
-       remainingSeconds,
-       locked: true,
-       failedAttempts: Number(user.failed_attempts),
-       maxAttempts: MAX_FAILED_ATTEMPTS,
-       showCaptcha: false,
-       details: { isLocked: true, remainingSeconds, locked: true, failedAttempts: Number(user.failed_attempts) },
-    })
+      return res.status(401).json(lockedBody({
+        requiresOsi: false,
+        remainingSeconds,
+        failedAttempts: Number(user.failed_attempts),
+      }))
     }
 
     await releaseExpiredLock(user.id)
@@ -293,7 +371,6 @@ async function login(req, res) {
     let remainingSeconds = 0
     if (requiresOsi) remainingSeconds = null
     else if (lockedNow) remainingSeconds = Math.max(0, Number(updated.remaining_seconds ?? LOCK_MINUTES * 60))
-    const lockMessage = requiresOsi ? LOCK_OSI_MESSAGE : LOCK_MESSAGE
 
     // 3. Al alcanzar el umbral -> cuenta bloqueada + evento LOGIN_LOCKED en bitacora
     //    y aviso al titular (ISO 27001 A.5.26), que puede detectar un ataque ajeno.
@@ -321,18 +398,7 @@ async function login(req, res) {
 
     // 401 uniforme con el contador real. Al bloquear se anexa isLocked y el
     // tiempo restante para que el frontend inicie su cuenta regresiva exacta.
-    return res.status(401).json({
-       message: lockedNow ? lockMessage : 'Credencial inválida',
-       error: lockedNow ? lockMessage : 'Credencial inválida',
-       failedAttempts,
-       maxAttempts: MAX_FAILED_ATTEMPTS,
-       locked: lockedNow,
-       isLocked: lockedNow,
-       requiresOsi,
-       remainingSeconds,
-       showCaptcha: !lockedNow && failedAttempts >= CAPTCHA_THRESHOLD,
-       details: { failedAttempts, maxAttempts: MAX_FAILED_ATTEMPTS, locked: lockedNow, isLocked: lockedNow, requiresOsi, remainingSeconds },
-    })
+    return res.status(401).json(failureBody({ failedAttempts, lockedNow, requiresOsi, remainingSeconds }))
   }
 
   // 4. Credencial correcta -> reinicia los contadores (tambien los bloqueos
@@ -418,6 +484,18 @@ async function lockStatus(req, res) {
       WHERE username = ? OR email = ? OR user_code = ?`,
     [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
   )
+
+  // Identificador inexistente: mismo estado simulado que usa el login.
+  if (!user) {
+    const state = ghostAttempts.peek(identifier.toLowerCase())
+    if (state.requiresOsi) {
+      return res.json({ isLocked: true, requiresOsi: true, remainingSeconds: null, failedAttempts: state.failed, message: LOCK_OSI_MESSAGE })
+    }
+    if (state.locked) {
+      return res.json({ isLocked: true, requiresOsi: false, remainingSeconds: state.remainingSeconds, failedAttempts: state.failed, message: LOCK_MESSAGE })
+    }
+    return res.json({ isLocked: false, requiresOsi: false, remainingSeconds: 0, failedAttempts: state.failed })
+  }
 
   // Bloqueo indefinido: locked_until es NULL, asi que no hay cuenta regresiva y
   // la cuenta NO se libera sola (solo la levanta el OSI o un OTP valido).
