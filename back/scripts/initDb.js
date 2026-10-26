@@ -322,15 +322,6 @@ const DEMO_USERS = [
     department: 'Externo',
     phone: '+591 3 228 4419',
   },
-  {
-    userCode: 'LEG-2026-0000',
-    username: 'admin',
-    email: 'admin@legalshield.bo',
-    role: 'socio',
-    firm: 'LegalShield Bufetes',
-    department: 'Super Administracion',
-    phone: '+591 2 000 0000',
-  },
 ]
 
 const DEMO_CASES = [
@@ -603,7 +594,7 @@ async function main() {
   // eventos de negocio permanecen donde fueron escritas.
 
   // Personas civiles de demostracion (mismas cuentas que DIRECTORY en el
-  // frontend). El usuario previo "admin" colisiona en LEG-2026-0001, asi que
+  // frontend). El usuario previo "admin" colisionaba en LEG-2026-0001, asi que
   // ON DUPLICATE KEY UPDATE lo transforma en mariana.solis (socio).
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, BCRYPT_ROUNDS)
   for (const user of DEMO_USERS) {
@@ -637,6 +628,17 @@ async function main() {
       [passwordHash, user.userCode],
     )
     logger.info(`Usuario de demostracion listo: ${user.userCode} / ${user.username} (${user.role})`)
+  }
+
+  // La cuenta tecnica "admin" (socio con clave de demostracion conocida) violaba
+  // el menor privilegio: se retira tambien de las bases creadas con seeds previos.
+  // Sus claves, historial y avisos caen por ON DELETE CASCADE; los expedientes
+  // que tuviera asignados quedan sin abogado (ON DELETE SET NULL). La bitacora
+  // de seguridad conserva sus eventos, que son inmutables.
+  const [staleAdmin] = await run("SELECT id FROM users WHERE user_code = 'LEG-2026-0000' AND username = 'admin'")
+  if (staleAdmin.length > 0) {
+    await run('DELETE FROM users WHERE id = ?', [staleAdmin[0].id])
+    logger.info('Cuenta tecnica retirada: LEG-2026-0000 / admin')
   }
 
   // Expedientes de demostracion (CASES del frontend), idempotentes.
