@@ -598,41 +598,9 @@ async function main() {
   )
   logger.info('Segregacion estricta aplicada: concesiones fuera de matriz revocadas')
 
-  // Separacion de bitacoras: los eventos de negocio que en seeds previos
-  // quedaron en security_logs se migran a activity_logs (la tabla de
-  // seguridad es inmutable, por eso se retira el trigger durante el traslado
-  // y se restaura en el mismo bloque).
-  const ACTIVITY_ACTIONS = [
-    'READ', 'CREATE', 'UPDATE', 'DELETE',
-    'CASE_READ', 'CASE_CREATED', 'CASE_UPDATED', 'CASE_ARCHIVED',
-    'PROFILE_UPDATED', 'MATRIX_ACCESS_CHANGED', 'MATRIX_BULK_CHANGED',
-    'DOC_REVEALED', 'DOC_CONCEALED', 'AUDIT_RECEIPT',
-  ]
-  const inList = ACTIVITY_ACTIONS.map((a) => `'${a}'`).join(', ')
-  const [pendingRows] = await run(
-    `SELECT COUNT(*) AS total FROM security_logs WHERE action IN (${inList})`,
-  )
-  if (Number(pendingRows[0].total) > 0) {
-    await run(
-      `INSERT INTO activity_logs (user_code, action, ip_address, status, details, timestamp)
-       SELECT user_code, action, ip_address, status, details, timestamp
-         FROM security_logs
-        WHERE action IN (${inList})`,
-    )
-    await run('DROP TRIGGER IF EXISTS trg_security_logs_no_delete')
-    try {
-      await run(`DELETE FROM security_logs WHERE action IN (${inList})`)
-    } finally {
-      if (!(await triggerExists('trg_security_logs_no_delete'))) {
-        await run(
-          `CREATE TRIGGER trg_security_logs_no_delete
-             BEFORE DELETE ON security_logs FOR EACH ROW
-             SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'security_logs es inmutable: DELETE no permitido'`,
-        )
-      }
-    }
-    logger.info('Bitacoras separadas: eventos de negocio movidos a activity_logs')
-  }
+  // security_logs es inmutable (ISO 27001 A.8.15): los triggers de UPDATE y DELETE
+  // nunca se retiran, ni siquiera durante una migracion. Las filas heredadas de
+  // eventos de negocio permanecen donde fueron escritas.
 
   // Personas civiles de demostracion (mismas cuentas que DIRECTORY en el
   // frontend). El usuario previo "admin" colisiona en LEG-2026-0001, asi que
