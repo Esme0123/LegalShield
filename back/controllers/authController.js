@@ -9,12 +9,13 @@ const {
 } = require('../services/authService')
 const { record } = require('../services/auditService')
 const { notifyUser, NOTICE } = require('../services/notificationService')
-const { hashOtp, otpMatches, OTP_PATTERN, MAX_OTP_ATTEMPTS } = require('../utils/unlockToken')
+const { hashOtp, otpMatches, OTP_PATTERN, MAX_OTP_ATTEMPTS, MAX_RESET_ATTEMPTS } = require('../utils/unlockToken')
+const { assertPasswordNotReused, pushPasswordHistory } = require('../utils/passwordHistory')
 const { getClientIp } = require('../utils/helpers')
 const { issueChallenge, verifyChallenge } = require('../utils/captcha')
 const ghostAttempts = require('../utils/ghostAttempts')
 const { badRequest, conflict, forbidden, notFound, unauthorized, unprocessable } = require('../utils/errors')
-const { PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
+const { evaluatePassword, PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
 const {
   USER_CODE_RE,
   USER_CODE_CI_RE,
@@ -39,6 +40,8 @@ const LOCK_MESSAGE = '3 de 3 - Cuenta inhabilitada temporalmente'
 const LOCK_OSI_MESSAGE = 'Cuenta bloqueada por reincidencia. Requiere desbloqueo del Oficial de Seguridad'
 /** Unico mensaje para todo rechazo del OTP: el motivo real solo va a security_logs. */
 const UNLOCK_TOKEN_REJECTED = 'Token de desbloqueo invalido, expirado o agotado. Solicite uno nuevo al Oficial de Seguridad'
+/** Unico mensaje para todo rechazo del token de reinicio: el motivo real solo va a security_logs. */
+const RESET_TOKEN_REJECTED = 'Token de reinicio invalido, expirado o agotado. Solicite uno nuevo al Oficial de Seguridad'
 const CAPTCHA_THRESHOLD = Number(process.env.CAPTCHA_THRESHOLD || 1)
 /** Edad maxima de la clave en dias; un valor invalido vuelve al predeterminado de 90. */
 const configuredMaxAge = Number(process.env.PASSWORD_MAX_AGE_DAYS)
@@ -104,6 +107,17 @@ const GHOST_POLICY = {
 
 /** Hash de relleno: iguala el costo de bcrypt cuando el usuario no existe (CWE-208). */
 const DUMMY_HASH = bcrypt.hashSync('relleno-sin-usuario', BCRYPT_ROUNDS)
+
+/** Anula el token de reinicio vigente (vencido o agotado) solo si sigue siendo el leido. */
+async function invalidateResetToken(userId, expectedHash) {
+  await query(
+    `UPDATE users
+        SET reset_token = NULL, reset_token_expires_at = NULL,
+            reset_token_used = TRUE, reset_token_attempts = 0
+      WHERE id = ? AND reset_token = ?`,
+    [userId, expectedHash],
+  )
+}
 
 /** Segundos restantes del bloqueo persistido en MySQL (locked_until). */
 function remainingSecondsFrom(lockedUntil, sqlSeconds) {
@@ -778,8 +792,139 @@ async function verifyUnlockToken(req, res) {
   res.json({ message: 'Cuenta desbloqueada. Inicie sesion con su contrasena habitual' })
 }
 
+/* -------------------------------------------------------------------------- */
+/* POST /api/auth/reset-password                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Reinicio de clave con el token que emitio el OSI. El titular define la clave: el
+ * OSI nunca la conoce.
+ *   · Todo rechazo del token es el mismo 401 (CWE-204); el motivo real solo queda en
+ *     security_logs. La politica de claves no depende del token y responde 422.
+ *   · Limite de intentos por token reservado con UPDATE condicional (CWE-307/362) y
+ *     HMAC con contexto "reset:" comparado en tiempo constante (CWE-208).
+ *   · Una clave del historial responde 422 sin consumir el token ni el intento.
+ *   · Al reiniciar tambien se levanta el bloqueo: quien olvido la clave suele estar
+ *     bloqueado y el token ya prueba la intervencion del OSI.
+ */
+async function resetPassword(req, res) {
+  const token = String(req.body?.token ?? '').trim()
+  const newPassword = req.body?.newPassword
+  const identifier = normalizeLoginIdentifier(req.body?.userCode ?? req.body?.identifier ?? req.body?.email)
+  const ip = getClientIp(req)
+
+  if (!identifier || !OTP_PATTERN.test(token) || typeof newPassword !== 'string' || newPassword.length === 0) {
+    throw badRequest('Debe enviar el User ID, un token de 6 digitos y la nueva contrasena')
+  }
+
+  const policy = evaluatePassword(newPassword)
+  if (!policy.valid) {
+    throw unprocessable('La nueva contrasena no cumple la politica de seguridad', {
+      failed: policy.failed,
+      rules: policy.rules.map(({ id, label }) => ({ id, label })),
+    })
+  }
+
+  const user = await one(
+    `SELECT id, user_code, is_active, reset_token, reset_token_expires_at,
+            reset_token_used, reset_token_attempts
+       FROM users WHERE username = ? OR email = ? OR user_code = ?`,
+    [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
+  )
+
+  const reject = (action, reason, extra = {}) => {
+    record(action, { userCode: user?.user_code ?? null, req, details: { reason, ip, ...extra } })
+    return unauthorized(RESET_TOKEN_REJECTED)
+  }
+
+  if (!user) {
+    hashOtp(0, token, 'reset:') // iguala el costo de la respuesta
+    throw reject('PASSWORD_RESET_FAILED', 'usuario_inexistente', { identifier })
+  }
+  if (!user.is_active) throw reject('PASSWORD_RESET_FAILED', 'cuenta_inactiva')
+  if (!user.reset_token || user.reset_token_used) {
+    throw reject('PASSWORD_RESET_FAILED', 'sin_token')
+  }
+  if (!user.reset_token_expires_at || new Date(user.reset_token_expires_at) < new Date()) {
+    await invalidateResetToken(user.id, user.reset_token)
+    throw reject('PASSWORD_RESET_FAILED', 'expirado')
+  }
+
+  // Reserva atomica del intento ANTES de comparar (misma tecnica que el OTP de desbloqueo).
+  const attempt = await withTransaction(async (client) => {
+    const reserved = await client.query(
+      `UPDATE users SET reset_token_attempts = reset_token_attempts + 1
+        WHERE id = ? AND reset_token = ? AND reset_token_attempts < ?`,
+      [user.id, user.reset_token, MAX_RESET_ATTEMPTS],
+    )
+    if (reserved.affectedRows !== 1) return null
+    const { rows: current } = await client.query(
+      'SELECT reset_token_attempts AS attempt FROM users WHERE id = ?',
+      [user.id],
+    )
+    return Number(current[0].attempt)
+  })
+  if (attempt === null) {
+    await invalidateResetToken(user.id, user.reset_token)
+    throw reject('PASSWORD_RESET_EXHAUSTED', 'limite_alcanzado', { maxAttempts: MAX_RESET_ATTEMPTS })
+  }
+
+  if (!otpMatches(user.id, token, user.reset_token, 'reset:')) {
+    if (attempt >= MAX_RESET_ATTEMPTS) {
+      await invalidateResetToken(user.id, user.reset_token)
+      throw reject('PASSWORD_RESET_EXHAUSTED', 'limite_alcanzado', { attempt, maxAttempts: MAX_RESET_ATTEMPTS })
+    }
+    throw reject('PASSWORD_RESET_FAILED', 'token_incorrecto', { attempt, maxAttempts: MAX_RESET_ATTEMPTS })
+  }
+
+  // Token correcto: una clave repetida no quema el token ni el intento.
+  try {
+    await assertPasswordNotReused(user.id, newPassword)
+  } catch (error) {
+    await query(
+      `UPDATE users SET reset_token_attempts = GREATEST(reset_token_attempts - 1, 0)
+        WHERE id = ? AND reset_token = ?`,
+      [user.id, user.reset_token],
+    )
+    record('PASSWORD_RESET_FAILED', { userCode: user.user_code, req, details: { reason: 'clave_reutilizada', ip } })
+    throw error
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
+
+  const consumed = await withTransaction(async (client) => {
+    // Consumo atomico de un solo uso: solo gana la peticion que aun ve el mismo hash.
+    const updated = await client.query(
+      `UPDATE users
+          SET password_hash = ?, password_updated_at = now(), must_change_password = FALSE,
+              is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0, lock_count = 0,
+              locked_at = NULL, locked_until = NULL,
+              unlock_token = NULL, unlock_token_expires_at = NULL,
+              unlock_token_used = FALSE, unlock_token_attempts = 0,
+              reset_token = NULL, reset_token_expires_at = NULL,
+              reset_token_used = TRUE, reset_token_attempts = 0
+        WHERE id = ? AND reset_token = ?`,
+      [passwordHash, user.id, user.reset_token],
+    )
+    if (updated.affectedRows !== 1) return false
+    await pushPasswordHistory(client, user.id, passwordHash)
+    return true
+  })
+  if (!consumed) throw reject('PASSWORD_RESET_FAILED', 'consumo_concurrente')
+
+  await notifyUser(user.id, NOTICE.PASSWORD_RESET_DONE(ip))
+  record('PASSWORD_RESET', {
+    userCode: user.user_code,
+    req,
+    details: { ip, attempt, historyLimit: PASSWORD_HISTORY_LIMIT },
+  })
+
+  res.json({ message: 'Contrasena restablecida. Inicie sesion con su nueva contrasena' })
+}
+
   module.exports = {
   register,
+  resetPassword,
   login,
   captcha,
   unlock,

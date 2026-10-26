@@ -20,6 +20,7 @@ import { toast } from '@/store/toastStore'
 import { validateUserId } from '@/lib/security'
 import { cn } from '@/lib/cn'
 import CaptchaChallenge from '@/components/auth/CaptchaChallenge'
+import PasswordResetPanel from '@/components/auth/PasswordResetPanel'
 
 const SIGNAL_STEPS = ['Analisis de User ID…', 'Verificacion de politica…', 'MFA · passkey', 'Emision de sesion']
 
@@ -51,6 +52,7 @@ export default function Login() {
   const [, setLocalError] = useState('')
   const [otpCode, setOtpCode] = useState('')
   const [verifyingOtp, setVerifyingOtp] = useState(false)
+  const [showReset, setShowReset] = useState(false)
 
   const locked = Boolean(lockedUntil) && now < lockedUntil
   const idCheck = useMemo(() => validateUserId(userId), [userId])
@@ -509,6 +511,26 @@ export default function Login() {
                       </button>
                     </div>
                   </motion.div>
+                )}
+              </AnimatePresence>
+
+              <button
+                type="button"
+                onClick={() => setShowReset((v) => !v)}
+                className="ls-btn-ghost mt-3 w-full text-xs"
+                aria-expanded={showReset}
+              >
+                ¿Olvidó su contraseña?
+              </button>
+              <AnimatePresence>
+                {showReset && (
+                  <PasswordResetPanel
+                    initialUserId={idCheck.valid ? idCheck.normalized : userId}
+                    onDone={() => {
+                      setShowReset(false)
+                      setPassword('')
+                    }}
+                  />
                 )}
               </AnimatePresence>
             </div>

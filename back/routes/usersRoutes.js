@@ -45,4 +45,11 @@ router.post(
   asyncHandler(controller.generateUnlockToken),
 )
 
+router.post(
+  '/:id/generate-reset-token',
+  // Reiniciar credenciales exige el permiso especifico TOKEN_RESET.
+  checkAnyPermission(['TOKEN_RESET']),
+  asyncHandler(controller.generateResetToken),
+)
+
 module.exports = router

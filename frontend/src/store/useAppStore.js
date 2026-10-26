@@ -490,6 +490,13 @@ export const useAppStore = create((set, get) => ({
     return { token: data.token, expiresAt: data.expiresAt, expiresInMinutes: data.expiresInMinutes }
   },
 
+  /** Token de reinicio de clave emitido por el OSI. Se devuelve al componente; no se almacena. */
+  generateResetToken: async (id) => {
+    const data = await usersApi.generateResetToken(id)
+    ok(set)
+    return { token: data.token, expiresAt: data.expiresAt, expiresInMinutes: data.expiresInMinutes }
+  },
+
   /* -------------------------------- PERFIL ------------------------------- */
 
   /** Ficha completa del titular (incluye telefono, despacho e historial). */
@@ -565,6 +572,32 @@ export const useAppStore = create((set, get) => ({
         return { ok: false, reason: error.message || 'Demasiados intentos. Espere unos minutos antes de reintentar' }
       }
       return { ok: false, reason: error.message ?? 'Token invalido o expirado' }
+    }
+  },
+
+  /**
+   * Reinicio de clave con el token del OSI. Ni el token ni la clave nueva se guardan
+   * en el store; solo viajan en la peticion. `policy` indica un 422: el token sigue vivo.
+   */
+  resetPassword: async (userCode, token, newPassword) => {
+    const code = String(userCode ?? '').trim().toUpperCase()
+    try {
+      const data = await authApi.resetPassword({ userCode: code, token, newPassword })
+      ok(set)
+      return { ok: true, message: data.message }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 0) {
+        noteApiFailure(set, error, 'reset-password')
+        return { ok: false, reason: CONNECTION_ERROR }
+      }
+      if (error instanceof ApiError && error.status === 429) {
+        return { ok: false, reason: error.message || 'Demasiados intentos. Espere unos minutos antes de reintentar' }
+      }
+      return {
+        ok: false,
+        policy: error instanceof ApiError && error.status === 422,
+        reason: error.message ?? 'Token invalido o expirado',
+      }
     }
   },
 

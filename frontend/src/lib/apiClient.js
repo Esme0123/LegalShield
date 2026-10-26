@@ -213,6 +213,7 @@ export const authApi = {
   /** Estado del bloqueo temporal de una cuenta (restaura el conteo tras F5). */
   lockStatus: (userCode) => post('/auth/lock-status', { userCode }, { auth: false }),
   verifyUnlockToken: (payload) => post('/auth/verify-unlock-token', payload, { auth: false }),
+  resetPassword: (payload) => post('/auth/reset-password', payload, { auth: false }),
   notifications: () => get('/auth/notifications'),
   readNotification: (id) => patch(`/auth/notifications/${id}/read`),
 }
@@ -261,6 +262,7 @@ export const usersApi = {
   status: (id, payload) => patch(`/users/${id}/status`, payload),
   unlock: (id, payload) => post(`/users/${id}/unlock`, payload),
   generateUnlockToken: (id) => post(`/users/${id}/generate-unlock-token`),
+  generateResetToken: (id) => post(`/users/${id}/generate-reset-token`),
 }
 
 /* -------------------------------------------------------------------------- */

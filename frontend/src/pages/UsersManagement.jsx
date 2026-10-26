@@ -253,7 +253,8 @@ function UserModal({ mode, user, onClose, onSecret }) {
 /* -------------------------------------------------------------------------- */
 
 function OneTimeSecretModal({ secret, onClose }) {
-  const isOtp = secret.kind === 'otp'
+  // 'otp' (desbloqueo) y 'reset' (reinicio de clave) son tokens de 6 digitos.
+  const isOtp = secret.kind === 'otp' || secret.kind === 'reset'
 
   const copy = async () => {
     try {
@@ -282,7 +283,7 @@ function OneTimeSecretModal({ secret, onClose }) {
         <div className="mb-5">
           <h3 className="flex items-center gap-2 font-display text-base font-bold text-ink">
             <KeyRound className="h-4 w-4 text-accent" />
-            {isOtp ? 'Token OTP de desbloqueo' : 'Contraseña inicial'}
+            {secret.kind === 'reset' ? 'Token de reinicio de contraseña' : isOtp ? 'Token OTP de desbloqueo' : 'Contraseña inicial'}
           </h3>
           <p className="mt-0.5 text-[11.5px] text-muted">{secret.userLabel}</p>
         </div>
@@ -343,6 +344,7 @@ export default function UsersManagement() {
   const setUserStatusAdmin = useAppStore((s) => s.setUserStatusAdmin)
   const unlockUserAdmin = useAppStore((s) => s.unlockUserAdmin)
   const generateUnlockToken = useAppStore((s) => s.generateUnlockToken)
+  const generateResetToken = useAppStore((s) => s.generateResetToken)
   const hasPermission = useAppStore((s) => s.hasPermission)
   const session = useAppStore((s) => s.session)
 
@@ -359,6 +361,7 @@ export default function UsersManagement() {
     remove: hasPermission('USERS_DELETE'),
     unlock: hasPermission('USERS_UNLOCK'),
     token: hasPermission('ACCOUNT_UNLOCK') || hasPermission('TOKEN_RESET'),
+    reset: hasPermission('TOKEN_RESET'),
   }
 
   useEffect(() => {
@@ -427,6 +430,18 @@ export default function UsersManagement() {
       setSecret({ kind: 'otp', value: token, userLabel: `${user.username} · ${user.userCode}`, expiresAt, expiresInMinutes })
     } catch (error) {
       toast.danger('No se emitio el token', error.message ?? 'Permiso insuficiente o fallo de API')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const issueResetToken = async (user) => {
+    setBusyId(user.id)
+    try {
+      const { token, expiresAt, expiresInMinutes } = await generateResetToken(user.id)
+      setSecret({ kind: 'reset', value: token, userLabel: `${user.username} · ${user.userCode}`, expiresAt, expiresInMinutes })
+    } catch (error) {
+      toast.danger('No se emitio el token de reinicio', error.message ?? 'Permiso insuficiente o fallo de API')
     } finally {
       setBusyId(null)
     }
@@ -603,6 +618,17 @@ export default function UsersManagement() {
                             title="Emitir token OTP de desbloqueo"
                           >
                             <KeyRound className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        {can.reset && user.isActive && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => issueResetToken(user)}
+                            className="rounded-lg border border-line/50 p-2 text-muted transition hover:border-accent/60 hover:text-accent"
+                            title="Emitir token de reinicio de contraseña"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
                           </button>
                         )}
                         {can.unlock && (user.isLocked || user.failedAttempts > 0) && (

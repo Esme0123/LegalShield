@@ -72,5 +72,7 @@ router.patch('/notifications/:id/read', authenticate, asyncHandler(profile.markN
 // Desbloqueo: exclusivo del Oficial de Seguridad (OSI) via ACCOUNT_UNLOCK.
 router.post('/unlock', authenticate, checkPermission('ACCOUNT_UNLOCK'), auditAction('AUTH_UNLOCK'), asyncHandler(controller.unlock))
 router.post('/verify-unlock-token', authLimiter, asyncHandler(controller.verifyUnlockToken))
+// Reinicio de clave del titular con el token emitido por el OSI (publico, con limitador).
+router.post('/reset-password', authLimiter, asyncHandler(controller.resetPassword))
 
 module.exports = router

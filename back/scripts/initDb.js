@@ -92,6 +92,10 @@ const TABLES = [
      unlock_token_expires_at DATETIME,
      unlock_token_used   BOOLEAN NOT NULL DEFAULT FALSE,
      unlock_token_attempts INT NOT NULL DEFAULT 0,
+     reset_token         CHAR(64) NULL DEFAULT NULL,
+     reset_token_expires_at DATETIME,
+     reset_token_used    BOOLEAN NOT NULL DEFAULT FALSE,
+     reset_token_attempts INT NOT NULL DEFAULT 0,
      created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT,
@@ -529,6 +533,24 @@ async function main() {
   if (!(await columnExists('users', 'unlock_token_attempts'))) {
     await run('ALTER TABLE users ADD COLUMN unlock_token_attempts INT NOT NULL DEFAULT 0 AFTER unlock_token_used')
     logger.info('Columna agregada: users.unlock_token_attempts')
+  }
+  // 4e. Reinicio de contrasena: token propio (HMAC con contexto "reset:") separado del de
+  //     desbloqueo, para que emitir uno no invalide el otro y no sean intercambiables.
+  if (!(await columnExists('users', 'reset_token'))) {
+    await run('ALTER TABLE users ADD COLUMN reset_token CHAR(64) NULL DEFAULT NULL AFTER unlock_token_attempts')
+    logger.info('Columna agregada: users.reset_token')
+  }
+  if (!(await columnExists('users', 'reset_token_expires_at'))) {
+    await run('ALTER TABLE users ADD COLUMN reset_token_expires_at DATETIME AFTER reset_token')
+    logger.info('Columna agregada: users.reset_token_expires_at')
+  }
+  if (!(await columnExists('users', 'reset_token_used'))) {
+    await run('ALTER TABLE users ADD COLUMN reset_token_used BOOLEAN NOT NULL DEFAULT FALSE AFTER reset_token_expires_at')
+    logger.info('Columna agregada: users.reset_token_used')
+  }
+  if (!(await columnExists('users', 'reset_token_attempts'))) {
+    await run('ALTER TABLE users ADD COLUMN reset_token_attempts INT NOT NULL DEFAULT 0 AFTER reset_token_used')
+    logger.info('Columna agregada: users.reset_token_attempts')
   }
   if (!(await columnExists('users', 'must_change_password'))) {
     await run('ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE AFTER password_updated_at')

@@ -26,6 +26,16 @@ const NOTICE = {
     title: 'Cuenta reactivada con token OTP',
     message: `Su cuenta fue reactivada el ${stamp()} mediante un token OTP. Su contrasena no fue modificada.`,
   }),
+  RESET_TOKEN_ISSUED: () => ({
+    type: 'PASSWORD_RESET_TOKEN_ISSUED',
+    title: 'Token de reinicio de contrasena emitido',
+    message: `El Oficial de Seguridad emitio un token de reinicio de contrasena para su cuenta el ${stamp()}. Si no lo solicito, reporte un incidente inmediatamente.`,
+  }),
+  PASSWORD_RESET_DONE: (ip) => ({
+    type: 'PASSWORD_RESET',
+    title: 'Contrasena reiniciada',
+    message: `Su contrasena fue reiniciada el ${stamp()} desde la IP ${ip ?? 'desconocida'} con un token del Oficial de Seguridad. Si no fue usted, reporte un incidente inmediatamente.`,
+  }),
   UNLOCKED_BY_OSI: () => ({
     type: 'ACCOUNT_UNLOCKED',
     title: 'Cuenta reactivada por el OSI',
