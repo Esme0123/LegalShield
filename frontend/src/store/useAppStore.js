@@ -118,8 +118,9 @@ const apiUserToAdminUser = (row) => {
     role: row.role,
     roleLabel: row.roleLabel,
     status: row.status,
-    isActive: row.isActive,
-    isLocked: row.isLocked,
+    // MySQL entrega 0/1: como numero, `cond && user.isLocked && ...` pintaba un "0" suelto.
+    isActive: Boolean(row.isActive),
+    isLocked: Boolean(row.isLocked),
     failedAttempts: row.failedAttempts,
     lockedAt: row.lockedAt,
     lockedUntil: row.lockedUntil,
