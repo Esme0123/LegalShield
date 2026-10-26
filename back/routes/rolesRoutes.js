@@ -20,6 +20,12 @@ router.post(
   auditAction('ROLE_CREATED'),
   asyncHandler(controller.createRole),
 )
+router.put(
+  '/:code',
+  checkPermission('ROLES_MANAGE'),
+  auditAction('ROLE_UPDATED'),
+  asyncHandler(controller.updateRole),
+)
 router.delete(
   '/:code',
   checkPermission('ROLES_MANAGE'),

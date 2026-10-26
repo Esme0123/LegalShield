@@ -276,4 +276,51 @@ async function deleteRole(req, res) {
   res.json({ message: `Rol ${code} eliminado` })
 }
 
-module.exports = { getMatrix, updatePermissions, resetMatrix, createRole, deleteRole }
+/**
+ * Renombra o describe un rol. El codigo es inmutable: los permisos, los tokens
+ * y los registros de auditoria lo referencian, asi que solo cambian nombre y descripcion.
+ */
+async function updateRole(req, res) {
+  const code = String(req.params.code ?? '').trim().toLowerCase()
+  const role = await one('SELECT id, code, name, description FROM roles WHERE code = ?', [code])
+  if (!role) throw notFound(`No existe el rol ${code}`)
+
+  const body = req.body ?? {}
+  const hasName = body.name !== undefined
+  const hasDescription = body.description !== undefined
+  if (!hasName && !hasDescription) {
+    throw badRequest('Se esperaba al menos name o description')
+  }
+
+  const name = hasName ? String(body.name ?? '').trim() : role.name
+  const description = hasDescription ? String(body.description ?? '').trim() : (role.description ?? '')
+
+  if (name.length < 3 || name.length > 80) {
+    throw unprocessable('El nombre del rol debe tener entre 3 y 80 caracteres')
+  }
+  if (description.length > 500) {
+    throw unprocessable('La descripcion no puede superar 500 caracteres')
+  }
+
+  const duplicate = await one('SELECT id FROM roles WHERE name = ? AND id <> ?', [name, role.id])
+  if (duplicate) throw conflict('Ya existe otro rol con ese nombre')
+
+  await query('UPDATE roles SET name = ?, description = ? WHERE id = ?', [name, description || null, role.id])
+
+  record('ROLE_UPDATED', {
+    userCode: req.user.user_code,
+    req,
+    details: {
+      role: code,
+      before: { name: role.name, description: role.description },
+      after: { name, description: description || null },
+    },
+  })
+
+  res.json({
+    message: `Rol ${code} actualizado`,
+    role: { id: role.id, code, name, description: description || null },
+  })
+}
+
+module.exports = { getMatrix, updatePermissions, resetMatrix, createRole, updateRole, deleteRole }

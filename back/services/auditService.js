@@ -53,6 +53,7 @@ const EVENT = {
   PASSWORD_CHANGE_REQUIRED: { status: 'INFO', stream: 'security' },
   PERMISSION_CHANGED: { status: 'WARN', stream: 'security' },
   ROLE_CREATED: { status: 'WARN', stream: 'security' },
+  ROLE_UPDATED: { status: 'WARN', stream: 'security' },
   ROLE_DELETED: { status: 'WARN', stream: 'security' },
   // Operacion del negocio (actividad)
   CASE_CREATED: { status: 'INFO', stream: 'activity' },
