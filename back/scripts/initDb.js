@@ -24,6 +24,7 @@ require('dotenv').config()
 const mysql = require('mysql2/promise')
 const bcrypt = require('bcryptjs')
 const { logger } = require('../utils/logger')
+const { RBAC_MATRIX } = require('../config/rbacBaseline')
 
 const DB_NAME = process.env.DB_NAME || 'legalshield_db'
 const DB_HOST = process.env.DB_HOST || 'localhost'
@@ -252,30 +253,6 @@ const PERMISSIONS = [
   ['ACCOUNT_UNLOCK', 'Desbloquear cuentas inhabilitadas temporalmente'],
   ['SECURITY_LOGS_VIEW', 'Ver la bitacora de seguridad (eventos de acceso y control)'],
 ]
-
-/**
- * Matriz estricta de segregacion de funciones:
- *   · OSI      -> ABM de usuarios, gestion de roles, desbloqueo y logs de seguridad.
- *   · Socio    -> expedientes, metricas del despacho y logs de aplicacion.
- *   · Abogado/Asistente/Cliente -> permisos operacionales sobre sus expedientes.
- */
-const RBAC_MATRIX = {
-  osi: [
-    'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
-    'USERS_UNLOCK', 'ACCOUNT_UNLOCK',
-    'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
-    'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT',
-    'CASES_READ',
-  ],
-  socio: [
-    'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL',
-    'DOCS_REVEAL', 'DOCS_DOWNLOAD',
-    'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS',
-  ],
-  abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT', 'RISK_ASSESS'],
-  asistente: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'],
-  cliente: ['CASES_READ'],
-}
 
 /** Catalogos obsoletos del seed previo: se limpian para alinear la matriz. */
 const OBSOLETE_PERMISSIONS = ['CASES_UPDATE']

@@ -13,6 +13,7 @@
 
 const { one, query, rows, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
+const { RBAC_MATRIX } = require('../config/rbacBaseline')
 const { badRequest, conflict, notFound, unprocessable } = require('../utils/errors')
 
 /* -------------------------------------------------------------------------- */
@@ -180,28 +181,11 @@ async function updatePermissions(req, res) {
 /* POST /api/roles/reset                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** Restaura la matriz base de segregacion (misma que el seed del sistema). */
+/** Restaura la matriz base de segregacion (config/rbacBaseline.js, la misma que siembra init-db). */
 async function resetMatrix(req, res) {
-  const BASELINE = {
-    osi: [
-      'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
-      'USERS_UNLOCK', 'ACCOUNT_UNLOCK',
-      'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
-      'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'CASES_READ',
-    ],
-    socio: [
-      'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL',
-      'DOCS_REVEAL', 'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT',
-      'AUDIT_RECEIPT', 'RISK_ASSESS',
-    ],
-    abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT', 'RISK_ASSESS'],
-    asistente: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'],
-    cliente: ['CASES_READ'],
-  }
-
   await withTransaction(async (client) => {
     await client.query('DELETE FROM role_permissions')
-    for (const [role, permissions] of Object.entries(BASELINE)) {
+    for (const [role, permissions] of Object.entries(RBAC_MATRIX)) {
       await client.query(
         `INSERT IGNORE INTO role_permissions (role_id, permission_id, granted_by)
          SELECT r.id, p.id, ?
@@ -215,7 +199,7 @@ async function resetMatrix(req, res) {
   record('PERMISSION_CHANGED', {
     userCode: req.user.user_code,
     req,
-    details: { action: 'reset_matriz', roles: Object.keys(BASELINE) },
+    details: { action: 'reset_matriz', roles: Object.keys(RBAC_MATRIX) },
   })
 
   res.json({ message: 'Matriz restaurada a la configuracion base' })
