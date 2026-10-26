@@ -7,6 +7,7 @@ export const PERMISSIONS = [
   { id: 'CASES_READ', label: 'Consultar expedientes', group: 'Expedientes', severity: 'media' },
   { id: 'CASES_WRITE', label: 'Editar expedientes', group: 'Expedientes', severity: 'alta' },
   { id: 'CASES_ARCHIVE', label: 'Archivar expedientes', group: 'Expedientes', severity: 'critica' },
+  { id: 'CASES_READ_ALL', label: 'Ver y operar todos los expedientes del despacho', group: 'Expedientes', severity: 'critica' },
   { id: 'DOCS_REVEAL', label: 'Revelar documentos restringidos', group: 'Documentación', severity: 'critica' },
   { id: 'DOCS_DOWNLOAD', label: 'Descargar documentos', group: 'Documentación', severity: 'alta' },
   { id: 'LOGS_VIEW', label: 'Consultar historial', group: 'Auditoría', severity: 'media' },

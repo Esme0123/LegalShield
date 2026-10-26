@@ -190,7 +190,7 @@ async function resetMatrix(req, res) {
       'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'CASES_READ',
     ],
     socio: [
-      'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE',
+      'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL',
       'DOCS_REVEAL', 'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT',
       'AUDIT_RECEIPT', 'RISK_ASSESS',
     ],

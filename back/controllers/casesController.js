@@ -4,13 +4,13 @@
  * Expedientes judiciales.
  *
  * Control de acceso A01:2021 aplicado en dos capas:
- *   1. middleware `scopeCasesToOwner` -> socio/admin ven todo, el resto queda
- *      acotado a `assigned_lawyer_id = usuario.id`;
+ *   1. middleware `scopeCasesToOwner` -> quien tiene el permiso CASES_READ_ALL ve todo
+ *      el despacho, el resto queda acotado a `assigned_lawyer_id = usuario.id`;
  *   2. cada consulta incluye el filtro por `req.scope`, de modo que la restriccion
  *      viaja en la propia sentencia SQL y no en el filtrado posterior.
  *
  * Un cliente tampoco puede leer expedientes ajenos: solo los asignados a su
- * usuario. Si un expediente no tiene titular, solo es visible para el socio.
+ * usuario. Si un expediente no tiene titular, solo es visible con CASES_READ_ALL.
  */
 
 const { rows, one, withTransaction } = require('../config/db')

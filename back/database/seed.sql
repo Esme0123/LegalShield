@@ -17,13 +17,14 @@ INSERT IGNORE INTO roles (code, name, description) VALUES
   ('cliente',    'Cliente',    'Acceso externo limitado al seguimiento de su propio expediente.');
 
 -- ---------------------------------------------------------------------------
--- Permisos atomicos (21 permisos, alineados con PERMISSIONS del frontend)
+-- Permisos atomicos (22 permisos, alineados con PERMISSIONS del frontend)
 -- ---------------------------------------------------------------------------
 INSERT IGNORE INTO permissions (code, description) VALUES
   ('CASES_CREATE',  'Crear expedientes'),
   ('CASES_READ',    'Leer expedientes'),
   ('CASES_WRITE',   'Editar expedientes'),
   ('CASES_ARCHIVE', 'Archivar expedientes'),
+  ('CASES_READ_ALL', 'Ver y operar todos los expedientes del despacho (alcance transversal)'),
   ('DOCS_REVEAL',   'Revelar documentos restringidos'),
   ('DOCS_DOWNLOAD', 'Descargar documentos'),
   ('LOGS_VIEW',     'Ver logs de aplicacion (actividad del despacho)'),
@@ -57,7 +58,7 @@ WHERE (r.code = 'osi' AND p.code IN (
   'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'CASES_READ'
 ))
    OR (r.code = 'socio' AND p.code IN (
-  'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'DOCS_REVEAL',
+  'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL', 'DOCS_REVEAL',
   'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS'
 ))
    OR (r.code = 'abogado' AND p.code IN (
@@ -81,7 +82,7 @@ DELETE rp FROM role_permissions rp
      'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'CASES_READ'
    ))
    OR (r.code = 'socio' AND p.code IN (
-     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'DOCS_REVEAL',
+     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL', 'DOCS_REVEAL',
      'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS'
    ))
    OR (r.code = 'abogado' AND p.code IN (

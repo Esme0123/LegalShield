@@ -261,6 +261,7 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('CASES_READ',    'Leer expedientes'),
   ('CASES_WRITE',   'Editar expedientes'),
   ('CASES_ARCHIVE', 'Archivar expedientes'),
+  ('CASES_READ_ALL', 'Ver y operar todos los expedientes del despacho (alcance transversal)'),
   ('DOCS_REVEAL',   'Revelar documentos restringidos'),
   ('DOCS_DOWNLOAD', 'Descargar documentos'),
   ('LOGS_VIEW',     'Ver logs de aplicacion (actividad del despacho)'),

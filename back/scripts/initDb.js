@@ -227,11 +227,12 @@ const ROLES = [
 ]
 
 const PERMISSIONS = [
-  // Catalogo atomico (21) replicando PERMISSIONS del frontend (seed.js).
+  // Catalogo atomico (22) replicando PERMISSIONS del frontend (seed.js).
   ['CASES_CREATE', 'Crear expedientes'],
   ['CASES_READ', 'Leer expedientes'],
   ['CASES_WRITE', 'Editar expedientes'],
   ['CASES_ARCHIVE', 'Archivar expedientes'],
+  ['CASES_READ_ALL', 'Ver y operar todos los expedientes del despacho (alcance transversal)'],
   ['DOCS_REVEAL', 'Revelar documentos restringidos'],
   ['DOCS_DOWNLOAD', 'Descargar documentos'],
   ['LOGS_VIEW', 'Ver logs de aplicacion (actividad del despacho)'],
@@ -267,7 +268,7 @@ const RBAC_MATRIX = {
     'CASES_READ',
   ],
   socio: [
-    'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE',
+    'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL',
     'DOCS_REVEAL', 'DOCS_DOWNLOAD',
     'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS',
   ],
@@ -577,7 +578,7 @@ async function main() {
     )
   }
   // Catalogo previo desalineado con el frontend: se retira para mantener la
-  // matriz rol x permiso exacta (17 permisos atomicos de seed.js / seed.sql).
+  // matriz rol x permiso exacta (el catalogo PERMISSIONS de este archivo).
   for (const code of OBSOLETE_PERMISSIONS) {
     await run('DELETE FROM permissions WHERE code = ?', [code])
   }

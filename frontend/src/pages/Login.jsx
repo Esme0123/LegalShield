@@ -245,7 +245,7 @@ export default function Login() {
             <div className="mt-7 grid gap-3 sm:grid-cols-3">
               {[
                 { icon: ScanFace, title: 'Identidad fuerte', copy: 'User ID estándar + MFA' },
-                { icon: Gavel, title: 'Minimo privilegio', copy: '21 permisos revisables en caliente' },
+                { icon: Gavel, title: 'Minimo privilegio', copy: '22 permisos revisables en caliente' },
                 { icon: Scale, title: 'Evidencia', copy: 'Comprobantes firmados con hash SHA-256' },
               ].map(({ icon: Icon, title, copy }) => (
                 <div key={title} className="ls-panel">
