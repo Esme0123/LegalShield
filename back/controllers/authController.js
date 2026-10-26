@@ -205,18 +205,22 @@ async function login(req, res) {
     [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
   )
 
-  // Respuesta uniforme para usuario inexistente y clave incorrecta: no revela
-  // que User IDs existen en el directorio (enumeracion de cuentas). El
-  // identificador inexistente sigue el mismo ciclo que una cuenta real
-  // (contador, CAPTCHA y bloqueo) con un estado en memoria.
-  if (!user) {
+  // Respuesta uniforme para usuario inexistente, cuenta desactivada y clave
+  // incorrecta: no revela que User IDs existen en el directorio (enumeracion de
+  // cuentas). El identificador inexistente o desactivado sigue el mismo ciclo que
+  // una cuenta real (contador, CAPTCHA y bloqueo) con un estado en memoria; el
+  // motivo real solo queda en security_logs.
+  const disabled = Boolean(user) && (!user.is_active || user.status === 'DISABLED')
+  if (!user || disabled) {
+    const reason = disabled ? 'usuario_desactivado' : 'usuario_no_existe'
+    const auditCode = disabled ? user.user_code : identifier
     const ghostKey = identifier.toLowerCase()
     const state = ghostAttempts.peek(ghostKey)
     if (state.locked) {
       record('AUTH_LOCKED', {
-        userCode: identifier,
+        userCode: auditCode,
         req,
-        details: { reason: 'usuario_no_existe', remainingSeconds: state.remainingSeconds, ip },
+        details: { reason, remainingSeconds: state.remainingSeconds, ip },
       })
       return res.status(401).json(lockedBody({
         requiresOsi: state.requiresOsi,
@@ -226,15 +230,15 @@ async function login(req, res) {
     }
     if (state.failed >= CAPTCHA_THRESHOLD && !verifyChallenge(captchaToken, captchaResponse)) {
       ghostAttempts.addFailure(ghostKey)
-      record('AUTH_FAILED', { userCode: identifier, req, details: { reason: 'usuario_no_existe', ip } })
+      record('AUTH_FAILED', { userCode: auditCode, req, details: { reason, ip } })
       throw unauthorized('Validación CAPTCHA requerida o incorrecta')
     }
     await bcrypt.compare(password, DUMMY_HASH)
     const after = ghostAttempts.registerFailure(ghostKey, GHOST_POLICY)
-    record(after.locked ? 'LOGIN_LOCKED' : 'AUTH_FAILED', {
-      userCode: identifier,
+    record(after.locked ? 'LOGIN_LOCKED' : (disabled ? 'AUTH_DISABLED' : 'AUTH_FAILED'), {
+      userCode: auditCode,
       req,
-      details: { reason: 'usuario_no_existe', ip },
+      details: { reason, ip },
     })
     return res.status(401).json(failureBody({
       failedAttempts: after.failed,
@@ -244,19 +248,10 @@ async function login(req, res) {
     }))
   }
 
-  // La baja logica y el bloqueo se evaluan ANTES del CAPTCHA: una cuenta
-  // inhabilitada responde siempre con su estado (cuenta regresiva o LOCKED_OSI)
-  // y un CAPTCHA ausente no incrementa failed_attempts sobre una cuenta bloqueada.
-
-  // 0. Baja logica: la cuenta fue desactivada por un administrador (ABM /users).
-  if (!user.is_active || user.status === 'DISABLED') {
-    record('AUTH_DISABLED', {
-      userCode: user.user_code,
-      req,
-      details: { reason: 'usuario_desactivado', ip },
-    })
-    throw forbidden('La cuenta esta desactivada. Contacte al administrador del despacho')
-  }
+  // El bloqueo se evalua ANTES del CAPTCHA: una cuenta inhabilitada responde
+  // siempre con su estado (cuenta regresiva o LOCKED_OSI) y un CAPTCHA ausente no
+  // incrementa failed_attempts sobre una cuenta bloqueada. La baja logica ya se
+  // atendio arriba con la respuesta uniforme.
 
   // 1. Bloqueo temporal persistido en MySQL: si NOW() < locked_until se informa
   //    el tiempo restante exacto; si ya vencio, la cuenta se libera sola.
@@ -490,15 +485,15 @@ async function lockStatus(req, res) {
   }
 
   const user = await one(
-    `SELECT id, failed_attempts, is_locked, status, locked_until,
+    `SELECT id, failed_attempts, is_locked, is_active, status, locked_until,
             TIMESTAMPDIFF(SECOND, NOW(), locked_until) AS remaining_seconds
        FROM users
       WHERE username = ? OR email = ? OR user_code = ?`,
     [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
   )
 
-  // Identificador inexistente: mismo estado simulado que usa el login.
-  if (!user) {
+  // Identificador inexistente o cuenta desactivada: mismo estado simulado que usa el login.
+  if (!user || !user.is_active || user.status === 'DISABLED') {
     const state = ghostAttempts.peek(identifier.toLowerCase())
     if (state.requiresOsi) {
       return res.json({ isLocked: true, requiresOsi: true, remainingSeconds: null, failedAttempts: state.failed, message: LOCK_OSI_MESSAGE })

@@ -106,7 +106,7 @@ export default function AppLayout() {
               </span>
               <span className="text-left leading-none">
                 <span className="block text-[11px] font-semibold text-ink">
-                  {displayNameFor(session?.userId ?? session?.username)}
+                  {displayNameFor(session?.name ?? session?.username)}
                 </span>
                 <span className="mt-0.5 block text-[9.5px] capitalize text-muted">
                   {session?.role ?? 'sesion'}

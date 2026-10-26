@@ -199,16 +199,15 @@ CREATE TABLE IF NOT EXISTS user_notifications (
 
 -- ---------------------------------------------------------------------------
 -- Triggers: inmovilizan la bitacora (UPDATE y DELETE lanzan excepcion).
--- Se recrean en cada importacion para que schema.sql sea idempotente.
+-- Se crean solo si faltan: la bitacora nunca queda sin proteccion, ni siquiera
+-- durante una reimportacion (ISO 27001 A.8.15).
 -- ---------------------------------------------------------------------------
-DROP TRIGGER IF EXISTS trg_security_logs_no_update;
-DROP TRIGGER IF EXISTS trg_security_logs_no_delete;
-CREATE TRIGGER trg_security_logs_no_update
+CREATE TRIGGER IF NOT EXISTS trg_security_logs_no_update
 BEFORE UPDATE ON security_logs
 FOR EACH ROW
 SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'security_logs es inmutable: UPDATE no permitido';
 
-CREATE TRIGGER trg_security_logs_no_delete
+CREATE TRIGGER IF NOT EXISTS trg_security_logs_no_delete
 BEFORE DELETE ON security_logs
 FOR EACH ROW
 SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'security_logs es inmutable: DELETE no permitido';
