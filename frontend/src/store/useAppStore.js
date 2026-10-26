@@ -127,6 +127,7 @@ const apiUserToAdminUser = (row) => {
 
 /** Fila de legal_cases -> expediente del frontend. */
 const apiCaseToCase = (row) => ({
+  dbId: row.id,
   id: row.caseNumber,
   title: row.title,
   client: row.clientName,
@@ -724,15 +725,17 @@ export const useAppStore = create((set, get) => ({
 
   /* ------------------------------ EXPEDIENTES ---------------------------- */
   /**
-   * Archivo logico contra la API (el servidor no borra: marca `archivado`). El
-   * indice de la lista local se usa solo como id del recurso.
+   * Archivo logico contra la API (el servidor no borra: marca `archivado`).
+   * `dbId` es la clave primaria que espera la ruta; `id` es el caseNumber visible.
    */
   archiveCase: async (caseId) => {
-    const index = get().cases.findIndex((c) => c.id === caseId)
-    if (index === -1) return
-    await casesApi.archive(index + 1)
+    const target = get().cases.find((c) => c.id === caseId)
+    if (!target?.dbId) throw new Error('No se pudo identificar el expediente en el servidor')
+
+    await casesApi.archiveCase(target.dbId)
     set((s) => ({ cases: s.cases.filter((c) => c.id !== caseId) }))
     ok(set)
+    await get().loadCases({ status: 'abierto,en_tramite,suspendido' })
   },
 
   /** Carga los expedientes respetando el alcance por ambito del servidor. */

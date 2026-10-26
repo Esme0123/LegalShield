@@ -75,23 +75,30 @@ export default function Cases() {
   const selected = cases.find((c) => c.id === selectedId) ?? cases[0]
   const canArchive = hasPermission('CASES_ARCHIVE')
 
-  const startArchive = (id) => {
+  const handleArchiveCase = (id) => {
     if (!canArchive) {
       toast.danger('Acceso denegado', 'No dispone de autorización para archivar este expediente.')
       return
     }
+    if (crumpling) return
     setCrumpling(id)
   }
 
-  const finishArchive = (id) => {
+  const finishArchive = async (id) => {
     const target = cases.find((c) => c.id === id)
-    archiveCase(id)
-    setCrumpling(null)
-    if (selectedId === id) setSelectedId(null)
-    toast.mint(
-      'Expediente archivado',
-      `${id} · ${target?.title ?? 'Expediente'} arrugado y sellado con integridad`,
-    )
+    try {
+      await archiveCase(id)
+      if (selectedId === id) setSelectedId(null)
+      toast.mint(
+        'Expediente archivado',
+        `${id} · ${target?.title ?? 'Expediente'} arrugado y sellado con integridad`,
+      )
+    } catch (error) {
+      await loadCases({ status: 'abierto,en_tramite,suspendido' })
+      toast.danger('No se pudo archivar el expediente', error.message)
+    } finally {
+      setCrumpling(null)
+    }
   }
 
   const onReveal = (docId, meta) => {
@@ -174,14 +181,22 @@ export default function Cases() {
               crumpled={crumpling === c.id}
               onComplete={() => finishArchive(c.id)}
             >
-              <motion.button
-                type="button"
+              <motion.div
+                role="button"
+                tabIndex={0}
                 initial={{ opacity: 0, x: -12 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: i * 0.04 }}
                 onClick={() => setSelectedId(c.id)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setSelectedId(c.id)
+                  }
+                }}
                 className={cn(
-                  'group w-full rounded-xl border p-3.5 text-left transition-all duration-300 ease-shield',
+                  'group w-full cursor-pointer rounded-xl border p-3.5 text-left transition-all duration-300 ease-shield focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
                   selected?.id === c.id
                     ? 'border-accent/70 bg-accent/10 shadow-glow'
                     : 'border-line/50 bg-surface/70 hover:border-accent/50 hover:bg-surface2/40',
@@ -206,18 +221,26 @@ export default function Cases() {
                   <span className="font-mono text-[10px] text-muted">
                     {c.docs.length} docs · {c.privileged ? 'privilegiado' : 'no privilegiado'}
                   </span>
-                  <span className="inline-flex items-center gap-1 text-[10.5px] text-danger opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleArchiveCase(c.id)
+                    }}
+                    disabled={Boolean(crumpling)}
+                    className="inline-flex items-center gap-1 rounded px-1 text-[10.5px] text-danger opacity-0 transition-opacity duration-300 hover:underline focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
                     <Trash2 className="h-3 w-3" /> archivar
-                  </span>
+                  </button>
                 </div>
-              </motion.button>
+              </motion.div>
             </PaperCrumple>
           ))}
 
           {selected && (
             <button
               type="button"
-              onClick={() => startArchive(selected.id)}
+              onClick={() => handleArchiveCase(selected.id)}
               disabled={Boolean(crumpling)}
               className="ls-btn-danger w-full text-xs"
             >
