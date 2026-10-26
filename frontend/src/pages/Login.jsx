@@ -146,8 +146,8 @@ export default function Login() {
       const result = await login({
         userId: idCheck.normalized,
         password,
-        captchaToken: captchaToken || undefined,
-        captchaResponse: captchaToken || undefined,
+        captchaToken: captchaToken?.token || undefined,
+        captchaResponse: captchaToken?.answer || undefined,
       })
       if (result.ok) {
         if (result.user.mustChangePassword) {
@@ -355,10 +355,11 @@ export default function Login() {
                       className="overflow-hidden"
                     >
                       <CaptchaChallenge
-                        onVerify={(verified, token) => {
+                        onVerify={(verified, challenge) => {
                           setCaptchaVerified(verified)
                           if (verified) {
-                            setCaptchaToken(token)
+                            // { token, answer }: el servidor valida ambos al iniciar sesion
+                            setCaptchaToken(challenge)
                             // Resuelto el desafio, el bloque se oculta y se continua con la clave
                             passwordRef.current?.focus()
                           }

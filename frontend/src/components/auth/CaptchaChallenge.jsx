@@ -1,78 +1,50 @@
 import { useEffect, useState } from "react"
 import { ShieldAlert } from "lucide-react"
+import { authApi } from "@/lib/apiClient"
 
 /**
  * Componente CAPTCHA como "Mecanismo Menos Común" (Principio de Diseño Seguro #7)
- * Desafío matemático interactivo de confirmación humana
+ * Desafío matemático emitido y validado por el servidor: el cliente solo
+ * muestra la pregunta y devuelve token + respuesta al iniciar sesión
  */
 export default function CaptchaChallenge({ onVerify, disabled }) {
-  const [num1, setNum1] = useState(0)
-  const [num2, setNum2] = useState(0)
+  const [challenge, setChallenge] = useState(null)
   const [answer, setAnswer] = useState("")
-  const [isValid, setIsValid] = useState(false)
+  const [isReady, setIsReady] = useState(false)
   const [error, setError] = useState("")
-  const [attempts, setAttempts] = useState(0)
 
-  const generateChallenge = () => {
-    const n1 = Math.floor(Math.random() * 10) + 1
-    const n2 = Math.floor(Math.random() * 10) + 1
-    setNum1(n1)
-    setNum2(n2)
+  const loadChallenge = async () => {
     setAnswer("")
-    setIsValid(false)
+    setIsReady(false)
     setError("")
+    onVerify && onVerify(false, null)
+    try {
+      setChallenge(await authApi.captcha())
+    } catch {
+      setChallenge(null)
+      setError("No se pudo obtener el desafío. Intenta de nuevo")
+    }
   }
 
   useEffect(() => {
-    generateChallenge()
+    loadChallenge()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleChange = (e) => {
-    const value = e.target.value
+    const value = e.target.value.replace(/D/g, "")
     setAnswer(value)
-    const correctAnswer = num1 + num2
-    const userAnswer = parseInt(value)
-
-    if (value === "" || isNaN(userAnswer)) {
-      setIsValid(false)
-      setError("")
-      onVerify && onVerify(false, "")
-      return
-    }
-
-    if (userAnswer === correctAnswer) {
-      setIsValid(true)
-      setError("")
-      onVerify && onVerify(true, correctAnswer.toString())
-    } else {
-      setIsValid(false)
-      onVerify && onVerify(false, "")
-    }
+    setError("")
+    setIsReady(false)
+    onVerify && onVerify(false, null)
   }
 
+  // La respuesta se valida en el servidor al iniciar sesión.
   const handleSubmit = (e) => {
     e.preventDefault()
-    const correctAnswer = num1 + num2
-    const userAnswer = parseInt(answer)
-
-    if (userAnswer === correctAnswer) {
-      setIsValid(true)
-      setError("")
-      onVerify && onVerify(true, correctAnswer.toString())
-    } else {
-      setIsValid(false)
-      setError("Respuesta de verificación incorrecta")
-      setAttempts((prev) => prev + 1)
-      if (attempts >= 2) {
-        generateChallenge()
-        setAttempts(0)
-      }
-      onVerify && onVerify(false, "")
-    }
-  }
-
-  const handleRefresh = () => {
-    generateChallenge()
+    if (!challenge || !answer) return
+    setIsReady(true)
+    onVerify && onVerify(true, { token: challenge.token, answer })
   }
 
   return (
@@ -88,9 +60,7 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
       </p>
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <div className="flex items-center justify-center gap-2 text-lg font-bold font-mono">
-          <span className="rounded-lg border border-line/60 bg-surface px-3 py-2">{num1}</span>
-          <span>+</span>
-          <span className="rounded-lg border border-line/60 bg-surface px-3 py-2">{num2}</span>
+          <span className="rounded-lg border border-line/60 bg-surface px-3 py-2">{challenge?.question ?? "…"}</span>
           <span>=</span>
           <input
             type="text"
@@ -107,13 +77,13 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
         {error && (
           <p className="text-center text-[10.5px] text-danger">{error}</p>
         )}
-        {isValid && (
-          <p className="text-center text-[10.5px] text-accent">✓ Verificación completada</p>
+        {isReady && (
+          <p className="text-center text-[10.5px] text-accent">✓ Respuesta lista para enviar</p>
         )}
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={handleRefresh}
+            onClick={loadChallenge}
             disabled={disabled}
             className="flex-1 rounded-lg border border-line/60 bg-surface2/60 px-2 py-1.5 text-[10.5px] font-mono uppercase tracking-wider text-muted transition hover:bg-surface2 hover:text-accent"
           >
@@ -121,7 +91,7 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
           </button>
           <button
             type="submit"
-            disabled={disabled || !answer}
+            disabled={disabled || !answer || !challenge}
             className="flex-1 rounded-lg border border-accent/40 bg-accent/10 px-2 py-1.5 text-[10.5px] font-mono uppercase tracking-wider text-accent transition hover:bg-accent/15 disabled:opacity-50"
           >
             VERIFICAR

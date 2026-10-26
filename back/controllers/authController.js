@@ -11,6 +11,7 @@ const { record } = require('../services/auditService')
 const { notifyUser, NOTICE } = require('../services/notificationService')
 const { hashOtp, otpMatches, OTP_PATTERN, MAX_OTP_ATTEMPTS } = require('../utils/unlockToken')
 const { getClientIp } = require('../utils/helpers')
+const { issueChallenge, verifyChallenge } = require('../utils/captcha')
 const { badRequest, conflict, forbidden, notFound, unauthorized, unprocessable } = require('../utils/errors')
 const { PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
 const {
@@ -220,9 +221,9 @@ async function login(req, res) {
 
   // Validación CAPTCHA si hay intentos fallidos previos (Mecanismo Menos Común)
   if (Number(user.failed_attempts) >= CAPTCHA_THRESHOLD) {
-    const expected = String(captchaToken ?? '').trim()
-    const provided = String(captchaResponse ?? '').trim()
-    if (!provided || provided !== expected) {
+    // El desafio lo emite y firma el servidor (GET /auth/captcha): el cliente
+    // solo devuelve el token recibido y su respuesta.
+    if (!verifyChallenge(captchaToken, captchaResponse)) {
       await query(
         `UPDATE users
             SET failed_attempts = failed_attempts + 1
@@ -385,7 +386,17 @@ async function login(req, res) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* POST /api/auth/lock-status                                                  */
+/* GET /api/auth/captcha                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** Emite un desafio aritmetico firmado por el servidor. */
+async function captcha(_req, res) {
+  res.set('Cache-Control', 'no-store')
+  res.json(issueChallenge())
+}
+
+/* -------------------------------------------------------------------------- */
+/* POST /api/auth/lock-status                                                 */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -685,6 +696,7 @@ async function verifyUnlockToken(req, res) {
   module.exports = {
   register,
   login,
+  captcha,
   unlock,
   lockStatus,
   refresh,

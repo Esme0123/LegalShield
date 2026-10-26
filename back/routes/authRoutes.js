@@ -27,9 +27,26 @@ const authLimiter = rateLimit({
   },
 })
 
+/**
+ * Limitador propio del CAPTCHA: pedir o renovar un desafio no es un intento de
+ * autenticacion y no debe agotar el cupo de login de la IP (de lo contrario el
+ * usuario queda sin desafio y sin poder iniciar sesion).
+ */
+const captchaLimiter = rateLimit({
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 900000),
+  max: Number(process.env.CAPTCHA_RATE_LIMIT_MAX || 60),
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    record('RATE_LIMITED', { userCode: null, req, details: { path: req.originalUrl } })
+    res.status(429).json({ error: 'Demasiadas solicitudes de verificacion. Reintente mas tarde' })
+  },
+})
+
 // --- Publico ----------------------------------------------------------------
 
 router.post('/register', authLimiter, asyncHandler(controller.register))
+router.get('/captcha', captchaLimiter, asyncHandler(controller.captcha))
 router.post('/login', authLimiter, asyncHandler(controller.login))
 
 // Estado del bloqueo temporal por cuenta: restaura el conteo tras un F5.

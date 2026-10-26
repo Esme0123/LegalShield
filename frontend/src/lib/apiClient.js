@@ -200,6 +200,7 @@ const del = (path, options) => request(path, { ...options, method: 'DELETE' })
 
 export const authApi = {
   login: (userCode, password, captchaToken, captchaResponse) => post('/auth/login', { userCode, password, captchaToken, captchaResponse }, { auth: false }),
+  captcha: () => get('/auth/captcha', { auth: false }),
   register: (payload) => post('/auth/register', payload, { auth: false }),
   me: () => get('/auth/me'),
   logout: () => post('/auth/logout'),
