@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import ModuleMatrix, { RESOURCE_COUNT } from '@/components/matrix/ModuleMatrix'
 import RbacPermissionMatrix from '@/components/matrix/RbacPermissionMatrix'
+import RoleManager from '@/components/matrix/RoleManager'
 import { Badge, SectionTitle } from '@/components/ui/primitives'
 import { MATRIX_ROLES, MATRIX_MODULES } from '@/data/seed'
 import { useAppStore } from '@/store/useAppStore'
@@ -180,6 +181,8 @@ export default function Roles() {
         onToggle={handleToggle}
         onToggleColumn={handleColumn}
       />
+
+      {hasPermission('ROLES_MANAGE') && <RoleManager />}
 
       {/* Solo una matriz unificada - eliminada tabla inferior de permisos atómicos */}
       <p className="flex items-start gap-2 text-[11.5px] leading-snug text-muted">

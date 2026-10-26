@@ -246,6 +246,8 @@ export const rolesApi = {
   matrix: () => get('/roles/matrix'),
   updatePermissions: (grants) => post('/roles/permissions', { grants }),
   reset: () => post('/roles/reset'),
+  create: (payload) => post('/roles', payload),
+  remove: (code) => del(`/roles/${encodeURIComponent(code)}`),
 }
 
 /* -------------------------------------------------------------------------- */
