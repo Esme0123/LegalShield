@@ -29,17 +29,24 @@ function RequireSession({ children }) {
 export default function App() {
   const session = useAppStore((s) => s.session)
   const bootstrap = useAppStore((s) => s.bootstrap)
+  const location = useLocation()
 
   useEffect(() => {
     bootstrap()
   }, [bootstrap])
+
+  // Al recargar, la sesion tarda en restaurarse y la guarda manda a /login con la ruta
+  // de origen; una vez restaurada se vuelve a ella. `from` viaja en el estado interno
+  // del router (no en la URL) y solo se acepta si es una ruta interna distinta de /login.
+  const from = location.state?.from
+  const afterLogin = typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') && from !== '/login' ? from : '/dashboard'
 
   return (
     <>
       {/* Cursor circular global: cubre header, tablas, formularios y dashboard. */}
       <GlowCursor />
       <Routes>
-        <Route path="/login" element={session ? <Navigate to="/dashboard" replace /> : <Login />} />
+        <Route path="/login" element={session ? <Navigate to={afterLogin} replace /> : <Login />} />
         {/* El alta de cuentas es exclusiva del OSI: no hay auto-registro. */}
         <Route path="/register" element={<Navigate to="/login" replace />} />
         <Route
