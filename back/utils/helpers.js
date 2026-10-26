@@ -17,4 +17,15 @@ function getClientIp(req) {
  */
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next)
 
-module.exports = { getClientIp, asyncHandler }
+/**
+ * Normaliza un parametro de paginacion recibido por query string.
+ * Un valor ausente, no numerico o fuera del rango usa el valor por defecto;
+ * los valores validos se acotan al maximo para evitar consultas desmedidas.
+ */
+function parsePagination(value, { fallback, min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isSafeInteger(parsed) || parsed < min) return fallback
+  return Math.min(parsed, max)
+}
+
+module.exports = { getClientIp, asyncHandler, parsePagination }

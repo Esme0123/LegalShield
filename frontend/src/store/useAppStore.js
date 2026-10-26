@@ -641,8 +641,12 @@ export const useAppStore = create((set, get) => ({
     return { granting }
   },
 
-  /** Carga la matriz rol x permiso desde MySQL. */
+  /** Carga la matriz rol x permiso desde MySQL (solo administradores RBAC). */
   loadMatrix: async () => {
+    if (!get().hasAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE'])) {
+      set({ rbac: {}, rbacRoles: [], rbacPermissions: [] })
+      return null
+    }
     try {
       const data = await rolesApi.matrix()
       set({

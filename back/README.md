@@ -115,9 +115,10 @@ La contrasena inicial de las cuentas de demostracion es la de `DEMO_PASSWORD`
 
 | Metodo | Ruta | Auth | Descripcion |
 |---|---|---|---|
-| GET | `/matrix` | sesion | Matriz completa rol x permiso, con `assignments` y `matrix` listo para pintar. |
-| POST | `/permissions` | `RBAC_MANAGE` | Aplica `{ grants: [{ role, permission, granted }] }` en una transaccion y devuelve la matriz ya actualizada. Sin reiniciar el servidor. |
-| POST | `/reset` | `RBAC_MANAGE` | Restaura la matriz base de `database/seed.sql`. |
+| GET | `/matrix` | `ROLES_MANAGE` o `RBAC_MANAGE` | Matriz completa rol x permiso, con `assignments` y `matrix` listo para pintar. |
+| PUT | `/:code` | `ROLES_MANAGE` | Actualiza `name` y/o `description` de un rol; el codigo no cambia. |
+| POST | `/permissions` | `RBAC_MANAGE` o `ROLES_MANAGE` | Aplica `{ grants: [{ role, permission, granted }] }` en una transaccion y devuelve la matriz ya actualizada. Sin reiniciar el servidor. |
+| POST | `/reset` | `RBAC_MANAGE` o `ROLES_MANAGE` | Restaura la matriz base de `database/seed.sql`. |
 
 ### Expedientes · `/api/cases`
 

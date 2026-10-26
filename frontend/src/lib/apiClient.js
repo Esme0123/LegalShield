@@ -259,6 +259,7 @@ export const rolesApi = {
   updatePermissions: (grants) => post('/roles/permissions', { grants }),
   reset: () => post('/roles/reset'),
   create: (payload) => post('/roles', payload),
+  update: (code, payload) => put(`/roles/${encodeURIComponent(code)}`, payload),
   remove: (code) => del(`/roles/${encodeURIComponent(code)}`),
 }
 

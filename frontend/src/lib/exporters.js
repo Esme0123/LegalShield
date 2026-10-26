@@ -56,7 +56,7 @@ const BOTTOM = 56
  * Genera y descarga un PDF real. `lines` es un arreglo de cadenas: cada una se
  * imprime en una línea de la página.
  */
-export function exportPdf({ filename, title = 'LegalShield', subtitle = '', lines = [], headers = [], rows = [] }) {
+export function exportPdf({ filename, title = 'LegalShield', subtitle = '', lines = [], rows = [] }) {
   const now = new Date().toLocaleString('es-ES')
   const headerLine = `Fecha de emisión: ${now}`
   const fullLines = [headerLine, '', ...(rows.length ? rows.map(r => (Array.isArray(r) ? r.join(' | ') : String(r))) : lines)]

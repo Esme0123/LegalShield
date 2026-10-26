@@ -61,7 +61,6 @@ export default function Cases() {
   const concealDocument = useAppStore((s) => s.concealDocument)
   const hasPermission = useAppStore((s) => s.hasPermission)
   const session = useAppStore((s) => s.session)
-  const pushLog = useAppStore((s) => s.pushLog)
   const activityLogs = useAppStore((s) => s.activityLogs)
   const loadActivityLogs = useAppStore((s) => s.loadActivityLogs)
 
@@ -145,7 +144,7 @@ export default function Cases() {
             <button
               type="button"
               onClick={() => {
-                import('@/lib/exporters').then(({ exportCsv, exportExcel }) => {
+                import('@/lib/exporters').then(({ exportCsv }) => {
                   const headers = ['ID', 'Título', 'Cliente', 'Juzgado', 'Materia', 'Etapa', 'Riesgo', 'Vencimiento', 'Progreso']
                   const rows = cases.map((c) => [
                     c.id,

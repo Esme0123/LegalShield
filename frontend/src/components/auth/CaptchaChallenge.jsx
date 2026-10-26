@@ -32,7 +32,7 @@ export default function CaptchaChallenge({ onVerify, disabled }) {
   }, [])
 
   const handleChange = (e) => {
-    const value = e.target.value.replace(/D/g, "")
+    const value = e.target.value.replace(/\D/g, "")
     setAnswer(value)
     setError("")
     setIsReady(false)

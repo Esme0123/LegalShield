@@ -9,11 +9,15 @@ const { asyncHandler } = require('../utils/helpers')
 
 const router = Router()
 
-// La lectura de la matriz requiere sesion; modificarla exige el permiso de
-// gestion de roles (ROLES_MANAGE) o su alias historico RBAC_MANAGE.
+// La matriz solo es visible para quien administra roles o RBAC. Modificarla
+// exige los mismos permisos.
 router.use(authenticate)
 
-router.get('/matrix', asyncHandler(controller.getMatrix))
+router.get(
+  '/matrix',
+  checkAnyPermission(['ROLES_MANAGE', 'RBAC_MANAGE']),
+  asyncHandler(controller.getMatrix),
+)
 router.post(
   '/',
   checkPermission('ROLES_MANAGE'),

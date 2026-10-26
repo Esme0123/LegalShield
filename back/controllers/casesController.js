@@ -16,6 +16,7 @@
 const { rows, one, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
 const { badRequest, forbidden, notFound } = require('../utils/errors')
+const { parsePagination } = require('../utils/helpers')
 
 const CASE_STATUSES = ['abierto', 'en_tramite', 'suspendido', 'archivado', 'cerrado']
 const RISK_LEVELS = ['baja', 'media', 'alta', 'critica']
@@ -78,8 +79,8 @@ async function listCases(req, res) {
   const { where, params } = buildFilters(req)
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
 
-  const limit = Math.min(Number(req.query.limit || 50), 200)
-  const offset = Math.max(Number(req.query.offset || 0), 0)
+  const limit = parsePagination(req.query.limit, { fallback: 50, min: 1, max: 200 })
+  const offset = parsePagination(req.query.offset, { fallback: 0, min: 0 })
 
   const result = await rows(
     `${SELECT_CASE}

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Plus, Trash2, UserCog } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Pencil, Plus, Trash2, UserCog } from 'lucide-react'
 import { Badge } from '@/components/ui/primitives'
 import { rolesApi } from '@/lib/apiClient'
+import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 
 /** Rol del Oficial de Seguridad: el servidor tampoco permite eliminarlo. */
@@ -9,44 +10,50 @@ const PROTECTED_ROLES = ['osi']
 const EMPTY_FORM = { code: '', name: '', description: '' }
 
 /**
- * Alta y baja de roles contra /api/roles. Solo se monta con ROLES_MANAGE; el
- * servidor vuelve a validar el permiso en cada peticion.
+ * Alta, edicion y baja de roles contra /api/roles. Solo se monta con ROLES_MANAGE;
+ * el servidor vuelve a validar el permiso en cada peticion.
  */
 export default function RoleManager() {
-  const [roles, setRoles] = useState([])
+  const roles = useAppStore((s) => s.rbacRoles)
+  const loadMatrix = useAppStore((s) => s.loadMatrix)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [editingCode, setEditingCode] = useState(null)
   const [busy, setBusy] = useState(false)
   const [pendingDelete, setPendingDelete] = useState(null)
 
-  const refresh = useCallback(async () => {
-    try {
-      const data = await rolesApi.matrix()
-      setRoles(data.roles ?? [])
-    } catch (error) {
-      toast.danger('No se pudieron cargar los roles', error.message)
-    }
-  }, [])
-
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    loadMatrix()
+  }, [loadMatrix])
+
+  const resetForm = () => {
+    setEditingCode(null)
+    setForm(EMPTY_FORM)
+  }
 
   const handleChange = (field) => (event) => setForm((f) => ({ ...f, [field]: event.target.value }))
 
-  const handleCreate = async (event) => {
+  const startEdit = (role) => {
+    setEditingCode(role.code)
+    setForm({ code: role.code, name: role.name, description: role.description ?? '' })
+    setPendingDelete(null)
+  }
+
+  const handleSubmit = async (event) => {
     event.preventDefault()
     setBusy(true)
     try {
-      const { role } = await rolesApi.create({
-        code: form.code.trim().toLowerCase(),
-        name: form.name.trim(),
-        description: form.description.trim(),
-      })
-      toast.mint('Rol creado', `${role.name} (${role.code}) no tiene permisos hasta que se le asignen`)
-      setForm(EMPTY_FORM)
-      await refresh()
+      const payload = { name: form.name.trim(), description: form.description.trim() }
+      if (editingCode) {
+        const { role } = await rolesApi.update(editingCode, payload)
+        toast.mint('Rol actualizado', `${role.name} (${role.code})`)
+      } else {
+        const { role } = await rolesApi.create({ ...payload, code: form.code.trim().toLowerCase() })
+        toast.mint('Rol creado', `${role.name} (${role.code}) no tiene permisos hasta que se le asignen`)
+      }
+      resetForm()
+      await loadMatrix()
     } catch (error) {
-      toast.danger('No se pudo crear el rol', error.message)
+      toast.danger(editingCode ? 'No se pudo actualizar el rol' : 'No se pudo crear el rol', error.message)
     } finally {
       setBusy(false)
     }
@@ -61,8 +68,9 @@ export default function RoleManager() {
     setBusy(true)
     try {
       await rolesApi.remove(code)
+      if (editingCode === code) resetForm()
       toast.mint('Rol eliminado', code)
-      await refresh()
+      await loadMatrix()
     } catch (error) {
       toast.danger('No se pudo eliminar el rol', error.message)
     } finally {
@@ -78,7 +86,7 @@ export default function RoleManager() {
         <h3 className="font-display text-[13px] font-bold tracking-tight">Administración de roles</h3>
       </div>
 
-      <form onSubmit={handleCreate} className="grid gap-3 md:grid-cols-[1fr_1fr_2fr_auto] md:items-end">
+      <form onSubmit={handleSubmit} className="grid gap-3 md:grid-cols-[1fr_1fr_2fr_auto] md:items-end">
         <div>
           <label className="ls-label" htmlFor="role-code">Código</label>
           <input
@@ -88,6 +96,7 @@ export default function RoleManager() {
             onChange={handleChange('code')}
             placeholder="pasante"
             maxLength={32}
+            disabled={Boolean(editingCode)}
             required
           />
         </div>
@@ -114,9 +123,17 @@ export default function RoleManager() {
             maxLength={500}
           />
         </div>
-        <button type="submit" disabled={busy} className="ls-btn-primary px-4 text-xs">
-          <Plus className="h-3.5 w-3.5" /> Crear rol
-        </button>
+        <div className="flex gap-2">
+          <button type="submit" disabled={busy} className="ls-btn-primary px-4 text-xs">
+            {editingCode ? <Pencil className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+            {editingCode ? 'Guardar cambios' : 'Crear rol'}
+          </button>
+          {editingCode && (
+            <button type="button" disabled={busy} onClick={resetForm} className="ls-btn-secondary px-3 text-xs">
+              Cancelar
+            </button>
+          )}
+        </div>
       </form>
 
       <ul className="divide-y divide-line/40">
@@ -129,6 +146,16 @@ export default function RoleManager() {
               <span className="text-[12px] font-semibold">{role.name}</span>
               {protectedRole && <Badge tone="pastel">Protegido</Badge>}
               <span className="min-w-0 flex-1 truncate text-[11px] text-muted">{role.description}</span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => startEdit(role)}
+                title="Editar nombre y descripción"
+                aria-label={`Editar rol ${role.code}`}
+                className="rounded-lg border border-line/50 p-2 text-muted transition hover:border-accent/60 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
               <button
                 type="button"
                 disabled={busy || protectedRole}

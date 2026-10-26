@@ -15,6 +15,7 @@
 
 const { rows, one } = require('../config/db')
 const { badRequest } = require('../utils/errors')
+const { parsePagination } = require('../utils/helpers')
 const { SEVERITY_ORDER } = require('../services/auditService')
 
 /** ISO 8601 estricto: evita que `new Date()` acepte formatos laxos. */
@@ -82,8 +83,8 @@ async function listFrom(table, req, res) {
   }
 
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
-  const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 500)
-  const offset = Math.max(Number(req.query.offset || 0), 0)
+  const limit = parsePagination(req.query.limit, { fallback: 100, min: 1, max: 500 })
+  const offset = parsePagination(req.query.offset, { fallback: 0, min: 0 })
 
   const [items, totalRow, byStatus, byAction] = await Promise.all([
     rows(

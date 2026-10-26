@@ -339,7 +339,7 @@ const DEMO_CASES = [
     caseNumber: 'EXP-2026-0033',
     title: 'Derecho de peticion · Ministerio de Salud',
     clientName: 'Redaccion Norte (periodista)',
-    lawyerCode: 'LEG-2026-0277',
+    lawyerCode: 'LEG-2026-0142',
     status: 'en_tramite',
     matter: 'Administrativo',
     court: 'Ministerio de Salud',
@@ -649,6 +649,7 @@ async function main() {
        VALUES (?, ?, ?, (SELECT id FROM users WHERE user_code = ?), ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          title = VALUES(title),
+         assigned_lawyer_id = VALUES(assigned_lawyer_id),
          status = VALUES(status),
          progress = VALUES(progress),
          deadline = VALUES(deadline)`,
