@@ -103,6 +103,18 @@ export default function Cases() {
     )
   }
 
+  const exportRows = cases.map((c) => ({
+    code: c.id,
+    title: c.title,
+    client: c.client,
+    matter: c.matter,
+    court: c.court,
+    stage: c.stage,
+    risk: c.risk,
+    progress: c.progress,
+    deadline: c.deadline,
+  }))
+
   return (
     <div className="space-y-5">
       <SectionTitle
@@ -114,28 +126,13 @@ export default function Cases() {
             <button
               type="button"
               onClick={() => {
-                // Exportar PDF (placeholder funcional)
-                import('@/lib/exporters').then(({ exportPdf }) => {
-                  const headers = ['ID', 'Título', 'Cliente', 'Juzgado', 'Materia', 'Etapa', 'Riesgo', 'Vencimiento', 'Progreso']
-                  const rows = cases.map((c) => [
-                    c.id,
-                    c.title,
-                    c.client,
-                    c.court,
-                    c.matter,
-                    c.stage,
-                    c.risk,
-                    c.deadline || '',
-                    String(c.progress),
-                  ])
-                  exportPdf({
+                import('@/lib/caseExports')
+                  .then(({ exportCasesPdf }) => exportCasesPdf({
                     filename: `expedientes_${new Date().toISOString().slice(0, 10)}.pdf`,
-                    title: 'LegalShield - Expedientes',
-                    subtitle: 'Reporte de Expedientes',
-                    headers,
-                    rows,
-                  })
-                })
+                    rows: exportRows,
+                    generatedBy: session?.name ?? session?.userId,
+                  }))
+                  .catch((error) => toast.danger('No se pudo exportar el PDF', error.message))
               }}
               className="ls-btn-secondary text-xs"
             >
@@ -144,21 +141,13 @@ export default function Cases() {
             <button
               type="button"
               onClick={() => {
-                import('@/lib/exporters').then(({ exportCsv }) => {
-                  const headers = ['ID', 'Título', 'Cliente', 'Juzgado', 'Materia', 'Etapa', 'Riesgo', 'Vencimiento', 'Progreso']
-                  const rows = cases.map((c) => [
-                    c.id,
-                    c.title,
-                    c.client,
-                    c.court,
-                    c.matter,
-                    c.stage,
-                    c.risk,
-                    c.deadline || '',
-                    String(c.progress),
-                  ])
-                  exportCsv(`expedientes_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows)
-                })
+                import('@/lib/caseExports')
+                  .then(({ exportCasesExcel }) => exportCasesExcel({
+                    filename: `expedientes_${new Date().toISOString().slice(0, 10)}.xlsx`,
+                    rows: exportRows,
+                    generatedBy: session?.name ?? session?.userId,
+                  }))
+                  .catch((error) => toast.danger('No se pudo exportar el Excel', error.message))
               }}
               className="ls-btn-secondary text-xs"
             >

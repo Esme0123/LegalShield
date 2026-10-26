@@ -27,10 +27,6 @@ export function exportCsv(filename, headers, rows) {
   downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), filename)
 }
 
-export function exportExcel(filename, headers, rows) {
-  exportCsv(filename.replace(/\.xlsx?$/i, '.csv'), headers, rows)
-}
-
 /** Normaliza cualquier caracter fuera de WinAnsi a un equivalente ASCII. */
 const toWinAnsi = (value) =>
   String(value ?? '')
