@@ -50,7 +50,9 @@ export default function Roles() {
     loadMatrix()
   }, [loadMatrix])
 
-  const canEdit = hasPermission('ROLES_MANAGE') || hasPermission('RBAC_MANAGE')
+  // Los cambios de la matriz solo vivian en memoria y no se guardaban en la base:
+  // se deshabilita la edicion para no aparentar una asignacion de permisos que no existe.
+  const canEdit = false
 
   const coverage = useMemo(() => {
     const values = MATRIX_ROLES.map((r) => (matrixCells[r.id] ?? []).length / RESOURCE_COUNT)
@@ -162,15 +164,9 @@ export default function Roles() {
               {coverage.grants}/{MATRIX_ROLES.length * RESOURCE_COUNT} celdas
             </p>
           </div>
-          {canEdit ? (
-            <Badge tone="pastel">
-              <ShieldCheck className="h-3 w-3" /> Edición habilitada
-            </Badge>
-          ) : (
-            <Badge tone="danger">
-              <Key className="h-3 w-3" /> Solo lectura · falta RBAC_MANAGE
-            </Badge>
-          )}
+          <Badge tone="danger">
+            <Key className="h-3 w-3" /> Solo lectura · los cambios de la matriz no se guardan
+          </Badge>
         </div>
       </div>
 
