@@ -68,13 +68,60 @@ function resolveTrustProxy(raw) {
   return entries
 }
 
-app.set('trust proxy', resolveTrustProxy(process.env.TRUST_PROXY))
+const isProduction = process.env.NODE_ENV === 'production'
+const trustProxy = resolveTrustProxy(process.env.TRUST_PROXY)
+app.set('trust proxy', trustProxy)
+
+/**
+ * Redireccion de HTTP a HTTPS (apagada por defecto). Solo en produccion y con
+ * HTTPS_REDIRECT=true. El TLS lo termina el proxy o la plataforma; el backend decide por
+ * X-Forwarded-Proto, que Express solo respeta si TRUST_PROXY confia en ese proxy.
+ * Fallo seguro: sin TRUST_PROXY todo parecería HTTP (bucle de redirecciones) y sin un
+ * PUBLIC_API_HOST fijo habria que tomar el destino de una cabecera manipulable.
+ */
+function resolveHttpsRedirect() {
+  if (String(process.env.HTTPS_REDIRECT ?? '').trim().toLowerCase() !== 'true') return null
+  if (!isProduction) {
+    logger.warn('HTTPS_REDIRECT se ignora fuera de produccion (NODE_ENV distinto de production)')
+    return null
+  }
+  if (trustProxy === false) {
+    throw new Error('HTTPS_REDIRECT=true exige TRUST_PROXY: sin confiar en el proxy no se puede saber si la peticion llego por HTTPS')
+  }
+  const host = String(process.env.PUBLIC_API_HOST ?? '').trim().toLowerCase()
+  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?$/.test(host)) {
+    throw new Error('HTTPS_REDIRECT=true exige PUBLIC_API_HOST con el host publico de la API (sin esquema ni ruta, p. ej. api.ejemplo.com)')
+  }
+  return { host }
+}
+
+/** max-age de HSTS en segundos (por defecto 1 ano). Un valor invalido aborta el arranque. */
+function resolveHstsMaxAge() {
+  const raw = String(process.env.HSTS_MAX_AGE ?? '').trim()
+  if (raw === '') return 31536000
+  if (!/^\d+$/.test(raw)) throw new Error('HSTS_MAX_AGE invalido: use un entero de segundos (p. ej. 31536000)')
+  return Number(raw)
+}
+
+const httpsRedirect = resolveHttpsRedirect()
+const hstsMaxAge = resolveHstsMaxAge()
+
+if (httpsRedirect) {
+  app.use((req, res, next) => {
+    // /health queda exento: los balanceadores lo sondean por HTTP interno.
+    if (req.secure || (req.method === 'GET' && req.path === '/health')) return next()
+    return res.redirect(308, `https://${httpsRedirect.host}${req.originalUrl}`)
+  })
+}
 
 app.use(
   helmet({
     // La API sirve JSON; la CSP endurecida aplica al frontend servido aparte.
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    // HSTS solo en produccion: en local no hay TLS y el navegador recordaria la regla
+    // de localhost durante el max-age. Sin preload: es irreversible a corto plazo.
+    strictTransportSecurity: isProduction ? { maxAge: hstsMaxAge, includeSubDomains: true, preload: false } : false,
   }),
 )
 
