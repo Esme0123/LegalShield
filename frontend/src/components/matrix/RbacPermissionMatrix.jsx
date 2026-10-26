@@ -1,7 +1,7 @@
 import { Fragment, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Check, Lock, X } from 'lucide-react'
-import { PERMISSIONS, ROLES } from '@/data/seed'
+import { PERMISSIONS } from '@/data/seed'
 import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { cn } from '@/lib/cn'
@@ -39,7 +39,7 @@ export default function RbacPermissionMatrix() {
   }, [rbacPermissions])
 
   const roles = useMemo(
-    () => rbacRoles.map((role) => ({ ...role, short: ROLES.find((r) => r.id === role.code)?.short ?? role.code.toUpperCase() })),
+    () => rbacRoles.map((role) => ({ ...role, short: role.code.slice(0, 3).toUpperCase() })),
     [rbacRoles],
   )
 

@@ -21,7 +21,6 @@ import PasswordStrength from '@/components/auth/PasswordStrength'
 import { Badge, SectionTitle } from '@/components/ui/primitives'
 import { PASSWORD_HISTORY_LIMIT, useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
-import { ROLES } from '@/data/seed'
 import { formatDateTime } from '@/lib/format'
 import { cn } from '@/lib/cn'
 
@@ -357,7 +356,6 @@ export default function Profile() {
   }, [loadProfile])
 
   const user = { ...session, ...profile }
-  const roleMeta = ROLES.find((r) => r.id === user?.role)
 
   const handleSave = async (payload) => {
     try {
@@ -407,7 +405,7 @@ export default function Profile() {
         subtitle="Identidad institucional, datos de contacto y rotacion de credenciales"
         actions={
           <Badge tone="info">
-            <UserCheck className="h-3 w-3" /> {roleMeta?.label ?? user?.roleLabel}
+            <UserCheck className="h-3 w-3" /> {user?.roleLabel}
           </Badge>
         }
       />

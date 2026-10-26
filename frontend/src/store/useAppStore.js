@@ -1,12 +1,7 @@
 import { create } from 'zustand'
 import {
   INFO_ASSETS,
-  MATRIX_CELLS,
-  MATRIX_ROLES,
-  MATRIX_MODULES,
   PERMISSIONS,
-  REGISTER_ROLES,
-  ROLES,
   RISK_CONTROLS,
   RISK_HEATMAP,
 } from '@/data/seed'
@@ -71,7 +66,7 @@ const apiUserToSession = (user) => ({
   name: user.username,
   email: user.email,
   role: user.role,
-  roleLabel: user.roleLabel ?? ROLES.find((r) => r.id === user.role)?.label ?? user.role,
+  roleLabel: user.roleLabel ?? user.role,
   permissions: user.permissions ?? [],
   mustChangePassword: Boolean(user.mustChangePassword),
   loginAt: nowIso(),
@@ -207,7 +202,6 @@ const initialState = () => ({
   logs: [],
   activityLogs: [],
   revealedDocs: [],
-  matrixCells: structuredClone(MATRIX_CELLS),
   infoAssets: structuredClone(INFO_ASSETS),
   riskControls: structuredClone(RISK_CONTROLS),
   risks: structuredClone(RISK_HEATMAP),
@@ -261,6 +255,7 @@ export const useAppStore = create((set, get) => ({
         set({ session: apiUserToSession(data.user) })
         await get().loadProfile()
         get().loadNotifications().catch(() => {})
+        get().loadMatrix().catch(() => {})
       } catch {
         clearTokens()
         set({ session: null })
@@ -287,6 +282,7 @@ export const useAppStore = create((set, get) => ({
       set({ session: user, attempts: 0, lockedUntil: null, lockRequiresOsi: false })
       get().loadDirectory().catch(() => {})
       get().loadNotifications().catch(() => {})
+      get().loadMatrix().catch(() => {})
       return { ok: true, user }
     } catch (error) {
       if (error instanceof ApiError && error.status === 0) {
@@ -402,32 +398,6 @@ export const useAppStore = create((set, get) => ({
     } catch (error) {
       setRead(false)
       noteApiFailure(set, error, 'notifications')
-    }
-  },
-
-  /* ------------------------------- ALTA / REGISTER ----------------------- */
-
-  /** Alta de usuario. El User ID lo emite el servidor en una transaccion. */
-  registerUser: async ({ firstName, lastName, email, firm, role, password, department }) => {
-    const requested = REGISTER_ROLES.find((r) => r.id === role) ?? REGISTER_ROLES[0]
-
-    const data = await authApi.register({
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: email.trim(),
-      password,
-      role: requested.id,
-      firm: firm.trim(),
-      department: department?.trim() || requested.department,
-    })
-    ok(set)
-    return {
-      userId: data.user.userCode,
-      userCode: data.user.userCode,
-      username: data.user.username,
-      name: data.user.username,
-      email: data.user.email,
-      role: data.user.role,
     }
   },
 
@@ -732,35 +702,6 @@ export const useAppStore = create((set, get) => ({
   /** Alias de compatibilidad: la bitacora por defecto es la de seguridad. */
   loadLogs: async (filters = {}) => get().loadSecurityLogs(filters),
 
-  /* ------------ Matriz de Permisos por Rol · rol x modulo/accion ----------
-   * Estado didactico en memoria (no persiste): los permisos atomicos reales
-   * viven en MySQL a traves de `rbac` y /api/roles/permissions.
-   * ------------------------------------------------------------------------ */
-  toggleMatrixAccess: (roleId, resourceId) => {
-    set((s) => ({
-      matrixCells: { ...s.matrixCells, [roleId]: toggleInList(s.matrixCells[roleId] ?? [], resourceId) },
-    }))
-    const roleLabel = MATRIX_ROLES.find((r) => r.id === roleId)?.label ?? roleId
-    const resource = MATRIX_MODULES.flatMap((module) => module.resources).find((r) => r.id === resourceId)
-    const granted = (get().matrixCells[roleId] ?? []).includes(resourceId)
-    return { granting: granted, roleLabel, resourceLabel: resource?.label ?? resourceId }
-  },
-
-  /** Marca o desmarca un recurso para los cinco roles de una vez. */
-  setMatrixColumn: (resourceId, granted) => {
-    const state = get()
-    const matrixCells = { ...state.matrixCells }
-    MATRIX_ROLES.forEach((role) => {
-      const list = matrixCells[role.id] ?? []
-      matrixCells[role.id] = granted
-        ? [...new Set([...list, resourceId])]
-        : list.filter((id) => id !== resourceId)
-    })
-    set({ matrixCells })
-  },
-
-  resetMatrix: () => set({ matrixCells: structuredClone(MATRIX_CELLS) }),
-
   /* ------------- Matriz de clasificacion de informacion ------------------ */
   setInfoAssetValue: (assetId, dimension, value) => {
     const next = Math.min(3, Math.max(1, Number(value)))
@@ -868,4 +809,4 @@ export const useAppStore = create((set, get) => ({
   },
 }))
 
-export { MAX_ATTEMPTS, PASSWORD_HISTORY_LIMIT, PERMISSIONS, ROLES }
+export { MAX_ATTEMPTS, PASSWORD_HISTORY_LIMIT, PERMISSIONS }

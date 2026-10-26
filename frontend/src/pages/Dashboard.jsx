@@ -13,7 +13,6 @@ import FolderFloat from '@/components/reactbits/FolderFloat'
 import ConnectionError from '@/components/ui/ConnectionError'
 import { Badge, Progress, RiskBadge, SectionTitle, StatCard } from '@/components/ui/primitives'
 import { useAppStore } from '@/store/useAppStore'
-import { PERMISSIONS, ROLES } from '@/data/seed'
 import { displayNameFor } from '@/lib/identity'
 import { timeAgo, relativePercent } from '@/lib/format'
 
@@ -31,6 +30,8 @@ export default function Dashboard() {
   const logs = useAppStore((s) => s.activityLogs)
   const riskControls = useAppStore((s) => s.riskControls)
   const rbac = useAppStore((s) => s.rbac)
+  const rbacRoles = useAppStore((s) => s.rbacRoles)
+  const rbacPermissions = useAppStore((s) => s.rbacPermissions)
   const session = useAppStore((s) => s.session)
   const loadCases = useAppStore((s) => s.loadCases)
   const loadActivityLogs = useAppStore((s) => s.loadActivityLogs)
@@ -221,18 +222,18 @@ export default function Dashboard() {
         <div className="ls-card p-4">
           <SectionTitle icon={Users2} title="Cobertura por rol" subtitle="Permisos activos tras el ultimo reajuste" />
           <div className="space-y-3">
-            {ROLES.map((r) => (
-              <div key={r.id}>
+            {rbacRoles.map((r) => (
+              <div key={r.code}>
                 <div className="mb-1 flex items-center justify-between">
-                  <span className="text-[12px] font-medium">{r.label}</span>
+                  <span className="text-[12px] font-medium">{r.name}</span>
                   <span className="font-mono text-[10px] text-muted">
-                    {(rbac[r.id] ?? []).length}/{PERMISSIONS.length}
+                    {(rbac[r.code] ?? []).length}/{rbacPermissions.length}
                   </span>
                 </div>
                 <Progress
-                  value={rbac[r.id]?.length ?? 0}
-                  max={PERMISSIONS.length}
-                  tone={r.id === 'osi' ? 'pastel' : 'accent'}
+                  value={rbac[r.code]?.length ?? 0}
+                  max={rbacPermissions.length}
+                  tone={r.code === 'osi' ? 'pastel' : 'accent'}
                 />
               </div>
             ))}

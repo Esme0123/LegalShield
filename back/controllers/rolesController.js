@@ -21,7 +21,9 @@ const { badRequest, conflict, notFound, unprocessable } = require('../utils/erro
 
 async function getMatrix(_req, res) {
   const [roleList, permissionList, grants] = await Promise.all([
-    rows('SELECT id, code, name, description FROM roles ORDER BY name'),
+    // Orden de alta (OSI, Socio, Abogado, Asistente, Cliente y luego los roles nuevos):
+    // es el orden en que el frontend siempre mostro los roles.
+    rows('SELECT id, code, name, description FROM roles ORDER BY id'),
     rows('SELECT id, code, description FROM permissions ORDER BY code'),
     rows(
       `SELECT r.code AS role_code, p.code AS permission_code, rp.granted_at, rp.granted_by

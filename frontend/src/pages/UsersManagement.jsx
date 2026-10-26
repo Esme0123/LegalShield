@@ -22,7 +22,6 @@ import { toast } from '@/store/toastStore'
 import { cn } from '@/lib/cn'
 import { formatDateTime } from '@/lib/format'
 import { previewUsername } from '@/lib/identity'
-import { ROLES } from '@/data/seed'
 
 const STATUS_FILTERS = [
   { id: 'todos', label: 'Todos' },
@@ -49,6 +48,7 @@ function statusOf(user) {
 
 function UserModal({ mode, user, onClose, onSecret }) {
   const users = useAppStore((s) => s.users)
+  const roles = useAppStore((s) => s.rbacRoles)
   const createUserAdmin = useAppStore((s) => s.createUserAdmin)
   const updateUserAdmin = useAppStore((s) => s.updateUserAdmin)
 
@@ -196,9 +196,9 @@ function UserModal({ mode, user, onClose, onSecret }) {
             <label className="block">
               <span className="ls-label">Rol asignado</span>
               <select value={form.role} onChange={set('role')} className="ls-input">
-                {ROLES.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.label}
+                {roles.map((r) => (
+                  <option key={r.code} value={r.code}>
+                    {r.name}
                   </option>
                 ))}
               </select>
@@ -341,6 +341,7 @@ function OneTimeSecretModal({ secret, onClose }) {
 export default function UsersManagement() {
   const users = useAppStore((s) => s.users)
   const loadUsers = useAppStore((s) => s.loadUsers)
+  const loadMatrix = useAppStore((s) => s.loadMatrix)
   const setUserStatusAdmin = useAppStore((s) => s.setUserStatusAdmin)
   const unlockUserAdmin = useAppStore((s) => s.unlockUserAdmin)
   const generateUnlockToken = useAppStore((s) => s.generateUnlockToken)
@@ -366,7 +367,9 @@ export default function UsersManagement() {
 
   useEffect(() => {
     loadUsers()
-  }, [loadUsers])
+    // Los roles del desplegable del alta salen de la API, no de una lista fija.
+    loadMatrix()
+  }, [loadUsers, loadMatrix])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
