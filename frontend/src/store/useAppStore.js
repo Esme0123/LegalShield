@@ -13,6 +13,7 @@ import {
   clearTokens,
   isApiEnabled,
   isAuthenticated,
+  restoreAccessToken,
   probeApi,
   rolesApi,
   setTokens,
@@ -251,6 +252,8 @@ export const useAppStore = create((set, get) => ({
 
     if (isAuthenticated()) {
       try {
+        // Tras recargar no hay access token en memoria: se restaura con la cookie HttpOnly.
+        if (!(await restoreAccessToken())) throw new Error('Sesion no disponible')
         const data = await authApi.me()
         set({ session: apiUserToSession(data.user) })
         await get().loadProfile()
@@ -275,7 +278,7 @@ export const useAppStore = create((set, get) => ({
 
     try {
       const data = await authApi.login(code, password, captchaToken, captchaResponse)
-      setTokens({ access: data.token, refresh: data.refreshToken })
+      setTokens({ access: data.token })
       ok(set)
 
       const user = apiUserToSession(data.user)

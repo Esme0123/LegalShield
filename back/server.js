@@ -10,6 +10,7 @@ const rateLimit = require('express-rate-limit')
 
 const { assertConnection, closePool } = require('./config/db')
 const { assertSecretsConfigured } = require('./services/authService')
+const { baseOptions: refreshCookieOptions } = require('./utils/refreshCookie')
 const { auditMiddleware } = require('./middlewares/auditMiddleware')
 const { logger } = require('./utils/logger')
 const errors = require('./utils/errors')
@@ -83,6 +84,13 @@ const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .map((o) => o.trim())
   .filter(Boolean)
 
+// Con cookies (credentials) un comodin dejaria a cualquier sitio leer respuestas con la
+// sesion del usuario: en produccion solo valen origenes explicitos.
+if (process.env.NODE_ENV === 'production' && corsOrigins.includes('*')) {
+  corsOrigins.splice(0, corsOrigins.length, ...corsOrigins.filter((o) => o !== '*'))
+  logger.warn('CORS_ORIGINS contiene * y se ignora en produccion: liste los origenes permitidos')
+}
+
 /** En desarrollo se acepta cualquier puerto local (Vite cambia 5173 -> 5174...). */
 const isDevelopment = process.env.NODE_ENV !== 'production'
 const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
@@ -98,7 +106,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     maxAge: 86400,
   }),
 )
@@ -199,6 +207,8 @@ app.use((err, req, res, _next) => {
 async function start() {
   try {
     assertSecretsConfigured()
+    // Fallo seguro: un REFRESH_COOKIE_SAMESITE invalido detiene el arranque.
+    refreshCookieOptions()
 
     const dbUp = await assertConnection()
     if (!dbUp) throw new Error('La consulta de verificacion no devolvio el resultado esperado')

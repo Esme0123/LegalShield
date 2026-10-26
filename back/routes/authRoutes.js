@@ -4,11 +4,12 @@ const { Router } = require('express')
 const rateLimit = require('express-rate-limit')
 const controller = require('../controllers/authController')
 const profile = require('../controllers/profileController')
-const { authenticate } = require('../middlewares/authMiddleware')
+const { authenticate, optionalAuth } = require('../middlewares/authMiddleware')
 const { checkPermission } = require('../middlewares/rbacMiddleware')
 const { auditAction } = require('../middlewares/auditMiddleware')
 const { record } = require('../services/auditService')
 const { asyncHandler } = require('../utils/helpers')
+const { requireAjaxHeader } = require('../utils/refreshCookie')
 
 const router = Router()
 
@@ -43,6 +44,22 @@ const captchaLimiter = rateLimit({
   },
 })
 
+/**
+ * Limitador propio del refresh: con la cookie, cada recarga de la pagina restaura la
+ * sesion con una llamada. El token firmado no se adivina por fuerza bruta, asi que no
+ * comparte el cupo estricto de los endpoints de credenciales.
+ */
+const refreshLimiter = rateLimit({
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 900000),
+  max: Number(process.env.REFRESH_RATE_LIMIT_MAX || 60),
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    record('RATE_LIMITED', { userCode: null, req, details: { path: req.originalUrl } })
+    res.status(429).json({ error: 'Demasiadas solicitudes de renovacion de sesion. Reintente mas tarde' })
+  },
+})
+
 // --- Publico ----------------------------------------------------------------
 
 router.post('/register', authLimiter, asyncHandler(controller.register))
@@ -54,9 +71,11 @@ router.post('/lock-status', authLimiter, asyncHandler(controller.lockStatus))
 
 // --- Requiere sesion ---------------------------------------------------------
 
-router.post('/refresh', authLimiter, auditAction('TOKEN_REFRESH'), asyncHandler(controller.refresh))
+// Con la cookie HttpOnly de por medio, exige la cabecera anti-CSRF.
+router.post('/refresh', refreshLimiter, requireAjaxHeader, auditAction('TOKEN_REFRESH'), asyncHandler(controller.refresh))
 router.get('/me', authenticate, asyncHandler(controller.me))
-router.post('/logout', authenticate, auditAction('LOGOUT'), asyncHandler(controller.logout))
+// El cierre borra la cookie aunque el access token ya haya vencido.
+router.post('/logout', optionalAuth, requireAjaxHeader, auditAction('LOGOUT'), asyncHandler(controller.logout))
 router.get('/directory', authenticate, asyncHandler(controller.directory))
 router.get('/password-history', authenticate, asyncHandler(controller.passwordHistory))
 

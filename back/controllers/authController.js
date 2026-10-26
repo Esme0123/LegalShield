@@ -12,6 +12,7 @@ const { notifyUser, NOTICE } = require('../services/notificationService')
 const { hashOtp, otpMatches, OTP_PATTERN, MAX_OTP_ATTEMPTS, MAX_RESET_ATTEMPTS } = require('../utils/unlockToken')
 const { assertPasswordNotReused, pushPasswordHistory } = require('../utils/passwordHistory')
 const { getClientIp } = require('../utils/helpers')
+const { setRefreshCookie, clearRefreshCookie, readRefreshCookie } = require('../utils/refreshCookie')
 const { issueChallenge, verifyChallenge } = require('../utils/captcha')
 const ghostAttempts = require('../utils/ghostAttempts')
 const { badRequest, conflict, forbidden, notFound, unauthorized, unprocessable } = require('../utils/errors')
@@ -453,10 +454,11 @@ async function login(req, res) {
     })
   }
 
+  // El refresh token viaja solo en cookie HttpOnly: nunca en el cuerpo JSON.
+  setRefreshCookie(res, refreshToken)
   res.json({
     message: 'Acceso concedido',
     token: accessToken,
-    refreshToken,
     expiresIn: process.env.JWT_EXPIRES_IN || '45m',
     user: {
       id: user.id,
@@ -612,16 +614,23 @@ async function unlock(req, res) {
 
 async function refresh(req, res) {
   const { rotateRefreshToken } = require('../services/authService')
-  const { refreshToken } = req.body ?? {}
-  if (!refreshToken) throw badRequest('Falta refreshToken')
+  // Sin cookie, o con una invalida, el mismo 401: el cliente vuelve a /login.
+  const refreshToken = readRefreshCookie(req)
+  if (!refreshToken) throw unauthorized('Sesion no disponible')
 
-  const result = await rotateRefreshToken(refreshToken)
+  let result
+  try {
+    result = await rotateRefreshToken(refreshToken)
+  } catch (error) {
+    clearRefreshCookie(res)
+    throw error
+  }
   record('TOKEN_REFRESH', { userCode: result.user.user_code, req })
 
+  setRefreshCookie(res, result.refreshToken)
   res.json({
     message: 'Sesion renovada',
     token: result.accessToken,
-    refreshToken: result.refreshToken,
     user: {
       id: result.user.id,
       userCode: result.user.user_code,
@@ -655,7 +664,10 @@ async function me(req, res) {
  * en la bitacora: la revocacion real exige lista de tokens o TTL corto.
  */
 async function logout(req, res) {
-  record('LOGOUT', { userCode: req.user?.user_code ?? null, req })
+  // Sin sesion valida solo se borra la cookie: no se escribe en la bitacora.
+  if (req.user) record('LOGOUT', { userCode: req.user.user_code, req })
+  // El navegador no adjunta la cookie a esta ruta (Path de refresh): solo se borra.
+  clearRefreshCookie(res)
   res.json({ message: 'Sesion cerrada', userCode: req.user?.user_code ?? null })
 }
 
