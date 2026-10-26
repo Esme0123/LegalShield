@@ -40,6 +40,9 @@ const LOCK_OSI_MESSAGE = 'Cuenta bloqueada por reincidencia. Requiere desbloqueo
 /** Unico mensaje para todo rechazo del OTP: el motivo real solo va a security_logs. */
 const UNLOCK_TOKEN_REJECTED = 'Token de desbloqueo invalido, expirado o agotado. Solicite uno nuevo al Oficial de Seguridad'
 const CAPTCHA_THRESHOLD = Number(process.env.CAPTCHA_THRESHOLD || 1)
+/** Edad maxima de la clave en dias; un valor invalido vuelve al predeterminado de 90. */
+const configuredMaxAge = Number(process.env.PASSWORD_MAX_AGE_DAYS)
+const PASSWORD_MAX_AGE_DAYS = process.env.PASSWORD_MAX_AGE_DAYS && configuredMaxAge >= 0 ? configuredMaxAge : 90
 
 /**
  * Cuerpos de respuesta compartidos por cuentas reales e identificadores
@@ -194,6 +197,7 @@ async function login(req, res) {
     `SELECT u.id, u.user_code, u.username, u.email, u.role_id, u.password_hash,
             u.failed_attempts, u.is_locked, u.status, u.locked_until, u.is_active,
             u.lock_count, u.password_updated_at, u.must_change_password,
+            TIMESTAMPDIFF(SECOND, u.password_updated_at, NOW()) AS password_age_seconds,
             TIMESTAMPDIFF(SECOND, NOW(), u.locked_until) AS remaining_seconds,
             r.code AS role_code, r.name AS role_name
        FROM users u JOIN roles r ON r.id = u.role_id
@@ -416,7 +420,15 @@ async function login(req, res) {
   const permissions = await loadPermissions(user.id)
   const accessToken = signAccessToken(user, permissions)
   const refreshToken = signRefreshToken(user)
-  const mustChangePassword = Boolean(user.must_change_password)
+  let mustChangePassword = Boolean(user.must_change_password)
+
+  // Caducidad de la clave (ISO 27001 A.5.17): al superar la edad maxima la sesion
+  // queda limitada al cambio de clave; se persiste para que el middleware lo aplique.
+  const passwordExpired = Number(user.password_age_seconds) > PASSWORD_MAX_AGE_DAYS * 86400
+  if (passwordExpired && !mustChangePassword) {
+    await query('UPDATE users SET must_change_password = TRUE WHERE id = ?', [user.id])
+    mustChangePassword = true
+  }
 
   record('AUTH_SUCCESS', {
     userCode: user.user_code,
@@ -428,7 +440,7 @@ async function login(req, res) {
     record('PASSWORD_CHANGE_REQUIRED', {
       userCode: user.user_code,
       req,
-      details: { reason: 'clave_inicial_pendiente', ip },
+      details: { reason: passwordExpired ? 'clave_vencida' : 'clave_inicial_pendiente', ip },
     })
   }
 
