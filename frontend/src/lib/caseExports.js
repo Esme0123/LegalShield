@@ -1,10 +1,15 @@
-﻿const NAVY = [30, 41, 59]
-const HEADER_NAVY = [15, 23, 42]
-const PRIMARY = [37, 99, 235]
-const ALT_ROW = [248, 250, 252]
-const BORDER = [226, 232, 240]
-const MUTED = [100, 116, 139]
-const BODY = [51, 65, 85]
+﻿import {
+  PDF_MARGIN,
+  PDF_PALETTE,
+  PDF_TABLE_START,
+  corporateTableStyles,
+  drawPdfHeader,
+  loadPdfTools,
+  paintPdfFooters,
+} from './pdfExport.js'
+
+const NAVY = PDF_PALETTE.navy
+const MUTED = PDF_PALETTE.muted
 const BODY_HEX = '#334155'
 
 const RISK_STYLES = {
@@ -98,76 +103,33 @@ export async function exportCasesPdf({
   rows = [],
   generatedBy = 'Usuario LegalShield',
   generatedAt = new Date(),
+  filter = 'Todos los expedientes',
 } = {}) {
-  const [{ jsPDF }, { default: autoTable }] = await Promise.all([
-    import('jspdf'),
-    import('jspdf-autotable'),
-  ])
+  const { jsPDF, autoTable } = await loadPdfTools()
 
   const records = toRecords(rows)
   const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true })
   const pageWidth = doc.internal.pageSize.getWidth()
-  const pageHeight = doc.internal.pageSize.getHeight()
-  const marginX = 40
-  const tableWidth = pageWidth - marginX * 2
+  const tableWidth = pageWidth - PDF_MARGIN * 2
   const columnWidths = COLUMN_WIDTHS.map((width) => (width / COLUMN_WIDTH_TOTAL) * tableWidth)
   const title = 'LegalShield · Reporte Operativo de Expedientes'
-  const subtitle = `Emitido: ${formatStamp(generatedAt)}   |   Usuario: ${generatedBy}   |   Expedientes: ${records.length}`
+  const meta = [
+    { label: 'Fecha de emisión', value: formatStamp(generatedAt) },
+    { label: 'Usuario emisor', value: generatedBy },
+    { label: 'Filtro aplicado', value: filter },
+    { label: 'Total de registros', value: String(records.length) },
+  ]
   const body = records.length
     ? records.map(tableRow)
     : [[{ content: 'Sin expedientes para exportar', colSpan: COLUMNS.length, styles: { halign: 'center', textColor: MUTED, fontStyle: 'italic' } }]]
-
-  const drawHeader = () => {
-    doc.setDrawColor(...PRIMARY)
-    doc.setLineWidth(2)
-    doc.line(marginX, 30, pageWidth - marginX, 30)
-
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(7.5)
-    doc.setTextColor(...PRIMARY)
-    doc.text('LEGALSHIELD ENTERPRISE', marginX, 44)
-
-    doc.setFontSize(15)
-    doc.setTextColor(...NAVY)
-    doc.text(title, marginX, 62)
-
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(...MUTED)
-    doc.text(subtitle, marginX, 76)
-
-    doc.setDrawColor(...BORDER)
-    doc.setLineWidth(0.6)
-    doc.line(marginX, 86, pageWidth - marginX, 86)
-  }
+  const tableStyles = corporateTableStyles()
 
   autoTable(doc, {
-    startY: 112,
-    margin: { top: 112, right: marginX, bottom: 54, left: marginX },
+    ...tableStyles,
+    startY: PDF_TABLE_START,
+    margin: { top: PDF_TABLE_START, right: PDF_MARGIN, bottom: 54, left: PDF_MARGIN },
     head: [COLUMNS],
     body,
-    theme: 'grid',
-    styles: {
-      font: 'helvetica',
-      fontSize: 7.4,
-      cellPadding: { top: 5, right: 4, bottom: 5, left: 4 },
-      textColor: BODY,
-      lineColor: BORDER,
-      lineWidth: 0.4,
-      overflow: 'linebreak',
-      valign: 'middle',
-    },
-    headStyles: {
-      fillColor: HEADER_NAVY,
-      textColor: 255,
-      fontStyle: 'bold',
-      halign: 'center',
-      fontSize: 7.4,
-      lineColor: HEADER_NAVY,
-      lineWidth: 0.4,
-      cellPadding: { top: 6, right: 4, bottom: 6, left: 4 },
-    },
-    alternateRowStyles: { fillColor: ALT_ROW },
     columnStyles: {
       0: { cellWidth: columnWidths[0], fontStyle: 'bold', textColor: NAVY },
       1: { cellWidth: columnWidths[1] },
@@ -195,22 +157,10 @@ export async function exportCasesPdf({
       doc.setFillColor(...risk.rgb)
       doc.circle(data.cell.x + 5.5, data.cell.y + data.cell.height / 2, 2, 'F')
     },
-    didDrawPage: drawHeader,
+    didDrawPage: () => drawPdfHeader(doc, { title, meta }),
   })
 
-  const totalPages = doc.getNumberOfPages()
-  for (let page = 1; page <= totalPages; page += 1) {
-    doc.setPage(page)
-    doc.setDrawColor(...BORDER)
-    doc.setLineWidth(0.6)
-    doc.line(marginX, pageHeight - 38, pageWidth - marginX, pageHeight - 38)
-
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7.2)
-    doc.setTextColor(...MUTED)
-    doc.text('Documento generado por LegalShield Enterprise - Uso exclusivo interno', marginX, pageHeight - 24)
-    doc.text(`Página ${page} de ${totalPages}`, pageWidth - marginX, pageHeight - 24, { align: 'right' })
-  }
+  paintPdfFooters(doc)
 
   doc.setProperties({
     title,
