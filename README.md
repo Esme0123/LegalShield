@@ -1,61 +1,61 @@
-# ??? LegalShield SaaS - Sistema de Gesti髇 Legal Seguro
+# LegalShield SaaS - Sistema de Gesti贸n Legal Seguro
 
-> **Proyecto de Reingenier韆 de Seguridad de Sistemas (SIS 321)**  
-> **Universidad Cat髄ica Boliviana "San Pablo" - Unidad Acad閙ica Regional La Paz**  
+> **Proyecto de Reingenier铆a de Seguridad de Sistemas (SIS 321)**  
+> **Universidad Cat贸lica Boliviana "San Pablo" - Unidad Acad茅mica Regional La Paz**  
 > **Docente:** Mgr. Ing. Lourdes Peredo Quiroga  
-> **Gesti髇:** 2026
+> **Gesti贸n:** 2026
 
 ---
 
-## ?? Descripci髇 General
+## Descripci贸n General
 
-**LegalShield** es una plataforma web SaaS dise馻da para la administraci髇 operativa y jur韉ica de despachos de abogados. El proyecto demuestra la transformaci髇 de una arquitectura web base vulnerable hacia un modelo de defensa en profundidad respaldado en los **7 Principios de Dise駉 Seguro**, las **5 Reglas de Oro** y el cumplimiento de controles **ISO 27001** / mitigaciones **OWASP Top 10**.
+**LegalShield** es una plataforma web SaaS dise帽ada para la administraci贸n operativa y jur铆dica de despachos de abogados. El proyecto demuestra la transformaci贸n de una arquitectura web base vulnerable hacia un modelo de defensa en profundidad respaldado en los **7 Principios de Dise帽o Seguro**, las **5 Reglas de Oro** y el cumplimiento de controles **ISO 27001** / mitigaciones **OWASP Top 10**.
 
 ---
 
-## ?? Tabla de Usuarios y Credenciales del Sistema
+## Tabla de Usuarios y Credenciales del Sistema
 
-> **Contrase馻 universal para todas las cuentas de demostraci髇:** `Juris2026!Abg`
+> **Contrase帽a universal para todas las cuentas de demostraci贸n:** `Juris2026!Abg`
 
-| Usuario (`nombre.apellido`) | C骴igo Corporativo | Rol | Funci髇 en el Sistema | Permisos Principales |
+| Usuario (`nombre.apellido`) | C贸digo Corporativo | Rol | Funci贸n en el Sistema | Permisos Principales |
 | :--- | :--- | :--- | :--- | :--- |
-| `osi.seguridad` | `LEG-2026-0002` | **OSI** | Oficial de Seguridad de la Informaci髇 | Gesti髇 de Usuarios (ABM), Matriz RBAC, Tokens de Desbloqueo, Logs de Seguridad. |
-| `mariana.solis` | `LEG-2026-0001` | **Socio** | Direcci髇 y Gesti髇 de Despacho | Crear/Editar Expedientes, Asignar Abogados, Logs de Aplicaci髇. |
-| `diego.ferrer` | `LEG-2026-0142` | **Abogado** | Litigante y Gesti髇 de Casos | Consultar y Actualizar Casos Asignados. |
+| `osi.seguridad` | `LEG-2026-0002` | **OSI** | Oficial de Seguridad de la Informaci贸n | Gesti贸n de Usuarios (ABM), Matriz RBAC, Tokens de Desbloqueo, Logs de Seguridad. |
+| `mariana.solis` | `LEG-2026-0001` | **Socio** | Direcci贸n y Gesti贸n de Despacho | Crear/Editar Expedientes, Asignar Abogados, Logs de Aplicaci贸n. |
+| `diego.ferrer` | `LEG-2026-0142` | **Abogado** | Litigante y Gesti贸n de Casos | Consultar y Actualizar Casos Asignados. |
 | `paula.sando` | `LEG-2026-0411` | **Asistente** | Apoyo Operativo | Consulta de Expedientes (Solo Lectura). |
 | `carlos.cliente` | `LEG-2026-0390` | **Cliente** | Titular de Causa | Consulta de Estado Procesal Propio. |
 
 ---
 
-## ?? Stack Tecnol骻ico
+## Stack Tecnol贸gico
 
-- **Frontend:** React 18, Vite, Tailwind CSS, Lucide React Icons.
+- **Frontend:** React 19, Vite, Tailwind CSS, Lucide React Icons.
 - **Backend API:** Node.js, Express.js (Arquitectura REST).
 - **Base de Datos:** MySQL (XAMPP / Service Port 3306).
 - **Seguridad & Crypto:** Bcrypt (Factor 12), JWT (Json Web Token), Express Rate Limit, CAPTCHA challenge.
 
 ---
 
-## ?? Cobertura de Principios de Dise駉 Seguro y OWASP Top 10
+## Cobertura de Principios de Dise帽o Seguro y OWASP Top 10
 
-1. **Menor Privilegio:** Control de acceso din醡ico RBAC por roles y permisos expl韈itos.
-2. **Seguridad por Defecto:** Middlewares de denegaci髇 por defecto en endpoints de la API.
-3. **Econom韆 del Mecanismo:** Microservicios desacoplados de autenticaci髇, expedientes y auditor韆.
-4. **Mediaci髇 Completa:** Interceptaci髇 y validaci髇 de propiedad de recursos en cada solicitud HTTP.
-5. **Segregaci髇 de Privilegios:** Separaci髇 entre la administraci髇 de ciberseguridad (OSI) y la operaci髇 legal (Socio).
-6. **Menos Asombro:** Interfaz corporativa limpia, terminolog韆 entendible e identificadores estandarizados (`nombre.apellido`).
-7. **Mecanismo Menos Com鷑:** Limitaci髇 de peticiones por IP, bloqueo temporal con persistencia en MySQL, desaf韔 CAPTCHA anti-bot y tokens de desbloqueo de 6 d韌itos validados por OSI.
+1. **Menor Privilegio:** Control de acceso din谩mico RBAC por roles y permisos expl铆citos.
+2. **Seguridad por Defecto:** Middlewares de denegaci贸n por defecto en endpoints de la API.
+3. **Econom铆a del Mecanismo:** Microservicios desacoplados de autenticaci贸n, expedientes y auditor铆a.
+4. **Mediaci贸n Completa:** Interceptaci贸n y validaci贸n de propiedad de recursos en cada solicitud HTTP.
+5. **Segregaci贸n de Privilegios:** Separaci贸n entre la administraci贸n de ciberseguridad (OSI) y la operaci贸n legal (Socio).
+6. **Menos Asombro:** Interfaz corporativa limpia, terminolog铆a entendible e identificadores estandarizados (`nombre.apellido`).
+7. **Mecanismo Menos Com煤n:** Limitaci贸n de peticiones por IP, bloqueo temporal con persistencia en MySQL, desaf铆o CAPTCHA anti-bot y tokens de desbloqueo de 6 d铆gitos validados por OSI.
 
 ---
 
-## ?? Gu韆 de Instalaci髇 y Puesta en Marcha Local
+## Gu铆a de Instalaci贸n y Puesta en Marcha Local
 
 ### Prerrequisitos
 
 - Node.js (v18 o superior)
 - XAMPP con servicio MySQL iniciado en el puerto 3306
 
-### Pasos de Ejecuci髇
+### Pasos de Ejecuci贸n
 
 1. **Clonar el repositorio:**
    ```bash
@@ -78,5 +78,5 @@
    npm run dev        # Servidor de desarrollo en http://localhost:5173 o 5174
    ```
 
-4. **Acceder a la aplicaci髇:**
+4. **Acceder a la aplicaci贸n:**
    Abre el navegador en http://localhost:5173 e ingresa con las credenciales de prueba (osi.seguridad o mariana.solis con clave Juris2026!Abg).
