@@ -516,26 +516,19 @@ export default function Login() {
         </motion.section>
       </div>
 
-      <div className="pointer-events-auto fixed bottom-5 left-5 z-20 max-w-xs rounded-xl border border-line/60 bg-surface/90 p-4 shadow-xl backdrop-blur">
-        <p className="font-display text-xs font-semibold text-ink">Usuario Demo</p>
-        <p className="mt-1 font-mono text-[11px] text-muted">
-          <span className="text-ink">osi.seguridad</span>, <span className="text-ink">mariana.solis</span> o{' '}
-          <span className="text-ink">diego.ferrer</span>
-        </p>
-        <p className="mt-1 font-mono text-[11px] text-muted">
-          Contraseña Demo: <span className="text-ink">Juris2026!Abg</span>
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setUserId('osi.seguridad')
-            setPassword('Juris2026!Abg')
-          }}
-          className="mt-3 w-full rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-semibold text-accent transition hover:bg-accent/15"
-        >
-          Llenar con credenciales demo
-        </button>
-      </div>
+      {/* Solo fuera de produccion; la contrasena nunca se muestra ni se rellena. */}
+      {!import.meta.env.PROD && (
+        <div className="pointer-events-auto fixed bottom-5 left-5 z-20 max-w-xs rounded-xl border border-line/60 bg-surface/90 p-4 shadow-xl backdrop-blur">
+          <p className="font-display text-xs font-semibold text-ink">Usuario Demo</p>
+          <p className="mt-1 font-mono text-[11px] text-muted">
+            <span className="text-ink">osi.seguridad</span>, <span className="text-ink">mariana.solis</span> o{' '}
+            <span className="text-ink">diego.ferrer</span>
+          </p>
+          <p className="mt-1 font-mono text-[11px] text-muted">
+            La contraseña de demostración la entrega el equipo del proyecto.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
