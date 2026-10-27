@@ -24,7 +24,14 @@ const { one, rows, query, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
 const { notifyUser, NOTICE } = require('../services/notificationService')
 const { badRequest, conflict, notFound, unprocessable, tooManyRequests } = require('../utils/errors')
-const { generateOtp, hashOtp, OTP_TTL_MINUTES, MAX_OTP_ISSUES_PER_HOUR } = require('../utils/unlockToken')
+const {
+  generateOtp,
+  hashOtp,
+  OTP_TTL_MINUTES,
+  MAX_OTP_ISSUES_PER_HOUR,
+  RESET_TTL_MINUTES,
+  MAX_RESET_ISSUES_PER_HOUR,
+} = require('../utils/unlockToken')
 const { evaluatePassword } = require('../utils/passwordPolicy')
 const {
   generateUserCode,
@@ -427,4 +434,63 @@ async function generateUnlockToken(req, res) {
   })
 }
 
-module.exports = { listUsers, createUser, updateUser, setUserStatus, unlockUser, generateUnlockToken }
+/* -------------------------------------------------------------------------- */
+/* POST /api/users/:id/generate-reset-token  Token de reinicio de clave (OSI)   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Emite un token de un solo uso para que el titular defina una clave nueva. El OSI
+ * solo conoce el token, nunca la clave definitiva. El hash usa el contexto "reset:",
+ * distinto del de desbloqueo, y el token en claro sale una unica vez hacia el OSI.
+ */
+async function generateResetToken(req, res) {
+  const id = parseId(req)
+  const existing = await one('SELECT id, user_code, is_active FROM users WHERE id = ?', [id])
+  if (!existing) throw notFound(`No existe el usuario #${id}`)
+  if (!existing.is_active) throw conflict('La cuenta esta desactivada; no se emiten tokens')
+
+  // Tope de emisiones por cuenta y hora; el conteo sale de la bitacora de seguridad.
+  const issued = await one(
+    `SELECT COUNT(*) AS total FROM security_logs
+      WHERE action = 'PASSWORD_RESET_TOKEN_GENERATED'
+        AND details LIKE ?
+        AND timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
+    [`%"target":"${existing.user_code}"%`],
+  )
+  if (Number(issued.total) >= MAX_RESET_ISSUES_PER_HOUR) {
+    record('PASSWORD_RESET_ISSUE_LIMITED', {
+      userCode: req.user.user_code,
+      req,
+      details: { target: existing.user_code, limit: MAX_RESET_ISSUES_PER_HOUR },
+    })
+    throw tooManyRequests(`Se alcanzo el limite de ${MAX_RESET_ISSUES_PER_HOUR} tokens de reinicio por hora para esta cuenta`)
+  }
+
+  const token = generateOtp()
+  const expiresAt = new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000)
+
+  await query(
+    `UPDATE users
+        SET reset_token = ?, reset_token_expires_at = ?,
+            reset_token_used = FALSE, reset_token_attempts = 0
+      WHERE id = ?`,
+    [hashOtp(existing.id, token, 'reset:'), expiresAt, id],
+  )
+
+  // Se espera la escritura: el conteo de emisiones depende de este registro.
+  await record('PASSWORD_RESET_TOKEN_GENERATED', {
+    userCode: req.user.user_code,
+    req,
+    details: { target: existing.user_code, expiresInMinutes: RESET_TTL_MINUTES },
+  })
+  await notifyUser(existing.id, NOTICE.RESET_TOKEN_ISSUED())
+
+  res.json({
+    message: `Token de reinicio generado para ${existing.user_code}`,
+    token,
+    expiresAt,
+    expiresInMinutes: RESET_TTL_MINUTES,
+  })
+}
+
+module.exports = { listUsers, createUser, updateUser, setUserStatus, unlockUser, generateUnlockToken, generateResetToken }

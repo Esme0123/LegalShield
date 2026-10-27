@@ -107,6 +107,7 @@ const TYPE_TONE = {
 export default function Audit() {
   // Bitacora de SEGURIDAD: eventos de acceso y control, exclusiva del OSI.
   const logs = useAppStore((s) => s.logs)
+  const session = useAppStore((s) => s.session)
   const liveFeedOn = useAppStore((s) => s.liveFeedOn)
   const loadSecurityLogs = useAppStore((s) => s.loadSecurityLogs)
   const receipts = useAppStore((s) => s.receipts)
@@ -169,24 +170,24 @@ export default function Audit() {
     toast.info('CSV descargado', `${filtered.length} eventos exportados`)
   }
 
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
     if (!canExport) {
       toast.danger('Exportacion bloqueada', 'LOGS_EXPORT no esta habilitado para tu rol')
       return
     }
-    const lines = filtered.map((l) => {
-      const ts = formatDateTime(l.ts)
-      const detail = l.message.length > 110 ? `${l.message.slice(0, 109)}…` : l.message
-      return `${ts.full}   ${l.type}   [${l.severity}]   ${l.actor}   ·   ${detail}`
-    })
     const scope = FILTERS.find((f) => f.id === category)?.label ?? 'Todos'
-    exportPdf({
-      filename: `bitacora-seguridad-${exportStamp()}.pdf`,
-      title: 'Bitácora de seguridad · LegalShield',
-      subtitle: `${filtered.length} eventos · filtro: ${scope} · emitido ${formatDateTime(new Date().toISOString()).full}`,
-      lines,
-    })
-    toast.info('PDF descargado', `${filtered.length} eventos exportados`)
+    try {
+      await exportPdf({
+        filename: `bitacora-seguridad-${exportStamp()}.pdf`,
+        title: 'LegalShield · Bitácora de Seguridad',
+        rows: filtered,
+        filter: scope,
+        generatedBy: session?.name ?? session?.userId ?? 'Usuario LegalShield',
+      })
+      toast.info('PDF descargado', `${filtered.length} eventos exportados`)
+    } catch (error) {
+      toast.danger('No se pudo exportar el PDF', error.message)
+    }
   }
 
   const activeTokens = tokens.filter((t) => t.status === 'activo')

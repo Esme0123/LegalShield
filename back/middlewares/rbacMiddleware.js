@@ -11,14 +11,13 @@
  * revocacion en la matriz SIS-321 surte efecto en la peticion siguiente.
  *
  * El control de acceso por ambito (un abogado solo ve sus expedientes) vive en
- * `scopeCasesToOwner`, tambien aqui, porque depende del mismo contexto RBAC.
+ * `scopeCasesToOwner`, tambien aqui, porque depende del mismo contexto RBAC. El alcance
+ * de todo el despacho lo da el permiso atomico CASES_READ_ALL, no el nombre del rol.
  */
 
 const { forbidden } = require('../utils/errors')
 const { record } = require('../services/auditService')
 const { getClientIp } = require('../utils/helpers')
-
-const ROLE_GLOBAL_ACCESS = ['socio'] // alcance transversal del despacho
 
 function hasPermission(user, code) {
   return Boolean(user?.permissions?.includes(code))
@@ -78,8 +77,8 @@ function requireRole(roles) {
  * A01:2021 · Control de acceso por ambito.
  *
  * Un abogado solo opera los expedientes donde `assigned_lawyer_id` coincide con
- * su usuario. Socio y administrador acceden a todo el despacho. El cliente
- * tambien queda acotado a lo propio.
+ * su usuario. Quien tiene el permiso CASES_READ_ALL accede a todo el despacho. El
+ * cliente tambien queda acotado a lo propio.
  *
  * Se expone como middleware de ruta para que el controller solo tenga que
  * filtrar con `req.scope` y no repita la regla de negocio.
@@ -88,9 +87,10 @@ function scopeCasesToOwner(req, _res, next) {
   const user = req.user
   if (!user) return next(forbidden('Se requiere sesion activa'))
 
-  // El socio dirige el despacho: alcance transversal. El resto (abogado,
-  // asistente, cliente y OSI) queda acotado a los expedientes propios.
-  if (ROLE_GLOBAL_ACCESS.includes(user.role_code)) {
+  // Alcance transversal solo con el permiso explicito, revisable desde la matriz. Sin el,
+  // el usuario queda acotado a los expedientes propios (hoy: abogado, asistente, cliente y
+  // OSI). Los permisos se rehidratan en cada peticion, asi que un cambio rige de inmediato.
+  if (hasPermission(user, 'CASES_READ_ALL')) {
     req.scope = { all: true }
     return next()
   }
@@ -111,5 +111,4 @@ module.exports = {
   requireRole,
   scopeCasesToOwner,
   hasPermission,
-  ROLE_GLOBAL_ACCESS,
 }

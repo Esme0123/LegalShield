@@ -3,17 +3,39 @@
 const { Router } = require('express')
 const controller = require('../controllers/rolesController')
 const { authenticate } = require('../middlewares/authMiddleware')
-const { checkAnyPermission } = require('../middlewares/rbacMiddleware')
+const { checkAnyPermission, checkPermission } = require('../middlewares/rbacMiddleware')
 const { auditAction } = require('../middlewares/auditMiddleware')
 const { asyncHandler } = require('../utils/helpers')
 
 const router = Router()
 
-// La lectura de la matriz requiere sesion; modificarla exige el permiso de
-// gestion de roles (ROLES_MANAGE) o su alias historico RBAC_MANAGE.
+// La matriz solo es visible para quien administra roles o RBAC. Modificarla
+// exige los mismos permisos.
 router.use(authenticate)
 
-router.get('/matrix', asyncHandler(controller.getMatrix))
+router.get(
+  '/matrix',
+  checkAnyPermission(['ROLES_MANAGE', 'RBAC_MANAGE']),
+  asyncHandler(controller.getMatrix),
+)
+router.post(
+  '/',
+  checkPermission('ROLES_MANAGE'),
+  auditAction('ROLE_CREATED'),
+  asyncHandler(controller.createRole),
+)
+router.put(
+  '/:code',
+  checkPermission('ROLES_MANAGE'),
+  auditAction('ROLE_UPDATED'),
+  asyncHandler(controller.updateRole),
+)
+router.delete(
+  '/:code',
+  checkPermission('ROLES_MANAGE'),
+  auditAction('ROLE_DELETED'),
+  asyncHandler(controller.deleteRole),
+)
 router.post(
   '/permissions',
   checkAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE']),

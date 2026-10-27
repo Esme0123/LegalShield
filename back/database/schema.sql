@@ -89,6 +89,10 @@ CREATE TABLE IF NOT EXISTS users (
   unlock_token_expires_at DATETIME,
   unlock_token_used   BOOLEAN NOT NULL DEFAULT FALSE,
   unlock_token_attempts INT NOT NULL DEFAULT 0,
+  reset_token         CHAR(64) NULL DEFAULT NULL,
+  reset_token_expires_at DATETIME,
+  reset_token_used    BOOLEAN NOT NULL DEFAULT FALSE,
+  reset_token_attempts INT NOT NULL DEFAULT 0,
   created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT,
@@ -140,6 +144,30 @@ CREATE TABLE IF NOT EXISTS legal_cases (
   INDEX idx_cases_lawyer (assigned_lawyer_id),
   INDEX idx_cases_status (status),
   INDEX idx_cases_created (created_at DESC)
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------------
+-- 6b. case_documents
+--     Prueba documental del expediente. El contenido sensible solo se entrega
+--     via POST /api/cases/:id/documents/reveal (permiso DOCS_REVEAL).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS case_documents (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  case_id        INT NOT NULL,
+  document_code  VARCHAR(40)  NOT NULL UNIQUE,
+  filename       VARCHAR(200) NOT NULL,
+  classification VARCHAR(30)  NOT NULL DEFAULT 'Publica',
+  is_privileged  BOOLEAN      NOT NULL DEFAULT FALSE,
+  mime_type      VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+  page_count     INT          NOT NULL DEFAULT 1,
+  checksum       CHAR(64),
+  content        LONGTEXT,
+  created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_docs_case FOREIGN KEY (case_id) REFERENCES legal_cases(id) ON DELETE CASCADE,
+  CONSTRAINT chk_doc_classification CHECK (classification IN ('Publica', 'Uso interno', 'Restringida', 'Confidencial')),
+  CONSTRAINT chk_doc_pages CHECK (page_count >= 1),
+  INDEX idx_docs_case (case_id),
+  INDEX idx_docs_privileged (case_id, is_privileged)
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
@@ -199,16 +227,15 @@ CREATE TABLE IF NOT EXISTS user_notifications (
 
 -- ---------------------------------------------------------------------------
 -- Triggers: inmovilizan la bitacora (UPDATE y DELETE lanzan excepcion).
--- Se recrean en cada importacion para que schema.sql sea idempotente.
+-- Se crean solo si faltan: la bitacora nunca queda sin proteccion, ni siquiera
+-- durante una reimportacion (ISO 27001 A.8.15).
 -- ---------------------------------------------------------------------------
-DROP TRIGGER IF EXISTS trg_security_logs_no_update;
-DROP TRIGGER IF EXISTS trg_security_logs_no_delete;
-CREATE TRIGGER trg_security_logs_no_update
+CREATE TRIGGER IF NOT EXISTS trg_security_logs_no_update
 BEFORE UPDATE ON security_logs
 FOR EACH ROW
 SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'security_logs es inmutable: UPDATE no permitido';
 
-CREATE TRIGGER trg_security_logs_no_delete
+CREATE TRIGGER IF NOT EXISTS trg_security_logs_no_delete
 BEFORE DELETE ON security_logs
 FOR EACH ROW
 SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'security_logs es inmutable: DELETE no permitido';
@@ -258,6 +285,7 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('CASES_READ',    'Leer expedientes'),
   ('CASES_WRITE',   'Editar expedientes'),
   ('CASES_ARCHIVE', 'Archivar expedientes'),
+  ('CASES_READ_ALL', 'Ver y operar todos los expedientes del despacho (alcance transversal)'),
   ('DOCS_REVEAL',   'Revelar documentos restringidos'),
   ('DOCS_DOWNLOAD', 'Descargar documentos'),
   ('LOGS_VIEW',     'Ver logs de aplicacion (actividad del despacho)'),

@@ -18,6 +18,7 @@ const { one, rows, query, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
 const { badRequest, conflict, notFound, unauthorized, unprocessable } = require('../utils/errors')
 const { evaluatePassword, PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
+const { assertPasswordNotReused, pushPasswordHistory } = require('../utils/passwordHistory')
 const { sanitizeEmail, normalizeUsername } = require('../utils/identity')
 
 const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12)
@@ -175,21 +176,7 @@ async function changePassword(req, res) {
     })
   }
 
-  const recent = await rows(
-    'SELECT password_hash FROM password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
-    [user.id, PASSWORD_HISTORY_LIMIT],
-  )
-
-  for (const entry of recent) {
-    // bcrypt.compare contra cada hash previo: detecta tanto la clave actual
-    // como cualquier reutilizada, sin necesidad de comparar en texto plano.
-    if (await bcrypt.compare(newPassword, entry.password_hash)) {
-      throw unprocessable(
-        `La nueva contrasena coincide con una de las ultimas ${PASSWORD_HISTORY_LIMIT} contrasenas del usuario`,
-        { reuseBlocked: true, historyLimit: PASSWORD_HISTORY_LIMIT },
-      )
-    }
-  }
+  await assertPasswordNotReused(user.id, newPassword)
 
   const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
 
@@ -199,27 +186,7 @@ async function changePassword(req, res) {
       'UPDATE users SET password_hash = ?, password_updated_at = now(), must_change_password = FALSE WHERE id = ?',
       [passwordHash, user.id],
     )
-    await client.query('INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)', [
-      user.id,
-      passwordHash,
-    ])
-    // Poda: conserva solo las N contrasenas mas recientes. La tabla derivada es
-    // necesaria: MySQL/MariaDB no admiten LIMIT dentro de una subconsulta IN ni
-    // leer en ella la misma tabla del DELETE; el desempate por id cubre dos
-    // cambios en el mismo segundo.
-    await client.query(
-      `DELETE FROM password_history
-        WHERE user_id = ?
-          AND id NOT IN (
-            SELECT id FROM (
-              SELECT id FROM password_history
-               WHERE user_id = ?
-               ORDER BY created_at DESC, id DESC
-               LIMIT ?
-            ) AS keep_recent
-          )`,
-      [user.id, user.id, PASSWORD_HISTORY_LIMIT],
-    )
+    await pushPasswordHistory(client, user.id, passwordHash)
   })
 
   record('PASSWORD_CHANGED', {

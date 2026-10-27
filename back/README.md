@@ -115,9 +115,10 @@ La contrasena inicial de las cuentas de demostracion es la de `DEMO_PASSWORD`
 
 | Metodo | Ruta | Auth | Descripcion |
 |---|---|---|---|
-| GET | `/matrix` | sesion | Matriz completa rol x permiso, con `assignments` y `matrix` listo para pintar. |
-| POST | `/permissions` | `RBAC_MANAGE` | Aplica `{ grants: [{ role, permission, granted }] }` en una transaccion y devuelve la matriz ya actualizada. Sin reiniciar el servidor. |
-| POST | `/reset` | `RBAC_MANAGE` | Restaura la matriz base de `database/seed.sql`. |
+| GET | `/matrix` | `ROLES_MANAGE` o `RBAC_MANAGE` | Matriz completa rol x permiso, con `assignments` y `matrix` listo para pintar. |
+| PUT | `/:code` | `ROLES_MANAGE` | Actualiza `name` y/o `description` de un rol; el codigo no cambia. |
+| POST | `/permissions` | `RBAC_MANAGE` o `ROLES_MANAGE` | Aplica `{ grants: [{ role, permission, granted }] }` en una transaccion y devuelve la matriz ya actualizada. Sin reiniciar el servidor. |
+| POST | `/reset` | `RBAC_MANAGE` o `ROLES_MANAGE` | Restaura la matriz base de `database/seed.sql`. |
 
 ### Expedientes · `/api/cases`
 
@@ -125,8 +126,10 @@ La contrasena inicial de las cuentas de demostracion es la de `DEMO_PASSWORD`
 |---|---|---|---|
 | GET | `/` | `CASES_READ` | Lista acotada al titular. Filtros: `status`, `riskLevel`, `owner`, `search`, `limit`, `offset`. |
 | GET | `/:id` | `CASES_READ` | Detalle. Un expediente de otro abogado responde 403. |
+| GET | `/:id/documents` | `CASES_READ` | Metadatos y conteo real de la prueba documental. Nunca devuelve el contenido. |
+| POST | `/:id/documents/reveal` | `DOCS_REVEAL` | Revela un documento (`documentId` + `justification`) y registra `DOCUMENT_REVEALED` en `activity_logs`. |
 | POST | `/` | `CASES_CREATE` | Crea el expediente con correlativo `EXP-AAAA-NNNN`. |
-| PUT | `/:id` | `CASES_WRITE` | Actualiza campos del expediente propio. |
+| PUT | `/:id` | `CASES_WRITE` | Actualiza campos del expediente propio. Si cambia `progress` registra `CASE_PROGRESS_UPDATED` con avance anterior y nuevo. |
 | DELETE | `/:id` | `CASES_ARCHIVE` | Archivo logico: `status = 'archivado'` + `archived_at`. No borra evidencia. |
 
 Control de acceso A01:2021: el socio (o quien tenga `RBAC_MANAGE`) opera sobre
@@ -144,7 +147,8 @@ no en un filtrado posterior.
 ## Modelo de datos
 
 `roles`, `permissions`, `role_permissions`, `users`, `password_history`,
-`legal_cases`, `security_logs`, `activity_logs`, `user_notifications`.
+`legal_cases`, `case_documents`, `security_logs`, `activity_logs`,
+`user_notifications`.
 
 Dos garantias las impone el esquema, no el codigo de aplicacion:
 

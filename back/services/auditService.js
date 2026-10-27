@@ -51,12 +51,23 @@ const EVENT = {
   UNLOCK_TOKEN_EXHAUSTED: { status: 'CRITICO', stream: 'security' },
   UNLOCK_TOKEN_ISSUE_LIMITED: { status: 'WARN', stream: 'security' },
   PASSWORD_CHANGE_REQUIRED: { status: 'INFO', stream: 'security' },
+  PASSWORD_RESET_TOKEN_GENERATED: { status: 'INFO', stream: 'security' },
+  PASSWORD_RESET_ISSUE_LIMITED: { status: 'WARN', stream: 'security' },
+  PASSWORD_RESET: { status: 'INFO', stream: 'security' },
+  PASSWORD_RESET_FAILED: { status: 'WARN', stream: 'security' },
+  PASSWORD_RESET_EXHAUSTED: { status: 'CRITICO', stream: 'security' },
   PERMISSION_CHANGED: { status: 'WARN', stream: 'security' },
+  PERMISSION_CHANGE_BLOCKED: { status: 'WARN', stream: 'security' },
+  ROLE_CREATED: { status: 'WARN', stream: 'security' },
+  ROLE_UPDATED: { status: 'WARN', stream: 'security' },
+  ROLE_DELETED: { status: 'WARN', stream: 'security' },
   // Operacion del negocio (actividad)
   CASE_CREATED: { status: 'INFO', stream: 'activity' },
   CASE_READ: { status: 'INFO', stream: 'activity' },
   CASE_UPDATED: { status: 'WARN', stream: 'activity' },
+  CASE_PROGRESS_UPDATED: { status: 'INFO', stream: 'activity' },
   CASE_ARCHIVED: { status: 'WARN', stream: 'activity' },
+  DOCUMENT_REVEALED: { status: 'WARN', stream: 'activity' },
   PROFILE_UPDATED: { status: 'INFO', stream: 'activity' },
 }
 

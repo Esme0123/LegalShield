@@ -4,18 +4,19 @@
  * Expedientes judiciales.
  *
  * Control de acceso A01:2021 aplicado en dos capas:
- *   1. middleware `scopeCasesToOwner` -> socio/admin ven todo, el resto queda
- *      acotado a `assigned_lawyer_id = usuario.id`;
+ *   1. middleware `scopeCasesToOwner` -> quien tiene el permiso CASES_READ_ALL ve todo
+ *      el despacho, el resto queda acotado a `assigned_lawyer_id = usuario.id`;
  *   2. cada consulta incluye el filtro por `req.scope`, de modo que la restriccion
  *      viaja en la propia sentencia SQL y no en el filtrado posterior.
  *
  * Un cliente tampoco puede leer expedientes ajenos: solo los asignados a su
- * usuario. Si un expediente no tiene titular, solo es visible para el socio.
+ * usuario. Si un expediente no tiene titular, solo es visible con CASES_READ_ALL.
  */
 
 const { rows, one, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
 const { badRequest, forbidden, notFound } = require('../utils/errors')
+const { parsePagination } = require('../utils/helpers')
 
 const CASE_STATUSES = ['abierto', 'en_tramite', 'suspendido', 'archivado', 'cerrado']
 const RISK_LEVELS = ['baja', 'media', 'alta', 'critica']
@@ -27,7 +28,8 @@ const SELECT_CASE = `
          c.risk_level AS "riskLevel", c.progress, c.deadline,
          c.is_privileged AS "isPrivileged",
          c.created_at AS "createdAt", c.updated_at AS "updatedAt", c.archived_at AS "archivedAt",
-         u.user_code AS "ownerUserCode", u.username AS "ownerName"
+         u.user_code AS "ownerUserCode", u.username AS "ownerName",
+         (SELECT COUNT(*) FROM case_documents d WHERE d.case_id = c.id) AS "documentCount"
     FROM legal_cases c
     LEFT JOIN users u ON u.id = c.assigned_lawyer_id`
 
@@ -78,8 +80,8 @@ async function listCases(req, res) {
   const { where, params } = buildFilters(req)
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
 
-  const limit = Math.min(Number(req.query.limit || 50), 200)
-  const offset = Math.max(Number(req.query.offset || 0), 0)
+  const limit = parsePagination(req.query.limit, { fallback: 50, min: 1, max: 200 })
+  const offset = parsePagination(req.query.offset, { fallback: 0, min: 0 })
 
   const result = await rows(
     `${SELECT_CASE}
@@ -219,7 +221,10 @@ const UPDATABLE = {
 
 async function updateCase(req, res) {
   const { params, scope } = findOneOr404(req)
-  const existing = await one('SELECT id, assigned_lawyer_id, case_number FROM legal_cases WHERE id = ?', params)
+  const existing = await one(
+    'SELECT id, assigned_lawyer_id, case_number, progress FROM legal_cases WHERE id = ?',
+    params,
+  )
   if (!existing) throw notFound(`No existe el expediente con id ${params[0]}`)
 
   if (!scope.all && existing.assigned_lawyer_id !== scope.userId) {
@@ -237,6 +242,13 @@ async function updateCase(req, res) {
     if (key === 'riskLevel' && !RISK_LEVELS.includes(req.body[key])) {
       throw badRequest(`riskLevel debe ser uno de: ${RISK_LEVELS.join(', ')}`)
     }
+    if (key === 'progress') {
+      const progress = Number(req.body[key])
+      if (!Number.isInteger(progress) || progress < 0 || progress > 100) {
+        throw badRequest('progress debe ser un entero entre 0 y 100')
+      }
+      req.body[key] = progress
+    }
     values.push(req.body[key])
     sets.push(`${column} = ?`)
   }
@@ -252,10 +264,22 @@ async function updateCase(req, res) {
     return { id: existing.id, case_number: existing.case_number }
   })
 
-  record('CASE_UPDATED', {
+  const fields = Object.keys(req.body).filter((key) => key in UPDATABLE)
+  const progressChanged = fields.includes('progress') && req.body.progress !== existing.progress
+  await record(progressChanged ? 'CASE_PROGRESS_UPDATED' : 'CASE_UPDATED', {
     userCode: req.user.user_code,
     req,
-    details: { caseNumber: updated.case_number, fields: Object.keys(req.body).filter((k) => k in UPDATABLE) },
+    details: {
+      caseNumber: updated.case_number,
+      fields,
+      ...(progressChanged
+        ? {
+            previousProgress: existing.progress,
+            progress: req.body.progress,
+            message: `Avance de ${updated.case_number}: ${existing.progress}% a ${req.body.progress}%`,
+          }
+        : {}),
+    },
   })
 
   const detail = await one(`${SELECT_CASE} WHERE c.id = ?`, [params[0]])
@@ -300,8 +324,94 @@ async function archiveCase(req, res) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* GET /api/cases/:id/documents                                                */
+/* -------------------------------------------------------------------------- */
+
+/** Metadatos de la prueba documental. El contenido nunca viaja en el listado. */
+async function listDocuments(req, res) {
+  const target = await findScopedCase(req)
+  const documents = await rows(
+    `SELECT id, document_code AS "documentCode", filename AS "name", classification,
+            is_privileged AS "isPrivileged", mime_type AS "mimeType",
+            page_count AS "pages", checksum, created_at AS "createdAt"
+       FROM case_documents
+      WHERE case_id = ?
+      ORDER BY is_privileged ASC, id ASC`,
+    [target.id],
+  )
+
+  res.json({
+    caseId: target.caseNumber,
+    total: documents.length,
+    documents: documents.map((doc) => ({ ...doc, isPrivileged: Boolean(doc.isPrivileged) })),
+  })
+}
+
+/* -------------------------------------------------------------------------- */
+/* POST /api/cases/:id/documents/reveal                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Entrega el contenido de un documento. La ruta exige DOCS_REVEAL y registra
+ * cada revelacion (incluida la justificacion) en activity_logs.
+ */
+async function revealDocument(req, res) {
+  const target = await findScopedCase(req)
+  const documentId = Number(req.body?.documentId)
+  if (!Number.isInteger(documentId) || documentId < 1) {
+    throw badRequest('documentId debe ser un entero positivo')
+  }
+
+  const justification = String(req.body?.justification ?? '').trim().slice(0, 500)
+  const document = await one(
+    `SELECT id, document_code AS "documentCode", filename AS "name", classification,
+            is_privileged AS "isPrivileged", mime_type AS "mimeType",
+            page_count AS "pages", checksum, content, created_at AS "createdAt"
+       FROM case_documents
+      WHERE id = ? AND case_id = ?`,
+    [documentId, target.id],
+  )
+  if (!document) throw notFound(`No existe el documento ${documentId} en el expediente ${target.caseNumber}`)
+
+  const countRow = await one('SELECT COUNT(*) AS total FROM case_documents WHERE case_id = ?', [target.id])
+  await record('DOCUMENT_REVEALED', {
+    userCode: req.user.user_code,
+    req,
+    details: {
+      caseNumber: target.caseNumber,
+      documentCode: document.documentCode,
+      classification: document.classification,
+      justification: justification || 'sin justificacion',
+      message: `${document.documentCode} revelado en ${target.caseNumber} · ${justification || 'sin justificacion'}`,
+    },
+  })
+
+  res.json({
+    message: 'Documento revelado bajo justificacion registrada',
+    caseId: target.caseNumber,
+    documentCount: Number(countRow.total),
+    justification: justification || 'sin justificacion',
+    document: { ...document, isPrivileged: Boolean(document.isPrivileged) },
+  })
+}
+
+/* -------------------------------------------------------------------------- */
 /* Auxiliares                                                                  */
 /* -------------------------------------------------------------------------- */
+
+/** Valida id, existencia y alcance del expediente antes de operar documentos. */
+async function findScopedCase(req) {
+  const { params, scope } = findOneOr404(req)
+  const found = await one(
+    'SELECT id, case_number, assigned_lawyer_id FROM legal_cases WHERE id = ?',
+    params,
+  )
+  if (!found) throw notFound(`No existe el expediente con id ${params[0]}`)
+  if (!scope.all && found.assigned_lawyer_id !== scope.userId) {
+    throw forbidden('No tiene acceso a este expediente: pertenece a otro abogado asignado')
+  }
+  return { id: found.id, caseNumber: found.case_number }
+}
 
 /**
  * Valida el id de ruta y devuelve `{ params, scope }`.
@@ -314,4 +424,14 @@ function findOneOr404(req) {
   return { params: [id], scope: req.scope }
 }
 
-module.exports = { listCases, getCase, createCase, updateCase, archiveCase, CASE_STATUSES, RISK_LEVELS }
+module.exports = {
+  listCases,
+  getCase,
+  createCase,
+  updateCase,
+  archiveCase,
+  listDocuments,
+  revealDocument,
+  CASE_STATUSES,
+  RISK_LEVELS,
+}

@@ -1,5 +1,5 @@
-/* Catalogos didacticos de referencia (roles/permisos e ISO 27001).
- * Los datos de negocio (usuarios, expedientes, auditoria, RBAC) viven en MySQL
+/* Catalogos didacticos de referencia (etiquetas de permisos e ISO 27001).
+ * Los datos de negocio (usuarios, roles, expedientes, auditoria, RBAC) viven en MySQL
  * y se consumen via la API REST; aqui no hay datos simulados. */
 
 export const PERMISSIONS = [
@@ -7,6 +7,7 @@ export const PERMISSIONS = [
   { id: 'CASES_READ', label: 'Consultar expedientes', group: 'Expedientes', severity: 'media' },
   { id: 'CASES_WRITE', label: 'Editar expedientes', group: 'Expedientes', severity: 'alta' },
   { id: 'CASES_ARCHIVE', label: 'Archivar expedientes', group: 'Expedientes', severity: 'critica' },
+  { id: 'CASES_READ_ALL', label: 'Ver y operar todos los expedientes del despacho', group: 'Expedientes', severity: 'critica' },
   { id: 'DOCS_REVEAL', label: 'Revelar documentos restringidos', group: 'Documentación', severity: 'critica' },
   { id: 'DOCS_DOWNLOAD', label: 'Descargar documentos', group: 'Documentación', severity: 'alta' },
   { id: 'LOGS_VIEW', label: 'Consultar historial', group: 'Auditoría', severity: 'media' },
@@ -25,177 +26,6 @@ export const PERMISSIONS = [
   { id: 'ACCOUNT_UNLOCK', label: 'Desbloquear cuentas inhabilitadas', group: 'Seguridad', severity: 'critica' },
   { id: 'SECURITY_LOGS_VIEW', label: 'Consultar la bitácora de seguridad', group: 'Auditoría', severity: 'critica' },
 ]
-
-export const ROLES = [
-  {
-    id: 'osi',
-    label: 'OSI',
-    short: 'OSI',
-    description: 'Oficial de Seguridad de la Informacion. ABM de usuarios, matriz RBAC y bitacora de seguridad.',
-    accent: 'critica',
-  },
-  {
-    id: 'socio',
-    label: 'Socio',
-    short: 'SOC',
-    description: 'Direccion del despacho. Responsabilidad final sobre el cierre de expedientes.',
-    accent: 'pastel',
-  },
-  {
-    id: 'abogado',
-    label: 'Abogado',
-    short: 'ABG',
-    description: 'Practicante principal con firma procesal y acceso a la prueba documental.',
-    accent: 'accent',
-  },
-  {
-    id: 'asistente',
-    label: 'Asistente',
-    short: 'AST',
-    description: 'Soporte administrativo. Opera expedientes sin acceso a material restringido.',
-    accent: 'info',
-  },
-  {
-    id: 'cliente',
-    label: 'Cliente',
-    short: 'CLI',
-    description: 'Acceso externo limitado al seguimiento de su propio expediente.',
-    accent: 'ice',
-  },
-]
-
-/* Roles que un usuario puede solicitar al registrarse en /register. */
-export const REGISTER_ROLES = [
-  {
-    id: 'abogado',
-    label: 'Abogado',
-    icon: 'gavel',
-    description: 'Firma procesal y acceso a la prueba documental restringida.',
-    department: 'Litigacion',
-  },
-  {
-    id: 'asistente',
-    label: 'Asistente',
-    icon: 'userCheck',
-    description: 'Tramitacion y soporte operativo sin material privilegiado.',
-    department: 'Tramitacion',
-  },
-  {
-    id: 'socio',
-    label: 'Socio',
-    icon: 'scale',
-    description: 'Direccion del despacho y responsabilidad final sobre el cierre.',
-    department: 'Direccion Juridica',
-  },
-]
-
-/* =====================================================================
-   Matriz de Permisos por Rol · modulos reales de LegalShield
-   Cuatro areas del sistema agrupadas en el encabezado y los cinco
-   roles configurados en la base de datos como filas.
-   ===================================================================== */
-
-export const MATRIX_MODULES = [
-  {
-    id: 'EXPEDIENTES',
-    label: 'Gestión de Expedientes',
-    long: 'Gestión de Expedientes · alta y seguimiento',
-    description: 'Alta, seguimiento y cierre de causas judiciales del despacho.',
-    resources: [
-      { id: 'EXP_CREATE', label: 'Crear' },
-      { id: 'EXP_EDIT', label: 'Editar' },
-      { id: 'EXP_ARCHIVE', label: 'Archivar' },
-      { id: 'EXP_VIEW', label: 'Consultar' },
-    ],
-  },
-  {
-    id: 'DOCUMENTOS',
-    label: 'Documentación Legal',
-    long: 'Documentación Legal · prueba documental',
-    description: 'Consulta, descarga y revelado de la prueba documental restringida.',
-    resources: [
-      { id: 'DOC_VIEW', label: 'Consultar' },
-      { id: 'DOC_DOWNLOAD', label: 'Descargar' },
-      { id: 'DOC_REVEAL', label: 'Revelar' },
-      { id: 'DOC_SHARE', label: 'Compartir' },
-    ],
-  },
-  {
-    id: 'AUDITORIA',
-    label: 'Auditoría e Historial',
-    long: 'Auditoría e Historial · bitacora',
-    description: 'Bitácora de seguridad, exportación y comprobantes firmados.',
-    resources: [
-      { id: 'AUD_VIEW', label: 'Historial' },
-      { id: 'AUD_EXPORT', label: 'Exportar' },
-      { id: 'AUD_RECEIPT', label: 'Comprobantes' },
-      { id: 'AUD_ALERTS', label: 'Alertas' },
-    ],
-  },
-  {
-    id: 'USUARIOS',
-    label: 'Administración de Usuarios (OSI)',
-    long: 'Administración de Usuarios (OSI) · ABM',
-    description: 'Alta, edición, baja y desbloqueo de cuentas, más la asignación de permisos.',
-    resources: [
-      { id: 'USR_CREATE', label: 'Alta' },
-      { id: 'USR_UPDATE', label: 'Edición' },
-      { id: 'USR_DEACTIVATE', label: 'Baja' },
-      { id: 'USR_UNLOCK', label: 'Desbloqueo' },
-      { id: 'USR_RBAC', label: 'Permisos' },
-    ],
-  },
-]
-
-/* Los cinco roles configurados en la base de datos (OSI, Socio, Abogado,
- * Asistente y Cliente) son las filas de la matriz. */
-export const MATRIX_ROLES = ROLES.map((role) => ({
-  id: role.id,
-  label: role.label,
-  short: role.short,
-  description: role.description,
-}))
-
-const grant = (...ids) => ids
-
-/** Estado inicial de la matriz: rol -> modulos/acciones concedidos. */
-export const MATRIX_CELLS = {
-  osi: grant(
-    'EXP_VIEW',
-    'DOC_VIEW',
-    'AUD_VIEW',
-    'AUD_EXPORT',
-    'AUD_RECEIPT',
-    'AUD_ALERTS',
-    'USR_CREATE',
-    'USR_UPDATE',
-    'USR_DEACTIVATE',
-    'USR_UNLOCK',
-    'USR_RBAC',
-  ),
-  socio: grant(
-    'EXP_CREATE',
-    'EXP_EDIT',
-    'EXP_ARCHIVE',
-    'EXP_VIEW',
-    'DOC_VIEW',
-    'DOC_DOWNLOAD',
-    'DOC_REVEAL',
-    'DOC_SHARE',
-    'AUD_VIEW',
-    'AUD_EXPORT',
-    'AUD_RECEIPT',
-    'AUD_ALERTS',
-    'USR_CREATE',
-    'USR_UPDATE',
-    'USR_DEACTIVATE',
-    'USR_UNLOCK',
-    'USR_RBAC',
-  ),
-  abogado: grant('EXP_CREATE', 'EXP_EDIT', 'EXP_VIEW', 'DOC_VIEW', 'DOC_DOWNLOAD', 'DOC_REVEAL', 'AUD_VIEW', 'AUD_RECEIPT'),
-  asistente: grant('EXP_CREATE', 'EXP_EDIT', 'EXP_VIEW', 'DOC_VIEW', 'DOC_DOWNLOAD', 'AUD_VIEW'),
-  cliente: grant('EXP_VIEW', 'DOC_VIEW'),
-}
 
 /* =====================================================================
    Resumen · Matriz de clasificacion de informacion

@@ -17,13 +17,14 @@ INSERT IGNORE INTO roles (code, name, description) VALUES
   ('cliente',    'Cliente',    'Acceso externo limitado al seguimiento de su propio expediente.');
 
 -- ---------------------------------------------------------------------------
--- Permisos atomicos (21 permisos, alineados con PERMISSIONS del frontend)
+-- Permisos atomicos (22 permisos, alineados con PERMISSIONS del frontend)
 -- ---------------------------------------------------------------------------
 INSERT IGNORE INTO permissions (code, description) VALUES
   ('CASES_CREATE',  'Crear expedientes'),
   ('CASES_READ',    'Leer expedientes'),
   ('CASES_WRITE',   'Editar expedientes'),
   ('CASES_ARCHIVE', 'Archivar expedientes'),
+  ('CASES_READ_ALL', 'Ver y operar todos los expedientes del despacho (alcance transversal)'),
   ('DOCS_REVEAL',   'Revelar documentos restringidos'),
   ('DOCS_DOWNLOAD', 'Descargar documentos'),
   ('LOGS_VIEW',     'Ver logs de aplicacion (actividad del despacho)'),
@@ -57,7 +58,7 @@ WHERE (r.code = 'osi' AND p.code IN (
   'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'CASES_READ'
 ))
    OR (r.code = 'socio' AND p.code IN (
-  'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'DOCS_REVEAL',
+  'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL', 'DOCS_REVEAL',
   'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS'
 ))
    OR (r.code = 'abogado' AND p.code IN (
@@ -81,7 +82,7 @@ DELETE rp FROM role_permissions rp
      'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'CASES_READ'
    ))
    OR (r.code = 'socio' AND p.code IN (
-     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'DOCS_REVEAL',
+     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL', 'DOCS_REVEAL',
      'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS'
    ))
    OR (r.code = 'abogado' AND p.code IN (
@@ -164,5 +165,77 @@ VALUES
   ('EXP-2026-0058', 'Propiedad industrial · Trademark Falcon', 'Falcon Studio SAS',
    (SELECT id FROM users WHERE user_code = 'LEG-2026-0142'),
    'en_tramite', 'Comercial', 'SIC - Decision 3', 'Ejecucion', 'alta', 71, '2026-10-27', FALSE);
+
+-- ---------------------------------------------------------------------------
+-- Prueba documental de demostracion: 2 publicos + 1 privilegiado por caso.
+-- El contenido solo se entrega con DOCS_REVEAL en /documents/reveal.
+-- ---------------------------------------------------------------------------
+INSERT IGNORE INTO case_documents
+  (case_id, document_code, filename, classification, is_privileged, mime_type, page_count, checksum, content)
+VALUES
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0014'), 'DOC-2026-0014-01',
+   'Peticion_Formal.pdf', 'Publica', FALSE, 'application/pdf', 6,
+   SHA2('DOC-2026-0014-01|legalshield-enterprise', 256),
+   'Peticion formal presentada ante el Juzgado 12 Laboral de Bogota. Documento de demostracion.'),
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0014'), 'DOC-2026-0014-02',
+   'Poder_Representacion.pdf', 'Publica', FALSE, 'application/pdf', 3,
+   SHA2('DOC-2026-0014-02|legalshield-enterprise', 256),
+   'Poder notarial otorgado a la firma para representar a Metalurgia Andes S.A.S. Documento de demostracion.'),
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0014'), 'DOC-2026-0014-03',
+   'Dictamen_Estrategico_Secreto.pdf', 'Confidencial', TRUE, 'application/pdf', 18,
+   SHA2('DOC-2026-0014-03|legalshield-enterprise', 256),
+   'Dictamen reservado sobre la estrategia probatoria y exposicion patrimonial. Documento de demostracion.'),
+
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0021'), 'DOC-2026-0021-01',
+   'Demanda_Nulidad.pdf', 'Publica', FALSE, 'application/pdf', 22,
+   SHA2('DOC-2026-0021-01|legalshield-enterprise', 256),
+   'Demanda de nulidad contractual presentada ante el Tribunal Superior. Documento de demostracion.'),
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0021'), 'DOC-2026-0021-02',
+   'Poder_Representacion.pdf', 'Publica', FALSE, 'application/pdf', 4,
+   SHA2('DOC-2026-0021-02|legalshield-enterprise', 256),
+   'Poder especial para actuar en el proceso de nulidad contractual. Documento de demostracion.'),
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0021'), 'DOC-2026-0021-03',
+   'Auditoria_Financiera.pdf', 'Confidencial', TRUE, 'application/pdf', 31,
+   SHA2('DOC-2026-0021-03|legalshield-enterprise', 256),
+   'Auditoria financiera reservada del consorcio y analisis de riesgo de credito. Documento de demostracion.'),
+
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0033'), 'DOC-2026-0033-01',
+   'Peticion_Formal.pdf', 'Publica', FALSE, 'application/pdf', 5,
+   SHA2('DOC-2026-0033-01|legalshield-enterprise', 256),
+   'Derecho de peticion radicado ante el Ministerio de Salud. Documento de demostracion.'),
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0033'), 'DOC-2026-0033-02',
+   'Acuse_Recibido.pdf', 'Publica', FALSE, 'application/pdf', 2,
+   SHA2('DOC-2026-0033-02|legalshield-enterprise', 256),
+   'Acuse de recibo y constancia de radicacion ministerial. Documento de demostracion.'),
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0033'), 'DOC-2026-0033-03',
+   'Informe_Reservado_Prensa.pdf', 'Confidencial', TRUE, 'application/pdf', 12,
+   SHA2('DOC-2026-0033-03|legalshield-enterprise', 256),
+   'Informe reservado sobre fuentes periodisticas y proteccion de identidad. Documento de demostracion.'),
+
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0047'), 'DOC-2026-0047-01',
+   'Solicitud_Sucesion.pdf', 'Publica', FALSE, 'application/pdf', 8,
+   SHA2('DOC-2026-0047-01|legalshield-enterprise', 256),
+   'Solicitud de apertura del proceso de sucesion intestada. Documento de demostracion.'),
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0047'), 'DOC-2026-0047-02',
+   'Poder_Representacion.pdf', 'Publica', FALSE, 'application/pdf', 3,
+   SHA2('DOC-2026-0047-02|legalshield-enterprise', 256),
+   'Poder de representacion de los herederos reconocidos. Documento de demostracion.'),
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0047'), 'DOC-2026-0047-03',
+   'Avaluo_Patrimonial_Confidencial.pdf', 'Confidencial', TRUE, 'application/pdf', 26,
+   SHA2('DOC-2026-0047-03|legalshield-enterprise', 256),
+   'Avaluo patrimonial reservado de bienes relictos y pasivos declarados. Documento de demostracion.'),
+
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0058'), 'DOC-2026-0058-01',
+   'Solicitud_Registro_Marca.pdf', 'Publica', FALSE, 'application/pdf', 7,
+   SHA2('DOC-2026-0058-01|legalshield-enterprise', 256),
+   'Solicitud de registro de marca presentada ante la SIC. Documento de demostracion.'),
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0058'), 'DOC-2026-0058-02',
+   'Poder_Representacion.pdf', 'Publica', FALSE, 'application/pdf', 4,
+   SHA2('DOC-2026-0058-02|legalshield-enterprise', 256),
+   'Poder para tramitar la oposicion y el registro marcario. Documento de demostracion.'),
+  ((SELECT id FROM legal_cases WHERE case_number = 'EXP-2026-0058'), 'DOC-2026-0058-03',
+   'Dictamen_Colision_Marcaria.pdf', 'Confidencial', TRUE, 'application/pdf', 19,
+   SHA2('DOC-2026-0058-03|legalshield-enterprise', 256),
+   'Dictamen reservado sobre riesgo de confusion y estrategia de defensa marcaria. Documento de demostracion.');
 
 COMMIT;

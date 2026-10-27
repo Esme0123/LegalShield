@@ -1,12 +1,7 @@
 import { create } from 'zustand'
 import {
   INFO_ASSETS,
-  MATRIX_CELLS,
-  MATRIX_ROLES,
-  MATRIX_MODULES,
   PERMISSIONS,
-  REGISTER_ROLES,
-  ROLES,
   RISK_CONTROLS,
   RISK_HEATMAP,
 } from '@/data/seed'
@@ -18,6 +13,7 @@ import {
   clearTokens,
   isApiEnabled,
   isAuthenticated,
+  restoreAccessToken,
   probeApi,
   rolesApi,
   setTokens,
@@ -71,7 +67,7 @@ const apiUserToSession = (user) => ({
   name: user.username,
   email: user.email,
   role: user.role,
-  roleLabel: user.roleLabel ?? ROLES.find((r) => r.id === user.role)?.label ?? user.role,
+  roleLabel: user.roleLabel ?? user.role,
   permissions: user.permissions ?? [],
   mustChangePassword: Boolean(user.mustChangePassword),
   loginAt: nowIso(),
@@ -118,8 +114,9 @@ const apiUserToAdminUser = (row) => {
     role: row.role,
     roleLabel: row.roleLabel,
     status: row.status,
-    isActive: row.isActive,
-    isLocked: row.isLocked,
+    // MySQL entrega 0/1: como numero, `cond && user.isLocked && ...` pintaba un "0" suelto.
+    isActive: Boolean(row.isActive),
+    isLocked: Boolean(row.isLocked),
     failedAttempts: row.failedAttempts,
     lockedAt: row.lockedAt,
     lockedUntil: row.lockedUntil,
@@ -130,6 +127,7 @@ const apiUserToAdminUser = (row) => {
 
 /** Fila de legal_cases -> expediente del frontend. */
 const apiCaseToCase = (row) => ({
+  dbId: row.id,
   id: row.caseNumber,
   title: row.title,
   client: row.clientName,
@@ -138,10 +136,25 @@ const apiCaseToCase = (row) => ({
   stage: row.stage ?? '',
   risk: row.riskLevel === 'critica' ? 'critico' : row.riskLevel,
   deadline: row.deadline ? String(row.deadline).slice(0, 10) : null,
-  progress: row.progress,
+  progress: Number(row.progress ?? 0),
   owner: row.ownerUserCode ?? '',
   privileged: row.isPrivileged,
   docs: [],
+  documentCount: Number(row.documentCount ?? 0),
+})
+
+/** Fila de GET /api/cases/:id/documents -> tarjeta de prueba documental. */
+const apiDocumentToDoc = (row) => ({
+  dbId: Number(row.id),
+  id: row.documentCode,
+  name: row.name,
+  classification: row.classification,
+  isPrivileged: Boolean(row.isPrivileged),
+  mimeType: row.mimeType,
+  pages: Number(row.pages ?? 0),
+  checksum: row.checksum,
+  createdAt: row.createdAt,
+  content: row.content ?? null,
 })
 
 /** Fila de security_logs -> entrada de bitacora del frontend. */
@@ -199,11 +212,13 @@ const initialState = () => ({
   directory: [],
   users: [],
   rbac: {},
+  // Roles y permisos tal como los devuelve GET /api/roles/matrix (fuente de la pantalla de roles).
+  rbacRoles: [],
+  rbacPermissions: [],
   cases: [],
   logs: [],
   activityLogs: [],
   revealedDocs: [],
-  matrixCells: structuredClone(MATRIX_CELLS),
   infoAssets: structuredClone(INFO_ASSETS),
   riskControls: structuredClone(RISK_CONTROLS),
   risks: structuredClone(RISK_HEATMAP),
@@ -253,10 +268,13 @@ export const useAppStore = create((set, get) => ({
 
     if (isAuthenticated()) {
       try {
+        // Tras recargar no hay access token en memoria: se restaura con la cookie HttpOnly.
+        if (!(await restoreAccessToken())) throw new Error('Sesion no disponible')
         const data = await authApi.me()
         set({ session: apiUserToSession(data.user) })
         await get().loadProfile()
         get().loadNotifications().catch(() => {})
+        get().loadMatrix().catch(() => {})
       } catch {
         clearTokens()
         set({ session: null })
@@ -276,13 +294,14 @@ export const useAppStore = create((set, get) => ({
 
     try {
       const data = await authApi.login(code, password, captchaToken, captchaResponse)
-      setTokens({ access: data.token, refresh: data.refreshToken })
+      setTokens({ access: data.token })
       ok(set)
 
       const user = apiUserToSession(data.user)
       set({ session: user, attempts: 0, lockedUntil: null, lockRequiresOsi: false })
       get().loadDirectory().catch(() => {})
       get().loadNotifications().catch(() => {})
+      get().loadMatrix().catch(() => {})
       return { ok: true, user }
     } catch (error) {
       if (error instanceof ApiError && error.status === 0) {
@@ -401,32 +420,6 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
-  /* ------------------------------- ALTA / REGISTER ----------------------- */
-
-  /** Alta de usuario. El User ID lo emite el servidor en una transaccion. */
-  registerUser: async ({ firstName, lastName, email, firm, role, password, department }) => {
-    const requested = REGISTER_ROLES.find((r) => r.id === role) ?? REGISTER_ROLES[0]
-
-    const data = await authApi.register({
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: email.trim(),
-      password,
-      role: requested.id,
-      firm: firm.trim(),
-      department: department?.trim() || requested.department,
-    })
-    ok(set)
-    return {
-      userId: data.user.userCode,
-      userCode: data.user.userCode,
-      username: data.user.username,
-      name: data.user.username,
-      email: data.user.email,
-      role: data.user.role,
-    }
-  },
-
   /* ------------------------------- ABM / USERS --------------------------- */
 
   /** Carga la lista del ABM desde MySQL (requiere permiso de gestion de usuarios). */
@@ -485,6 +478,13 @@ export const useAppStore = create((set, get) => ({
   /** Emision de OTP por el OSI. El token se devuelve al componente y no se almacena. */
   generateUnlockToken: async (id) => {
     const data = await usersApi.generateUnlockToken(id)
+    ok(set)
+    return { token: data.token, expiresAt: data.expiresAt, expiresInMinutes: data.expiresInMinutes }
+  },
+
+  /** Token de reinicio de clave emitido por el OSI. Se devuelve al componente; no se almacena. */
+  generateResetToken: async (id) => {
+    const data = await usersApi.generateResetToken(id)
     ok(set)
     return { token: data.token, expiresAt: data.expiresAt, expiresInMinutes: data.expiresInMinutes }
   },
@@ -567,6 +567,32 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
+  /**
+   * Reinicio de clave con el token del OSI. Ni el token ni la clave nueva se guardan
+   * en el store; solo viajan en la peticion. `policy` indica un 422: el token sigue vivo.
+   */
+  resetPassword: async (userCode, token, newPassword) => {
+    const code = String(userCode ?? '').trim().toUpperCase()
+    try {
+      const data = await authApi.resetPassword({ userCode: code, token, newPassword })
+      ok(set)
+      return { ok: true, message: data.message }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 0) {
+        noteApiFailure(set, error, 'reset-password')
+        return { ok: false, reason: CONNECTION_ERROR }
+      }
+      if (error instanceof ApiError && error.status === 429) {
+        return { ok: false, reason: error.message || 'Demasiados intentos. Espere unos minutos antes de reintentar' }
+      }
+      return {
+        ok: false,
+        policy: error instanceof ApiError && error.status === 422,
+        reason: error.message ?? 'Token invalido o expirado',
+      }
+    }
+  },
+
   resetLock: () => set({ attempts: 0, lockedUntil: null, lockRequiresOsi: false }),
 
   logout: async () => {
@@ -631,11 +657,19 @@ export const useAppStore = create((set, get) => ({
     return { granting }
   },
 
-  /** Carga la matriz rol x permiso desde MySQL. */
+  /** Carga la matriz rol x permiso desde MySQL (solo administradores RBAC). */
   loadMatrix: async () => {
+    if (!get().hasAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE'])) {
+      set({ rbac: {}, rbacRoles: [], rbacPermissions: [] })
+      return null
+    }
     try {
       const data = await rolesApi.matrix()
-      set({ rbac: structuredClone(data.assignments) })
+      set({
+        rbac: structuredClone(data.assignments),
+        rbacRoles: data.roles ?? [],
+        rbacPermissions: data.permissions ?? [],
+      })
       ok(set)
       return data
     } catch (error) {
@@ -691,35 +725,6 @@ export const useAppStore = create((set, get) => ({
   /** Alias de compatibilidad: la bitacora por defecto es la de seguridad. */
   loadLogs: async (filters = {}) => get().loadSecurityLogs(filters),
 
-  /* ------------ Matriz de Permisos por Rol · rol x modulo/accion ----------
-   * Estado didactico en memoria (no persiste): los permisos atomicos reales
-   * viven en MySQL a traves de `rbac` y /api/roles/permissions.
-   * ------------------------------------------------------------------------ */
-  toggleMatrixAccess: (roleId, resourceId) => {
-    set((s) => ({
-      matrixCells: { ...s.matrixCells, [roleId]: toggleInList(s.matrixCells[roleId] ?? [], resourceId) },
-    }))
-    const roleLabel = MATRIX_ROLES.find((r) => r.id === roleId)?.label ?? roleId
-    const resource = MATRIX_MODULES.flatMap((module) => module.resources).find((r) => r.id === resourceId)
-    const granted = (get().matrixCells[roleId] ?? []).includes(resourceId)
-    return { granting: granted, roleLabel, resourceLabel: resource?.label ?? resourceId }
-  },
-
-  /** Marca o desmarca un recurso para los cinco roles de una vez. */
-  setMatrixColumn: (resourceId, granted) => {
-    const state = get()
-    const matrixCells = { ...state.matrixCells }
-    MATRIX_ROLES.forEach((role) => {
-      const list = matrixCells[role.id] ?? []
-      matrixCells[role.id] = granted
-        ? [...new Set([...list, resourceId])]
-        : list.filter((id) => id !== resourceId)
-    })
-    set({ matrixCells })
-  },
-
-  resetMatrix: () => set({ matrixCells: structuredClone(MATRIX_CELLS) }),
-
   /* ------------- Matriz de clasificacion de informacion ------------------ */
   setInfoAssetValue: (assetId, dimension, value) => {
     const next = Math.min(3, Math.max(1, Number(value)))
@@ -735,22 +740,64 @@ export const useAppStore = create((set, get) => ({
 
   /* ------------------------------ EXPEDIENTES ---------------------------- */
   /**
-   * Archivo logico contra la API (el servidor no borra: marca `archivado`). El
-   * indice de la lista local se usa solo como id del recurso.
+   * Archivo logico contra la API (el servidor no borra: marca `archivado`).
+   * `dbId` es la clave primaria que espera la ruta; `id` es el caseNumber visible.
    */
   archiveCase: async (caseId) => {
-    const index = get().cases.findIndex((c) => c.id === caseId)
-    if (index === -1) return
-    await casesApi.archive(index + 1)
+    const target = get().cases.find((c) => c.id === caseId)
+    if (!target?.dbId) throw new Error('No se pudo identificar el expediente en el servidor')
+
+    await casesApi.archiveCase(target.dbId)
     set((s) => ({ cases: s.cases.filter((c) => c.id !== caseId) }))
     ok(set)
+    await get().loadCases({ status: 'abierto,en_tramite,suspendido' })
+  },
+
+  /** Actualiza el avance con respuesta optimista y refresco de activity_logs. */
+  updateCaseProgress: async (caseId, progress) => {
+    const target = get().cases.find((c) => c.id === caseId)
+    if (!target?.dbId) throw new Error('No se pudo identificar el expediente en el servidor')
+
+    const nextProgress = Math.min(100, Math.max(0, Math.round(Number(progress))))
+    if (!Number.isFinite(nextProgress)) throw new Error('El avance debe ser un numero entre 0 y 100')
+    if (target.progress === nextProgress) return nextProgress
+
+    const previousProgress = target.progress
+    set((s) => ({
+      cases: s.cases.map((c) => (c.id === caseId ? { ...c, progress: nextProgress } : c)),
+    }))
+
+    try {
+      const data = await casesApi.update(target.dbId, { progress: nextProgress })
+      const serverProgress = Number(data.case?.progress ?? nextProgress)
+      set((s) => ({
+        cases: s.cases.map((c) => (c.id === caseId ? { ...c, progress: serverProgress } : c)),
+      }))
+      ok(set)
+      if (get().hasPermission('LOGS_VIEW')) await get().loadActivityLogs()
+      return serverProgress
+    } catch (error) {
+      set((s) => ({
+        cases: s.cases.map((c) => (c.id === caseId ? { ...c, progress: previousProgress } : c)),
+      }))
+      throw error
+    }
   },
 
   /** Carga los expedientes respetando el alcance por ambito del servidor. */
   loadCases: async (filters = {}) => {
     try {
       const data = await casesApi.list({ limit: 60, ...filters })
-      set({ cases: data.cases.map(apiCaseToCase) })
+      set((s) => {
+        const cachedDocs = new Map(s.cases.map((c) => [c.dbId, c.docs]))
+        return {
+          cases: data.cases.map((row) => {
+            const mapped = apiCaseToCase(row)
+            const docs = cachedDocs.get(mapped.dbId)
+            return docs?.length ? { ...mapped, docs } : mapped
+          }),
+        }
+      })
       ok(set)
       return data.cases.length
     } catch (error) {
@@ -759,15 +806,69 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
-  /* --------------------------- DOCUMENTOS RESTRINGIDOS -------------------- */
-  revealDocument: (docId) => {
-    if (!get().revealedDocs.includes(docId)) {
-      set((s) => ({ revealedDocs: [...s.revealedDocs, docId] }))
+  /** Carga la prueba documental de un expediente bajo demanda. */
+  loadCaseDocuments: async (caseDbId) => {
+    try {
+      const data = await casesApi.documents(caseDbId)
+      set((s) => ({
+        cases: s.cases.map((c) =>
+          c.dbId === caseDbId
+            ? { ...c, docs: data.documents.map(apiDocumentToDoc), documentCount: Number(data.total) }
+            : c,
+        ),
+      }))
+      ok(set)
+      return data.total
+    } catch (error) {
+      noteApiFailure(set, error, 'case-documents')
+      return 0
     }
   },
 
+  /* --------------------------- DOCUMENTOS RESTRINGIDOS -------------------- */
+  revealDocument: async (docId, meta = {}) => {
+    if (!get().hasPermission('DOCS_REVEAL')) {
+      throw new Error('Permiso DOCS_REVEAL requerido para revelar documentos restringidos')
+    }
+
+    const container = get().cases.find((c) => c.docs.some((doc) => doc.id === docId))
+    const document = container?.docs.find((doc) => doc.id === docId)
+    if (!container?.dbId || !document?.dbId) {
+      throw new Error('El documento no esta disponible en la lista del expediente')
+    }
+
+    const data = await casesApi.revealDocument(container.dbId, {
+      documentId: document.dbId,
+      justification: meta.justification ?? 'sin justificacion',
+    })
+
+    set((s) => ({
+      revealedDocs: s.revealedDocs.includes(docId) ? s.revealedDocs : [...s.revealedDocs, docId],
+      cases: s.cases.map((c) =>
+        c.dbId === container.dbId
+          ? {
+              ...c,
+              docs: c.docs.map((doc) =>
+                doc.id === docId
+                  ? { ...doc, content: data.document?.content ?? doc.content, revealedAt: new Date().toISOString() }
+                  : doc,
+              ),
+            }
+          : c,
+      ),
+    }))
+    if (get().hasPermission('LOGS_VIEW')) await get().loadActivityLogs()
+    return data
+  },
+
   concealDocument: (docId) =>
-    set((s) => ({ revealedDocs: s.revealedDocs.filter((id) => id !== docId) })),
+    set((s) => ({
+      revealedDocs: s.revealedDocs.filter((id) => id !== docId),
+      cases: s.cases.map((c) => ({
+        ...c,
+        docs: c.docs.map((doc) => (doc.id === docId ? { ...doc, content: null } : doc)),
+      })),
+    })),
 
   /* --------------------------- COMPROBANTES / TOKENS --------------------- */
   issueReceipt: ({ title, subject, logId }) => {
@@ -827,4 +928,4 @@ export const useAppStore = create((set, get) => ({
   },
 }))
 
-export { MAX_ATTEMPTS, PASSWORD_HISTORY_LIMIT, PERMISSIONS, ROLES }
+export { MAX_ATTEMPTS, PASSWORD_HISTORY_LIMIT, PERMISSIONS }

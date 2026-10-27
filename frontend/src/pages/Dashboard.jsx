@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -13,15 +13,8 @@ import FolderFloat from '@/components/reactbits/FolderFloat'
 import ConnectionError from '@/components/ui/ConnectionError'
 import { Badge, Progress, RiskBadge, SectionTitle, StatCard } from '@/components/ui/primitives'
 import { useAppStore } from '@/store/useAppStore'
-import { PERMISSIONS, ROLES } from '@/data/seed'
 import { displayNameFor } from '@/lib/identity'
 import { timeAgo, relativePercent } from '@/lib/format'
-
-function maturityScore(controls) {
-  if (!controls.length) return 0
-  const total = controls.reduce((acc, c) => acc + c.score, 0)
-  return Math.round((total / (controls.length * 5)) * 100)
-}
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -29,20 +22,22 @@ export default function Dashboard() {
   // El panel de inicio resume la ACTIVIDAD de negocio del despacho; los eventos
   // de acceso y control viven en la bitacora de seguridad (solo OSI).
   const logs = useAppStore((s) => s.activityLogs)
-  const riskControls = useAppStore((s) => s.riskControls)
   const rbac = useAppStore((s) => s.rbac)
+  const rbacRoles = useAppStore((s) => s.rbacRoles)
+  const rbacPermissions = useAppStore((s) => s.rbacPermissions)
   const session = useAppStore((s) => s.session)
   const loadCases = useAppStore((s) => s.loadCases)
   const loadActivityLogs = useAppStore((s) => s.loadActivityLogs)
   const loadMatrix = useAppStore((s) => s.loadMatrix)
+  const hasAnyPermission = useAppStore((s) => s.hasAnyPermission)
+  const canViewRbac = hasAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE'])
 
   useEffect(() => {
     loadCases()
     loadActivityLogs()
-    loadMatrix()
-  }, [loadCases, loadActivityLogs, loadMatrix])
+    if (canViewRbac) loadMatrix()
+  }, [loadCases, loadActivityLogs, loadMatrix, canViewRbac])
 
-  const critical = useMemo(() => logs.filter((l) => l.severity === 'critico').length, [logs])
   const seesSecurity = (session?.permissions ?? []).includes('SECURITY_LOGS_VIEW')
   const [recentActivity, setRecentActivity] = useState([])
   
@@ -65,7 +60,8 @@ export default function Dashboard() {
     }
     fetchActivity()
   }, [logs])
-  const displayName = displayNameFor(session?.userId ?? session?.username)
+  // session.userId es el codigo LEG-AAAA-NNNN; el saludo se arma con el username.
+  const displayName = displayNameFor(session?.name ?? session?.username)
 
   return (
     <div className="space-y-6">
@@ -217,31 +213,33 @@ export default function Dashboard() {
           </ul>
         </div>
 
-        <div className="ls-card p-4">
-          <SectionTitle icon={Users2} title="Cobertura por rol" subtitle="Permisos activos tras el ultimo reajuste" />
-          <div className="space-y-3">
-            {ROLES.map((r) => (
-              <div key={r.id}>
-                <div className="mb-1 flex items-center justify-between">
-                  <span className="text-[12px] font-medium">{r.label}</span>
-                  <span className="font-mono text-[10px] text-muted">
-                    {(rbac[r.id] ?? []).length}/{PERMISSIONS.length}
-                  </span>
+        {canViewRbac && (
+          <div className="ls-card p-4">
+            <SectionTitle icon={Users2} title="Cobertura por rol" subtitle="Permisos activos tras el ultimo reajuste" />
+            <div className="space-y-3">
+              {rbacRoles.map((r) => (
+                <div key={r.code}>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-[12px] font-medium">{r.name}</span>
+                    <span className="font-mono text-[10px] text-muted">
+                      {(rbac[r.code] ?? []).length}/{rbacPermissions.length}
+                    </span>
+                  </div>
+                  <Progress
+                    value={rbac[r.code]?.length ?? 0}
+                    max={rbacPermissions.length}
+                    tone={r.code === 'osi' ? 'pastel' : 'accent'}
+                  />
                 </div>
-                <Progress
-                  value={rbac[r.id]?.length ?? 0}
-                  max={PERMISSIONS.length}
-                  tone={r.id === 'osi' ? 'pastel' : 'accent'}
-                />
-              </div>
-            ))}
+              ))}
+            </div>
+            {seesSecurity && (
+              <Link to="/roles" className="ls-btn-secondary mt-4 w-full text-xs">
+                Ajustar matriz RBAC
+              </Link>
+            )}
           </div>
-          {seesSecurity && (
-            <Link to="/roles" className="ls-btn-secondary mt-4 w-full text-xs">
-              Ajustar matriz RBAC
-            </Link>
-          )}
-        </div>
+        )}
       </section>
     </div>
   )

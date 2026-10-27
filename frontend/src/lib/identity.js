@@ -47,7 +47,8 @@ const DISPLAY_NAMES = {
 
 export function displayNameFor(username) {
   const token = String(username ?? '').trim().toLowerCase()
-  const normalized = token.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, '')
+  // El punto se conserva: las claves de DISPLAY_NAMES son "nombre.apellido".
+  const normalized = token.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9. ]/g, '')
   const known = Object.keys(DISPLAY_NAMES).find((key) => key === normalized)
   if (known) return DISPLAY_NAMES[known]
   const parts = token

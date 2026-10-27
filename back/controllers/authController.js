@@ -9,10 +9,14 @@ const {
 } = require('../services/authService')
 const { record } = require('../services/auditService')
 const { notifyUser, NOTICE } = require('../services/notificationService')
-const { hashOtp, otpMatches, OTP_PATTERN, MAX_OTP_ATTEMPTS } = require('../utils/unlockToken')
+const { hashOtp, otpMatches, OTP_PATTERN, MAX_OTP_ATTEMPTS, MAX_RESET_ATTEMPTS } = require('../utils/unlockToken')
+const { assertPasswordNotReused, pushPasswordHistory } = require('../utils/passwordHistory')
 const { getClientIp } = require('../utils/helpers')
+const { setRefreshCookie, clearRefreshCookie, readRefreshCookie } = require('../utils/refreshCookie')
+const { issueChallenge, verifyChallenge } = require('../utils/captcha')
+const ghostAttempts = require('../utils/ghostAttempts')
 const { badRequest, conflict, forbidden, notFound, unauthorized, unprocessable } = require('../utils/errors')
-const { PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
+const { evaluatePassword, PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
 const {
   USER_CODE_RE,
   USER_CODE_CI_RE,
@@ -37,7 +41,84 @@ const LOCK_MESSAGE = '3 de 3 - Cuenta inhabilitada temporalmente'
 const LOCK_OSI_MESSAGE = 'Cuenta bloqueada por reincidencia. Requiere desbloqueo del Oficial de Seguridad'
 /** Unico mensaje para todo rechazo del OTP: el motivo real solo va a security_logs. */
 const UNLOCK_TOKEN_REJECTED = 'Token de desbloqueo invalido, expirado o agotado. Solicite uno nuevo al Oficial de Seguridad'
+/** Unico mensaje para todo rechazo del token de reinicio: el motivo real solo va a security_logs. */
+const RESET_TOKEN_REJECTED = 'Token de reinicio invalido, expirado o agotado. Solicite uno nuevo al Oficial de Seguridad'
 const CAPTCHA_THRESHOLD = Number(process.env.CAPTCHA_THRESHOLD || 1)
+/** Edad maxima de la clave en dias; un valor invalido vuelve al predeterminado de 90. */
+const configuredMaxAge = Number(process.env.PASSWORD_MAX_AGE_DAYS)
+const PASSWORD_MAX_AGE_DAYS = process.env.PASSWORD_MAX_AGE_DAYS && configuredMaxAge >= 0 ? configuredMaxAge : 90
+
+/**
+ * Cuerpos de respuesta compartidos por cuentas reales e identificadores
+ * inexistentes: usar el mismo constructor garantiza que ambos casos respondan
+ * identico (CWE-204, enumeracion de cuentas).
+ */
+function lockedBody({ requiresOsi, remainingSeconds, failedAttempts }) {
+  if (requiresOsi) {
+    return {
+      message: LOCK_OSI_MESSAGE,
+      error: LOCK_OSI_MESSAGE,
+      isLocked: true,
+      locked: true,
+      requiresOsi: true,
+      remainingSeconds: null,
+      failedAttempts,
+      maxAttempts: MAX_FAILED_ATTEMPTS,
+      showCaptcha: false,
+      details: { isLocked: true, requiresOsi: true, remainingSeconds: null },
+    }
+  }
+  return {
+    message: LOCK_MESSAGE,
+    error: LOCK_MESSAGE,
+    isLocked: true,
+    requiresOsi: false,
+    remainingSeconds,
+    locked: true,
+    failedAttempts,
+    maxAttempts: MAX_FAILED_ATTEMPTS,
+    showCaptcha: false,
+    details: { isLocked: true, remainingSeconds, locked: true, failedAttempts },
+  }
+}
+
+function failureBody({ failedAttempts, lockedNow, requiresOsi, remainingSeconds }) {
+  const lockMessage = requiresOsi ? LOCK_OSI_MESSAGE : LOCK_MESSAGE
+  return {
+    message: lockedNow ? lockMessage : 'Credencial inválida',
+    error: lockedNow ? lockMessage : 'Credencial inválida',
+    failedAttempts,
+    maxAttempts: MAX_FAILED_ATTEMPTS,
+    locked: lockedNow,
+    isLocked: lockedNow,
+    requiresOsi,
+    remainingSeconds,
+    showCaptcha: !lockedNow && failedAttempts >= CAPTCHA_THRESHOLD,
+    details: { failedAttempts, maxAttempts: MAX_FAILED_ATTEMPTS, locked: lockedNow, isLocked: lockedNow, requiresOsi, remainingSeconds },
+  }
+}
+
+/** Politica de backoff que el contador de identificadores inexistentes replica. */
+const GHOST_POLICY = {
+  maxAttempts: MAX_FAILED_ATTEMPTS,
+  hardThreshold: LOCK_HARD_THRESHOLD,
+  lockMinutes: LOCK_MINUTES,
+  lockMinutesSecond: LOCK_MINUTES_SECOND,
+}
+
+/** Hash de relleno: iguala el costo de bcrypt cuando el usuario no existe (CWE-208). */
+const DUMMY_HASH = bcrypt.hashSync('relleno-sin-usuario', BCRYPT_ROUNDS)
+
+/** Anula el token de reinicio vigente (vencido o agotado) solo si sigue siendo el leido. */
+async function invalidateResetToken(userId, expectedHash) {
+  await query(
+    `UPDATE users
+        SET reset_token = NULL, reset_token_expires_at = NULL,
+            reset_token_used = TRUE, reset_token_attempts = 0
+      WHERE id = ? AND reset_token = ?`,
+    [userId, expectedHash],
+  )
+}
 
 /** Segundos restantes del bloqueo persistido en MySQL (locked_until). */
 function remainingSecondsFrom(lockedUntil, sqlSeconds) {
@@ -131,6 +212,7 @@ async function login(req, res) {
     `SELECT u.id, u.user_code, u.username, u.email, u.role_id, u.password_hash,
             u.failed_attempts, u.is_locked, u.status, u.locked_until, u.is_active,
             u.lock_count, u.password_updated_at, u.must_change_password,
+            TIMESTAMPDIFF(SECOND, u.password_updated_at, NOW()) AS password_age_seconds,
             TIMESTAMPDIFF(SECOND, NOW(), u.locked_until) AS remaining_seconds,
             r.code AS role_code, r.name AS role_name
        FROM users u JOIN roles r ON r.id = u.role_id
@@ -138,28 +220,53 @@ async function login(req, res) {
     [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
   )
 
-  // Respuesta uniforme para usuario inexistente y clave incorrecta: no revela
-  // que User IDs existen en el directorio (enumeracion de cuentas).
-  const genericError = unauthorized('User ID o contrasena incorrectos')
-
-  if (!user) {
-    record('AUTH_FAILED', { userCode: identifier, req, details: { reason: 'usuario_no_existe', ip } })
-    throw genericError
-  }
-
-  // La baja logica y el bloqueo se evaluan ANTES del CAPTCHA: una cuenta
-  // inhabilitada responde siempre con su estado (cuenta regresiva o LOCKED_OSI)
-  // y un CAPTCHA ausente no incrementa failed_attempts sobre una cuenta bloqueada.
-
-  // 0. Baja logica: la cuenta fue desactivada por un administrador (ABM /users).
-  if (!user.is_active || user.status === 'DISABLED') {
-    record('AUTH_DISABLED', {
-      userCode: user.user_code,
+  // Respuesta uniforme para usuario inexistente, cuenta desactivada y clave
+  // incorrecta: no revela que User IDs existen en el directorio (enumeracion de
+  // cuentas). El identificador inexistente o desactivado sigue el mismo ciclo que
+  // una cuenta real (contador, CAPTCHA y bloqueo) con un estado en memoria; el
+  // motivo real solo queda en security_logs.
+  const disabled = Boolean(user) && (!user.is_active || user.status === 'DISABLED')
+  if (!user || disabled) {
+    const reason = disabled ? 'usuario_desactivado' : 'usuario_no_existe'
+    const auditCode = disabled ? user.user_code : identifier
+    const ghostKey = identifier.toLowerCase()
+    const state = ghostAttempts.peek(ghostKey)
+    if (state.locked) {
+      record('AUTH_LOCKED', {
+        userCode: auditCode,
+        req,
+        details: { reason, remainingSeconds: state.remainingSeconds, ip },
+      })
+      return res.status(401).json(lockedBody({
+        requiresOsi: state.requiresOsi,
+        remainingSeconds: state.remainingSeconds,
+        failedAttempts: state.failed,
+      }))
+    }
+    if (state.failed >= CAPTCHA_THRESHOLD && !verifyChallenge(captchaToken, captchaResponse)) {
+      ghostAttempts.addFailure(ghostKey)
+      record('AUTH_FAILED', { userCode: auditCode, req, details: { reason, ip } })
+      throw unauthorized('Validación CAPTCHA requerida o incorrecta')
+    }
+    await bcrypt.compare(password, DUMMY_HASH)
+    const after = ghostAttempts.registerFailure(ghostKey, GHOST_POLICY)
+    record(after.locked ? 'LOGIN_LOCKED' : (disabled ? 'AUTH_DISABLED' : 'AUTH_FAILED'), {
+      userCode: auditCode,
       req,
-      details: { reason: 'usuario_desactivado', ip },
+      details: { reason, ip },
     })
-    throw forbidden('La cuenta esta desactivada. Contacte al administrador del despacho')
+    return res.status(401).json(failureBody({
+      failedAttempts: after.failed,
+      lockedNow: after.locked,
+      requiresOsi: after.requiresOsi,
+      remainingSeconds: after.remainingSeconds,
+    }))
   }
+
+  // El bloqueo se evalua ANTES del CAPTCHA: una cuenta inhabilitada responde
+  // siempre con su estado (cuenta regresiva o LOCKED_OSI) y un CAPTCHA ausente no
+  // incrementa failed_attempts sobre una cuenta bloqueada. La baja logica ya se
+  // atendio arriba con la respuesta uniforme.
 
   // 1. Bloqueo temporal persistido en MySQL: si NOW() < locked_until se informa
   //    el tiempo restante exacto; si ya vencio, la cuenta se libera sola.
@@ -172,18 +279,11 @@ async function login(req, res) {
         req,
         details: { reason: 'intento_sobre_bloqueo_indefinido', requiresOsi: true, ip },
       })
-      return res.status(401).json({
-        message: LOCK_OSI_MESSAGE,
-        error: LOCK_OSI_MESSAGE,
-        isLocked: true,
-        locked: true,
+      return res.status(401).json(lockedBody({
         requiresOsi: true,
         remainingSeconds: null,
         failedAttempts: Number(user.failed_attempts),
-        maxAttempts: MAX_FAILED_ATTEMPTS,
-        showCaptcha: false,
-        details: { isLocked: true, requiresOsi: true, remainingSeconds: null },
-      })
+      }))
     }
 
     const remainingSeconds = remainingSecondsFrom(user.locked_until, user.remaining_seconds)
@@ -194,18 +294,11 @@ async function login(req, res) {
         req,
         details: { reason: 'intento_sobre_cuenta_bloqueada', remainingSeconds, ip },
       })
-    return res.status(401).json({
-       message: LOCK_MESSAGE,
-       error: LOCK_MESSAGE,
-       isLocked: true,
-       requiresOsi: false,
-       remainingSeconds,
-       locked: true,
-       failedAttempts: Number(user.failed_attempts),
-       maxAttempts: MAX_FAILED_ATTEMPTS,
-       showCaptcha: false,
-       details: { isLocked: true, remainingSeconds, locked: true, failedAttempts: Number(user.failed_attempts) },
-    })
+      return res.status(401).json(lockedBody({
+        requiresOsi: false,
+        remainingSeconds,
+        failedAttempts: Number(user.failed_attempts),
+      }))
     }
 
     await releaseExpiredLock(user.id)
@@ -220,9 +313,9 @@ async function login(req, res) {
 
   // Validación CAPTCHA si hay intentos fallidos previos (Mecanismo Menos Común)
   if (Number(user.failed_attempts) >= CAPTCHA_THRESHOLD) {
-    const expected = String(captchaToken ?? '').trim()
-    const provided = String(captchaResponse ?? '').trim()
-    if (!provided || provided !== expected) {
+    // El desafio lo emite y firma el servidor (GET /auth/captcha): el cliente
+    // solo devuelve el token recibido y su respuesta.
+    if (!verifyChallenge(captchaToken, captchaResponse)) {
       await query(
         `UPDATE users
             SET failed_attempts = failed_attempts + 1
@@ -292,7 +385,6 @@ async function login(req, res) {
     let remainingSeconds = 0
     if (requiresOsi) remainingSeconds = null
     else if (lockedNow) remainingSeconds = Math.max(0, Number(updated.remaining_seconds ?? LOCK_MINUTES * 60))
-    const lockMessage = requiresOsi ? LOCK_OSI_MESSAGE : LOCK_MESSAGE
 
     // 3. Al alcanzar el umbral -> cuenta bloqueada + evento LOGIN_LOCKED en bitacora
     //    y aviso al titular (ISO 27001 A.5.26), que puede detectar un ataque ajeno.
@@ -320,18 +412,7 @@ async function login(req, res) {
 
     // 401 uniforme con el contador real. Al bloquear se anexa isLocked y el
     // tiempo restante para que el frontend inicie su cuenta regresiva exacta.
-    return res.status(401).json({
-       message: lockedNow ? lockMessage : 'Credencial inválida',
-       error: lockedNow ? lockMessage : 'Credencial inválida',
-       failedAttempts,
-       maxAttempts: MAX_FAILED_ATTEMPTS,
-       locked: lockedNow,
-       isLocked: lockedNow,
-       requiresOsi,
-       remainingSeconds,
-       showCaptcha: !lockedNow && failedAttempts >= CAPTCHA_THRESHOLD,
-       details: { failedAttempts, maxAttempts: MAX_FAILED_ATTEMPTS, locked: lockedNow, isLocked: lockedNow, requiresOsi, remainingSeconds },
-    })
+    return res.status(401).json(failureBody({ failedAttempts, lockedNow, requiresOsi, remainingSeconds }))
   }
 
   // 4. Credencial correcta -> reinicia los contadores (tambien los bloqueos
@@ -349,7 +430,15 @@ async function login(req, res) {
   const permissions = await loadPermissions(user.id)
   const accessToken = signAccessToken(user, permissions)
   const refreshToken = signRefreshToken(user)
-  const mustChangePassword = Boolean(user.must_change_password)
+  let mustChangePassword = Boolean(user.must_change_password)
+
+  // Caducidad de la clave (ISO 27001 A.5.17): al superar la edad maxima la sesion
+  // queda limitada al cambio de clave; se persiste para que el middleware lo aplique.
+  const passwordExpired = Number(user.password_age_seconds) > PASSWORD_MAX_AGE_DAYS * 86400
+  if (passwordExpired && !mustChangePassword) {
+    await query('UPDATE users SET must_change_password = TRUE WHERE id = ?', [user.id])
+    mustChangePassword = true
+  }
 
   record('AUTH_SUCCESS', {
     userCode: user.user_code,
@@ -361,14 +450,15 @@ async function login(req, res) {
     record('PASSWORD_CHANGE_REQUIRED', {
       userCode: user.user_code,
       req,
-      details: { reason: 'clave_inicial_pendiente', ip },
+      details: { reason: passwordExpired ? 'clave_vencida' : 'clave_inicial_pendiente', ip },
     })
   }
 
+  // El refresh token viaja solo en cookie HttpOnly: nunca en el cuerpo JSON.
+  setRefreshCookie(res, refreshToken)
   res.json({
     message: 'Acceso concedido',
     token: accessToken,
-    refreshToken,
     expiresIn: process.env.JWT_EXPIRES_IN || '45m',
     user: {
       id: user.id,
@@ -385,7 +475,17 @@ async function login(req, res) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* POST /api/auth/lock-status                                                  */
+/* GET /api/auth/captcha                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** Emite un desafio aritmetico firmado por el servidor. */
+async function captcha(_req, res) {
+  res.set('Cache-Control', 'no-store')
+  res.json(issueChallenge())
+}
+
+/* -------------------------------------------------------------------------- */
+/* POST /api/auth/lock-status                                                 */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -401,12 +501,24 @@ async function lockStatus(req, res) {
   }
 
   const user = await one(
-    `SELECT id, failed_attempts, is_locked, status, locked_until,
+    `SELECT id, failed_attempts, is_locked, is_active, status, locked_until,
             TIMESTAMPDIFF(SECOND, NOW(), locked_until) AS remaining_seconds
        FROM users
       WHERE username = ? OR email = ? OR user_code = ?`,
     [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
   )
+
+  // Identificador inexistente o cuenta desactivada: mismo estado simulado que usa el login.
+  if (!user || !user.is_active || user.status === 'DISABLED') {
+    const state = ghostAttempts.peek(identifier.toLowerCase())
+    if (state.requiresOsi) {
+      return res.json({ isLocked: true, requiresOsi: true, remainingSeconds: null, failedAttempts: state.failed, message: LOCK_OSI_MESSAGE })
+    }
+    if (state.locked) {
+      return res.json({ isLocked: true, requiresOsi: false, remainingSeconds: state.remainingSeconds, failedAttempts: state.failed, message: LOCK_MESSAGE })
+    }
+    return res.json({ isLocked: false, requiresOsi: false, remainingSeconds: 0, failedAttempts: state.failed })
+  }
 
   // Bloqueo indefinido: locked_until es NULL, asi que no hay cuenta regresiva y
   // la cuenta NO se libera sola (solo la levanta el OSI o un OTP valido).
@@ -502,16 +614,23 @@ async function unlock(req, res) {
 
 async function refresh(req, res) {
   const { rotateRefreshToken } = require('../services/authService')
-  const { refreshToken } = req.body ?? {}
-  if (!refreshToken) throw badRequest('Falta refreshToken')
+  // Sin cookie, o con una invalida, el mismo 401: el cliente vuelve a /login.
+  const refreshToken = readRefreshCookie(req)
+  if (!refreshToken) throw unauthorized('Sesion no disponible')
 
-  const result = await rotateRefreshToken(refreshToken)
+  let result
+  try {
+    result = await rotateRefreshToken(refreshToken)
+  } catch (error) {
+    clearRefreshCookie(res)
+    throw error
+  }
   record('TOKEN_REFRESH', { userCode: result.user.user_code, req })
 
+  setRefreshCookie(res, result.refreshToken)
   res.json({
     message: 'Sesion renovada',
     token: result.accessToken,
-    refreshToken: result.refreshToken,
     user: {
       id: result.user.id,
       userCode: result.user.user_code,
@@ -545,7 +664,10 @@ async function me(req, res) {
  * en la bitacora: la revocacion real exige lista de tokens o TTL corto.
  */
 async function logout(req, res) {
-  record('LOGOUT', { userCode: req.user?.user_code ?? null, req })
+  // Sin sesion valida solo se borra la cookie: no se escribe en la bitacora.
+  if (req.user) record('LOGOUT', { userCode: req.user.user_code, req })
+  // El navegador no adjunta la cookie a esta ruta (Path de refresh): solo se borra.
+  clearRefreshCookie(res)
   res.json({ message: 'Sesion cerrada', userCode: req.user?.user_code ?? null })
 }
 
@@ -682,9 +804,141 @@ async function verifyUnlockToken(req, res) {
   res.json({ message: 'Cuenta desbloqueada. Inicie sesion con su contrasena habitual' })
 }
 
+/* -------------------------------------------------------------------------- */
+/* POST /api/auth/reset-password                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Reinicio de clave con el token que emitio el OSI. El titular define la clave: el
+ * OSI nunca la conoce.
+ *   · Todo rechazo del token es el mismo 401 (CWE-204); el motivo real solo queda en
+ *     security_logs. La politica de claves no depende del token y responde 422.
+ *   · Limite de intentos por token reservado con UPDATE condicional (CWE-307/362) y
+ *     HMAC con contexto "reset:" comparado en tiempo constante (CWE-208).
+ *   · Una clave del historial responde 422 sin consumir el token ni el intento.
+ *   · Al reiniciar tambien se levanta el bloqueo: quien olvido la clave suele estar
+ *     bloqueado y el token ya prueba la intervencion del OSI.
+ */
+async function resetPassword(req, res) {
+  const token = String(req.body?.token ?? '').trim()
+  const newPassword = req.body?.newPassword
+  const identifier = normalizeLoginIdentifier(req.body?.userCode ?? req.body?.identifier ?? req.body?.email)
+  const ip = getClientIp(req)
+
+  if (!identifier || !OTP_PATTERN.test(token) || typeof newPassword !== 'string' || newPassword.length === 0) {
+    throw badRequest('Debe enviar el User ID, un token de 6 digitos y la nueva contrasena')
+  }
+
+  const policy = evaluatePassword(newPassword)
+  if (!policy.valid) {
+    throw unprocessable('La nueva contrasena no cumple la politica de seguridad', {
+      failed: policy.failed,
+      rules: policy.rules.map(({ id, label }) => ({ id, label })),
+    })
+  }
+
+  const user = await one(
+    `SELECT id, user_code, is_active, reset_token, reset_token_expires_at,
+            reset_token_used, reset_token_attempts
+       FROM users WHERE username = ? OR email = ? OR user_code = ?`,
+    [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
+  )
+
+  const reject = (action, reason, extra = {}) => {
+    record(action, { userCode: user?.user_code ?? null, req, details: { reason, ip, ...extra } })
+    return unauthorized(RESET_TOKEN_REJECTED)
+  }
+
+  if (!user) {
+    hashOtp(0, token, 'reset:') // iguala el costo de la respuesta
+    throw reject('PASSWORD_RESET_FAILED', 'usuario_inexistente', { identifier })
+  }
+  if (!user.is_active) throw reject('PASSWORD_RESET_FAILED', 'cuenta_inactiva')
+  if (!user.reset_token || user.reset_token_used) {
+    throw reject('PASSWORD_RESET_FAILED', 'sin_token')
+  }
+  if (!user.reset_token_expires_at || new Date(user.reset_token_expires_at) < new Date()) {
+    await invalidateResetToken(user.id, user.reset_token)
+    throw reject('PASSWORD_RESET_FAILED', 'expirado')
+  }
+
+  // Reserva atomica del intento ANTES de comparar (misma tecnica que el OTP de desbloqueo).
+  const attempt = await withTransaction(async (client) => {
+    const reserved = await client.query(
+      `UPDATE users SET reset_token_attempts = reset_token_attempts + 1
+        WHERE id = ? AND reset_token = ? AND reset_token_attempts < ?`,
+      [user.id, user.reset_token, MAX_RESET_ATTEMPTS],
+    )
+    if (reserved.affectedRows !== 1) return null
+    const { rows: current } = await client.query(
+      'SELECT reset_token_attempts AS attempt FROM users WHERE id = ?',
+      [user.id],
+    )
+    return Number(current[0].attempt)
+  })
+  if (attempt === null) {
+    await invalidateResetToken(user.id, user.reset_token)
+    throw reject('PASSWORD_RESET_EXHAUSTED', 'limite_alcanzado', { maxAttempts: MAX_RESET_ATTEMPTS })
+  }
+
+  if (!otpMatches(user.id, token, user.reset_token, 'reset:')) {
+    if (attempt >= MAX_RESET_ATTEMPTS) {
+      await invalidateResetToken(user.id, user.reset_token)
+      throw reject('PASSWORD_RESET_EXHAUSTED', 'limite_alcanzado', { attempt, maxAttempts: MAX_RESET_ATTEMPTS })
+    }
+    throw reject('PASSWORD_RESET_FAILED', 'token_incorrecto', { attempt, maxAttempts: MAX_RESET_ATTEMPTS })
+  }
+
+  // Token correcto: una clave repetida no quema el token ni el intento.
+  try {
+    await assertPasswordNotReused(user.id, newPassword)
+  } catch (error) {
+    await query(
+      `UPDATE users SET reset_token_attempts = GREATEST(reset_token_attempts - 1, 0)
+        WHERE id = ? AND reset_token = ?`,
+      [user.id, user.reset_token],
+    )
+    record('PASSWORD_RESET_FAILED', { userCode: user.user_code, req, details: { reason: 'clave_reutilizada', ip } })
+    throw error
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
+
+  const consumed = await withTransaction(async (client) => {
+    // Consumo atomico de un solo uso: solo gana la peticion que aun ve el mismo hash.
+    const updated = await client.query(
+      `UPDATE users
+          SET password_hash = ?, password_updated_at = now(), must_change_password = FALSE,
+              is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0, lock_count = 0,
+              locked_at = NULL, locked_until = NULL,
+              unlock_token = NULL, unlock_token_expires_at = NULL,
+              unlock_token_used = FALSE, unlock_token_attempts = 0,
+              reset_token = NULL, reset_token_expires_at = NULL,
+              reset_token_used = TRUE, reset_token_attempts = 0
+        WHERE id = ? AND reset_token = ?`,
+      [passwordHash, user.id, user.reset_token],
+    )
+    if (updated.affectedRows !== 1) return false
+    await pushPasswordHistory(client, user.id, passwordHash)
+    return true
+  })
+  if (!consumed) throw reject('PASSWORD_RESET_FAILED', 'consumo_concurrente')
+
+  await notifyUser(user.id, NOTICE.PASSWORD_RESET_DONE(ip))
+  record('PASSWORD_RESET', {
+    userCode: user.user_code,
+    req,
+    details: { ip, attempt, historyLimit: PASSWORD_HISTORY_LIMIT },
+  })
+
+  res.json({ message: 'Contrasena restablecida. Inicie sesion con su nueva contrasena' })
+}
+
   module.exports = {
   register,
+  resetPassword,
   login,
+  captcha,
   unlock,
   lockStatus,
   refresh,

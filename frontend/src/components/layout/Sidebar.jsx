@@ -17,7 +17,6 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useAppStore } from '@/store/useAppStore'
-import { ROLES } from '@/data/seed'
 import { toast } from '@/store/toastStore'
 import EffectsToggle from '@/components/ui/EffectsToggle'
 
@@ -96,7 +95,6 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
   const hasAnyPermission = useAppStore((s) => s.hasAnyPermission)
   const logout = useAppStore((s) => s.logout)
 
-  const roleMeta = ROLES.find((r) => r.id === session?.role)
   // Cada modulo exige al menos uno de los permisos indicados (segregacion OSI).
   const permissionMap = {
     '/users': ['USERS_READ', 'USERS_MANAGE'],
@@ -202,7 +200,7 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[12.5px] font-semibold">{session?.name ?? 'Sin sesion'}</p>
                 <p className="truncate font-mono text-[10px] text-muted">
-                  {roleMeta?.label ?? session?.role} · {session?.userId}
+                  {session?.roleLabel ?? session?.role} · {session?.userId}
                 </p>
               </div>
             )}

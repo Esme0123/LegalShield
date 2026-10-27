@@ -21,9 +21,11 @@
 
 require('dotenv').config()
 
+const crypto = require('crypto')
 const mysql = require('mysql2/promise')
 const bcrypt = require('bcryptjs')
 const { logger } = require('../utils/logger')
+const { RBAC_MATRIX } = require('../config/rbacBaseline')
 
 const DB_NAME = process.env.DB_NAME || 'legalshield_db'
 const DB_HOST = process.env.DB_HOST || 'localhost'
@@ -92,6 +94,10 @@ const TABLES = [
      unlock_token_expires_at DATETIME,
      unlock_token_used   BOOLEAN NOT NULL DEFAULT FALSE,
      unlock_token_attempts INT NOT NULL DEFAULT 0,
+     reset_token         CHAR(64) NULL DEFAULT NULL,
+     reset_token_expires_at DATETIME,
+     reset_token_used    BOOLEAN NOT NULL DEFAULT FALSE,
+     reset_token_attempts INT NOT NULL DEFAULT 0,
      created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT,
@@ -135,6 +141,27 @@ const TABLES = [
      INDEX idx_cases_lawyer (assigned_lawyer_id),
      INDEX idx_cases_status (status),
      INDEX idx_cases_created (created_at DESC)
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  // 3.6b case_documents · prueba documental del expediente. El contenido
+  //      sensible solo se entrega con DOCS_REVEAL via endpoint de revelacion.
+  `CREATE TABLE IF NOT EXISTS case_documents (
+     id             INT AUTO_INCREMENT PRIMARY KEY,
+     case_id        INT NOT NULL,
+     document_code  VARCHAR(40)  NOT NULL UNIQUE,
+     filename       VARCHAR(200) NOT NULL,
+     classification VARCHAR(30)  NOT NULL DEFAULT 'Publica',
+     is_privileged  BOOLEAN      NOT NULL DEFAULT FALSE,
+     mime_type      VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+     page_count     INT          NOT NULL DEFAULT 1,
+     checksum       CHAR(64),
+     content        LONGTEXT,
+     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     CONSTRAINT fk_docs_case FOREIGN KEY (case_id) REFERENCES legal_cases(id) ON DELETE CASCADE,
+     CONSTRAINT chk_doc_classification CHECK (classification IN ('Publica', 'Uso interno', 'Restringida', 'Confidencial')),
+     CONSTRAINT chk_doc_pages CHECK (page_count >= 1),
+     INDEX idx_docs_case (case_id),
+     INDEX idx_docs_privileged (case_id, is_privileged)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
   // 3.7 security_logs · eventos de acceso y control (ciberseguridad), visibles
@@ -223,11 +250,12 @@ const ROLES = [
 ]
 
 const PERMISSIONS = [
-  // Catalogo atomico (21) replicando PERMISSIONS del frontend (seed.js).
+  // Catalogo atomico (22) replicando PERMISSIONS del frontend (seed.js).
   ['CASES_CREATE', 'Crear expedientes'],
   ['CASES_READ', 'Leer expedientes'],
   ['CASES_WRITE', 'Editar expedientes'],
   ['CASES_ARCHIVE', 'Archivar expedientes'],
+  ['CASES_READ_ALL', 'Ver y operar todos los expedientes del despacho (alcance transversal)'],
   ['DOCS_REVEAL', 'Revelar documentos restringidos'],
   ['DOCS_DOWNLOAD', 'Descargar documentos'],
   ['LOGS_VIEW', 'Ver logs de aplicacion (actividad del despacho)'],
@@ -247,30 +275,6 @@ const PERMISSIONS = [
   ['ACCOUNT_UNLOCK', 'Desbloquear cuentas inhabilitadas temporalmente'],
   ['SECURITY_LOGS_VIEW', 'Ver la bitacora de seguridad (eventos de acceso y control)'],
 ]
-
-/**
- * Matriz estricta de segregacion de funciones:
- *   · OSI      -> ABM de usuarios, gestion de roles, desbloqueo y logs de seguridad.
- *   · Socio    -> expedientes, metricas del despacho y logs de aplicacion.
- *   · Abogado/Asistente/Cliente -> permisos operacionales sobre sus expedientes.
- */
-const RBAC_MATRIX = {
-  osi: [
-    'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
-    'USERS_UNLOCK', 'ACCOUNT_UNLOCK',
-    'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
-    'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT',
-    'CASES_READ',
-  ],
-  socio: [
-    'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE',
-    'DOCS_REVEAL', 'DOCS_DOWNLOAD',
-    'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS',
-  ],
-  abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT', 'RISK_ASSESS'],
-  asistente: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'],
-  cliente: ['CASES_READ'],
-}
 
 /** Catalogos obsoletos del seed previo: se limpian para alinear la matriz. */
 const OBSOLETE_PERMISSIONS = ['CASES_UPDATE']
@@ -322,15 +326,6 @@ const DEMO_USERS = [
     department: 'Externo',
     phone: '+591 3 228 4419',
   },
-  {
-    userCode: 'LEG-2026-0000',
-    username: 'admin',
-    email: 'admin@legalshield.bo',
-    role: 'socio',
-    firm: 'LegalShield Bufetes',
-    department: 'Super Administracion',
-    phone: '+591 2 000 0000',
-  },
 ]
 
 const DEMO_CASES = [
@@ -366,7 +361,7 @@ const DEMO_CASES = [
     caseNumber: 'EXP-2026-0033',
     title: 'Derecho de peticion · Ministerio de Salud',
     clientName: 'Redaccion Norte (periodista)',
-    lawyerCode: 'LEG-2026-0277',
+    lawyerCode: 'LEG-2026-0142',
     status: 'en_tramite',
     matter: 'Administrativo',
     court: 'Ministerio de Salud',
@@ -403,6 +398,145 @@ const DEMO_CASES = [
     progress: 71,
     deadline: '2026-10-27',
     isPrivileged: false,
+  },
+]
+
+/** Prueba documental de demostracion: 2 publicos + 1 privilegiado por expediente. */
+const DEMO_DOCUMENTS = [
+  {
+    caseNumber: 'EXP-2026-0014',
+    code: 'DOC-2026-0014-01',
+    filename: 'Peticion_Formal.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 6,
+    content: 'Peticion formal presentada ante el Juzgado 12 Laboral de Bogota. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0014',
+    code: 'DOC-2026-0014-02',
+    filename: 'Poder_Representacion.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 3,
+    content: 'Poder notarial otorgado a la firma para representar a Metalurgia Andes S.A.S. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0014',
+    code: 'DOC-2026-0014-03',
+    filename: 'Dictamen_Estrategico_Secreto.pdf',
+    classification: 'Confidencial',
+    isPrivileged: true,
+    pages: 18,
+    content: 'Dictamen reservado sobre la estrategia probatoria y exposicion patrimonial. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0021',
+    code: 'DOC-2026-0021-01',
+    filename: 'Demanda_Nulidad.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 22,
+    content: 'Demanda de nulidad contractual presentada ante el Tribunal Superior. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0021',
+    code: 'DOC-2026-0021-02',
+    filename: 'Poder_Representacion.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 4,
+    content: 'Poder especial para actuar en el proceso de nulidad contractual. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0021',
+    code: 'DOC-2026-0021-03',
+    filename: 'Auditoria_Financiera.pdf',
+    classification: 'Confidencial',
+    isPrivileged: true,
+    pages: 31,
+    content: 'Auditoria financiera reservada del consorcio y analisis de riesgo de credito. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0033',
+    code: 'DOC-2026-0033-01',
+    filename: 'Peticion_Formal.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 5,
+    content: 'Derecho de peticion radicado ante el Ministerio de Salud. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0033',
+    code: 'DOC-2026-0033-02',
+    filename: 'Acuse_Recibido.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 2,
+    content: 'Acuse de recibo y constancia de radicacion ministerial. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0033',
+    code: 'DOC-2026-0033-03',
+    filename: 'Informe_Reservado_Prensa.pdf',
+    classification: 'Confidencial',
+    isPrivileged: true,
+    pages: 12,
+    content: 'Informe reservado sobre fuentes periodisticas y proteccion de identidad. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0047',
+    code: 'DOC-2026-0047-01',
+    filename: 'Solicitud_Sucesion.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 8,
+    content: 'Solicitud de apertura del proceso de sucesion intestada. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0047',
+    code: 'DOC-2026-0047-02',
+    filename: 'Poder_Representacion.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 3,
+    content: 'Poder de representacion de los herederos reconocidos. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0047',
+    code: 'DOC-2026-0047-03',
+    filename: 'Avaluo_Patrimonial_Confidencial.pdf',
+    classification: 'Confidencial',
+    isPrivileged: true,
+    pages: 26,
+    content: 'Avaluo patrimonial reservado de bienes relictos y pasivos declarados. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0058',
+    code: 'DOC-2026-0058-01',
+    filename: 'Solicitud_Registro_Marca.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 7,
+    content: 'Solicitud de registro de marca presentada ante la SIC. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0058',
+    code: 'DOC-2026-0058-02',
+    filename: 'Poder_Representacion.pdf',
+    classification: 'Publica',
+    isPrivileged: false,
+    pages: 4,
+    content: 'Poder para tramitar la oposicion y el registro marcario. Documento de demostracion.',
+  },
+  {
+    caseNumber: 'EXP-2026-0058',
+    code: 'DOC-2026-0058-03',
+    filename: 'Dictamen_Colision_Marcaria.pdf',
+    classification: 'Confidencial',
+    isPrivileged: true,
+    pages: 19,
+    content: 'Dictamen reservado sobre riesgo de confusion y estrategia de defensa marcaria. Documento de demostracion.',
   },
 ]
 
@@ -539,6 +673,24 @@ async function main() {
     await run('ALTER TABLE users ADD COLUMN unlock_token_attempts INT NOT NULL DEFAULT 0 AFTER unlock_token_used')
     logger.info('Columna agregada: users.unlock_token_attempts')
   }
+  // 4e. Reinicio de contrasena: token propio (HMAC con contexto "reset:") separado del de
+  //     desbloqueo, para que emitir uno no invalide el otro y no sean intercambiables.
+  if (!(await columnExists('users', 'reset_token'))) {
+    await run('ALTER TABLE users ADD COLUMN reset_token CHAR(64) NULL DEFAULT NULL AFTER unlock_token_attempts')
+    logger.info('Columna agregada: users.reset_token')
+  }
+  if (!(await columnExists('users', 'reset_token_expires_at'))) {
+    await run('ALTER TABLE users ADD COLUMN reset_token_expires_at DATETIME AFTER reset_token')
+    logger.info('Columna agregada: users.reset_token_expires_at')
+  }
+  if (!(await columnExists('users', 'reset_token_used'))) {
+    await run('ALTER TABLE users ADD COLUMN reset_token_used BOOLEAN NOT NULL DEFAULT FALSE AFTER reset_token_expires_at')
+    logger.info('Columna agregada: users.reset_token_used')
+  }
+  if (!(await columnExists('users', 'reset_token_attempts'))) {
+    await run('ALTER TABLE users ADD COLUMN reset_token_attempts INT NOT NULL DEFAULT 0 AFTER reset_token_used')
+    logger.info('Columna agregada: users.reset_token_attempts')
+  }
   if (!(await columnExists('users', 'must_change_password'))) {
     await run('ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE AFTER password_updated_at')
     logger.info('Columna agregada: users.must_change_password')
@@ -564,7 +716,7 @@ async function main() {
     )
   }
   // Catalogo previo desalineado con el frontend: se retira para mantener la
-  // matriz rol x permiso exacta (17 permisos atomicos de seed.js / seed.sql).
+  // matriz rol x permiso exacta (el catalogo PERMISSIONS de este archivo).
   for (const code of OBSOLETE_PERMISSIONS) {
     await run('DELETE FROM permissions WHERE code = ?', [code])
   }
@@ -598,44 +750,12 @@ async function main() {
   )
   logger.info('Segregacion estricta aplicada: concesiones fuera de matriz revocadas')
 
-  // Separacion de bitacoras: los eventos de negocio que en seeds previos
-  // quedaron en security_logs se migran a activity_logs (la tabla de
-  // seguridad es inmutable, por eso se retira el trigger durante el traslado
-  // y se restaura en el mismo bloque).
-  const ACTIVITY_ACTIONS = [
-    'READ', 'CREATE', 'UPDATE', 'DELETE',
-    'CASE_READ', 'CASE_CREATED', 'CASE_UPDATED', 'CASE_ARCHIVED',
-    'PROFILE_UPDATED', 'MATRIX_ACCESS_CHANGED', 'MATRIX_BULK_CHANGED',
-    'DOC_REVEALED', 'DOC_CONCEALED', 'AUDIT_RECEIPT',
-  ]
-  const inList = ACTIVITY_ACTIONS.map((a) => `'${a}'`).join(', ')
-  const [pendingRows] = await run(
-    `SELECT COUNT(*) AS total FROM security_logs WHERE action IN (${inList})`,
-  )
-  if (Number(pendingRows[0].total) > 0) {
-    await run(
-      `INSERT INTO activity_logs (user_code, action, ip_address, status, details, timestamp)
-       SELECT user_code, action, ip_address, status, details, timestamp
-         FROM security_logs
-        WHERE action IN (${inList})`,
-    )
-    await run('DROP TRIGGER IF EXISTS trg_security_logs_no_delete')
-    try {
-      await run(`DELETE FROM security_logs WHERE action IN (${inList})`)
-    } finally {
-      if (!(await triggerExists('trg_security_logs_no_delete'))) {
-        await run(
-          `CREATE TRIGGER trg_security_logs_no_delete
-             BEFORE DELETE ON security_logs FOR EACH ROW
-             SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'security_logs es inmutable: DELETE no permitido'`,
-        )
-      }
-    }
-    logger.info('Bitacoras separadas: eventos de negocio movidos a activity_logs')
-  }
+  // security_logs es inmutable (ISO 27001 A.8.15): los triggers de UPDATE y DELETE
+  // nunca se retiran, ni siquiera durante una migracion. Las filas heredadas de
+  // eventos de negocio permanecen donde fueron escritas.
 
   // Personas civiles de demostracion (mismas cuentas que DIRECTORY en el
-  // frontend). El usuario previo "admin" colisiona en LEG-2026-0001, asi que
+  // frontend). El usuario previo "admin" colisionaba en LEG-2026-0001, asi que
   // ON DUPLICATE KEY UPDATE lo transforma en mariana.solis (socio).
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, BCRYPT_ROUNDS)
   for (const user of DEMO_USERS) {
@@ -671,6 +791,17 @@ async function main() {
     logger.info(`Usuario de demostracion listo: ${user.userCode} / ${user.username} (${user.role})`)
   }
 
+  // La cuenta tecnica "admin" (socio con clave de demostracion conocida) violaba
+  // el menor privilegio: se retira tambien de las bases creadas con seeds previos.
+  // Sus claves, historial y avisos caen por ON DELETE CASCADE; los expedientes
+  // que tuviera asignados quedan sin abogado (ON DELETE SET NULL). La bitacora
+  // de seguridad conserva sus eventos, que son inmutables.
+  const [staleAdmin] = await run("SELECT id FROM users WHERE user_code = 'LEG-2026-0000' AND username = 'admin'")
+  if (staleAdmin.length > 0) {
+    await run('DELETE FROM users WHERE id = ?', [staleAdmin[0].id])
+    logger.info('Cuenta tecnica retirada: LEG-2026-0000 / admin')
+  }
+
   // Expedientes de demostracion (CASES del frontend), idempotentes.
   for (const c of DEMO_CASES) {
     await run(
@@ -679,6 +810,7 @@ async function main() {
        VALUES (?, ?, ?, (SELECT id FROM users WHERE user_code = ?), ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          title = VALUES(title),
+         assigned_lawyer_id = VALUES(assigned_lawyer_id),
          status = VALUES(status),
          progress = VALUES(progress),
          deadline = VALUES(deadline)`,
@@ -690,6 +822,28 @@ async function main() {
   }
   logger.info(`Expedientes de demostracion listos: ${DEMO_CASES.length}`)
 
+  // Prueba documental de demostracion (2 publicos + 1 privilegiado por caso).
+  for (const doc of DEMO_DOCUMENTS) {
+    const checksum = crypto.createHash('sha256').update(`${doc.code}|legalshield-enterprise`).digest('hex')
+    await run(
+      `INSERT INTO case_documents
+         (case_id, document_code, filename, classification, is_privileged, mime_type, page_count, checksum, content)
+       VALUES ((SELECT id FROM legal_cases WHERE case_number = ?), ?, ?, ?, ?, 'application/pdf', ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         filename = VALUES(filename),
+         classification = VALUES(classification),
+         is_privileged = VALUES(is_privileged),
+         page_count = VALUES(page_count),
+         checksum = VALUES(checksum),
+         content = VALUES(content)`,
+      [
+        doc.caseNumber, doc.code, doc.filename, doc.classification, doc.isPrivileged,
+        doc.pages, checksum, doc.content,
+      ],
+    )
+  }
+  logger.info(`Documentos de demostracion listos: ${DEMO_DOCUMENTS.length}`)
+
   // 6. Verificacion final: tablas visibles en phpMyAdmin.
   const [tables] = await conn.query(
     'SELECT table_name AS nombre FROM information_schema.tables WHERE table_schema = ? ORDER BY table_name',
@@ -699,6 +853,7 @@ async function main() {
   const [[{ total: permCount }]] = await conn.query('SELECT COUNT(*) AS total FROM permissions')
   const [[{ total: grantCount }]] = await conn.query('SELECT COUNT(*) AS total FROM role_permissions')
   const [[{ total: userCount }]] = await conn.query('SELECT COUNT(*) AS total FROM users')
+  const [[{ total: documentCount }]] = await conn.query('SELECT COUNT(*) AS total FROM case_documents')
 
   logger.info(`Tablas creadas (${tables.length}): ${tables.map((t) => t.nombre).join(', ')}`)
   logger.info('Seed verificado', {
@@ -706,6 +861,7 @@ async function main() {
     permisos: permCount,
     asignaciones: grantCount,
     usuarios: userCount,
+    documentos: documentCount,
   })
 
   await conn.end()

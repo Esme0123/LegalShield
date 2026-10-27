@@ -14,9 +14,13 @@ const API_ENABLED = import.meta.env.VITE_API_ENABLED !== 'false'
 
 export const API_BASE = RAW_BASE.replace(/\/$/, '')
 
-/** Claves de persistencia de la sesion en el navegador. */
-const ACCESS_TOKEN_KEY = 'legalshield.access'
-const REFRESH_TOKEN_KEY = 'legalshield.refresh'
+/**
+ * El refresh token vive en una cookie HttpOnly que el navegador adjunta solo a la ruta de
+ * refresh: el JavaScript nunca lo ve. El access token se guarda unicamente en memoria.
+ * En localStorage queda una marca sin secreto que indica si conviene intentar restaurar
+ * la sesion al cargar la pagina (evita una llamada inutil cuando no hay sesion).
+ */
+const SESSION_HINT_KEY = 'legalshield.session'
 
 function readStorage(key) {
   try {
@@ -35,28 +39,27 @@ function writeStorage(key, value) {
   }
 }
 
-/** Tokens persistidos en localStorage para sobrevivir recargas de pagina. */
-const tokens = {
-  access: readStorage(ACCESS_TOKEN_KEY),
-  refresh: readStorage(REFRESH_TOKEN_KEY),
-}
+// Sesiones iniciadas antes de este cambio dejaron los tokens en localStorage: se retiran
+// para que ningun refresh token quede al alcance del JavaScript de la pagina.
+writeStorage('legalshield.access', null)
+writeStorage('legalshield.refresh', null)
 
-export function setTokens({ access, refresh }) {
+/** Access token en memoria: se pierde al recargar y se recupera con la cookie. */
+const tokens = { access: null }
+
+export function setTokens({ access }) {
   tokens.access = access ?? null
-  tokens.refresh = refresh ?? null
-  writeStorage(ACCESS_TOKEN_KEY, tokens.access)
-  writeStorage(REFRESH_TOKEN_KEY, tokens.refresh)
+  writeStorage(SESSION_HINT_KEY, tokens.access ? '1' : null)
 }
 
 export function clearTokens() {
   tokens.access = null
-  tokens.refresh = null
-  writeStorage(ACCESS_TOKEN_KEY, null)
-  writeStorage(REFRESH_TOKEN_KEY, null)
+  writeStorage(SESSION_HINT_KEY, null)
 }
 
+/** True si hay (o pudo haber) una sesion que restaurar. No implica un token valido. */
 export function isAuthenticated() {
-  return Boolean(tokens.access)
+  return Boolean(tokens.access) || readStorage(SESSION_HINT_KEY) === '1'
 }
 
 /** Error de API con el codigo HTTP, para que la UI distinga 403 de 500. */
@@ -117,14 +120,20 @@ export class ApiError extends Error {
 
 let refreshPromise = null
 
-/** Intenta renovar el access token una sola vez ante un 401. */
+/** Restaura el access token al cargar la pagina; null si no hay cookie valida. */
+export const restoreAccessToken = () => tryRefresh()
+
+/** Cabecera anti-CSRF que el servidor exige en las rutas que usan la cookie. */
+const AJAX_HEADERS = { 'X-Requested-With': 'XMLHttpRequest' }
+
+/** Renueva el access token con la cookie HttpOnly. Devuelve el token o null. */
 async function tryRefresh() {
-  if (!tokens.refresh || refreshPromise) return refreshPromise
+  if (!isAuthenticated() || refreshPromise) return refreshPromise
 
   refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken: tokens.refresh }),
+    credentials: 'include',
+    headers: AJAX_HEADERS,
   })
     .then(async (res) => {
       if (!res.ok) {
@@ -132,7 +141,7 @@ async function tryRefresh() {
         return null
       }
       const data = await res.json()
-      setTokens({ access: data.token, refresh: data.refreshToken })
+      setTokens({ access: data.token })
       return data.token
     })
     .catch(() => {
@@ -151,7 +160,7 @@ async function tryRefresh() {
  * controllers de la UI puedan mostrarlo sin parsear el JSON otra vez.
  */
 export async function request(path, { method = 'GET', body, signal, auth = true, retry = true } = {}) {
-  const headers = {}
+  const headers = { ...AJAX_HEADERS }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (auth && tokens.access) headers.Authorization = `Bearer ${tokens.access}`
 
@@ -162,13 +171,15 @@ export async function request(path, { method = 'GET', body, signal, auth = true,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,
+      // Necesario para que el navegador acepte la cookie de login y la envie al refresh.
+      credentials: 'include',
     })
   } catch (err) {
     if (err.name === 'AbortError') throw err
     throw new ApiError('No hay conexion con la API REST', { status: 0 })
   }
 
-  if (response.status === 401 && auth && retry && tokens.refresh) {
+  if (response.status === 401 && auth && retry && isAuthenticated()) {
     const renewed = await tryRefresh()
     if (renewed) return request(path, { method, body, signal, auth, retry: false })
   }
@@ -200,6 +211,7 @@ const del = (path, options) => request(path, { ...options, method: 'DELETE' })
 
 export const authApi = {
   login: (userCode, password, captchaToken, captchaResponse) => post('/auth/login', { userCode, password, captchaToken, captchaResponse }, { auth: false }),
+  captcha: () => get('/auth/captcha', { auth: false }),
   register: (payload) => post('/auth/register', payload, { auth: false }),
   me: () => get('/auth/me'),
   logout: () => post('/auth/logout'),
@@ -212,6 +224,7 @@ export const authApi = {
   /** Estado del bloqueo temporal de una cuenta (restaura el conteo tras F5). */
   lockStatus: (userCode) => post('/auth/lock-status', { userCode }, { auth: false }),
   verifyUnlockToken: (payload) => post('/auth/verify-unlock-token', payload, { auth: false }),
+  resetPassword: (payload) => post('/auth/reset-password', payload, { auth: false }),
   notifications: () => get('/auth/notifications'),
   readNotification: (id) => patch(`/auth/notifications/${id}/read`),
 }
@@ -234,7 +247,9 @@ export const casesApi = {
   get: (id, options) => get(`/cases/${id}`, options),
   create: (payload) => post('/cases', payload),
   update: (id, payload) => put(`/cases/${id}`, payload),
-  archive: (id) => del(`/cases/${id}`),
+  archiveCase: (id) => del(`/cases/${id}`),
+  documents: (id) => get(`/cases/${id}/documents`),
+  revealDocument: (id, payload) => post(`/cases/${id}/documents/reveal`, payload),
 }
 
 /* -------------------------------------------------------------------------- */
@@ -245,6 +260,9 @@ export const rolesApi = {
   matrix: () => get('/roles/matrix'),
   updatePermissions: (grants) => post('/roles/permissions', { grants }),
   reset: () => post('/roles/reset'),
+  create: (payload) => post('/roles', payload),
+  update: (code, payload) => put(`/roles/${encodeURIComponent(code)}`, payload),
+  remove: (code) => del(`/roles/${encodeURIComponent(code)}`),
 }
 
 /* -------------------------------------------------------------------------- */
@@ -258,6 +276,7 @@ export const usersApi = {
   status: (id, payload) => patch(`/users/${id}/status`, payload),
   unlock: (id, payload) => post(`/users/${id}/unlock`, payload),
   generateUnlockToken: (id) => post(`/users/${id}/generate-unlock-token`),
+  generateResetToken: (id) => post(`/users/${id}/generate-reset-token`),
 }
 
 /* -------------------------------------------------------------------------- */

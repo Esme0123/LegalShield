@@ -20,6 +20,7 @@ import { toast } from '@/store/toastStore'
 import { validateUserId } from '@/lib/security'
 import { cn } from '@/lib/cn'
 import CaptchaChallenge from '@/components/auth/CaptchaChallenge'
+import PasswordResetPanel from '@/components/auth/PasswordResetPanel'
 
 const SIGNAL_STEPS = ['Analisis de User ID…', 'Verificacion de politica…', 'MFA · passkey', 'Emision de sesion']
 
@@ -51,6 +52,7 @@ export default function Login() {
   const [, setLocalError] = useState('')
   const [otpCode, setOtpCode] = useState('')
   const [verifyingOtp, setVerifyingOtp] = useState(false)
+  const [showReset, setShowReset] = useState(false)
 
   const locked = Boolean(lockedUntil) && now < lockedUntil
   const idCheck = useMemo(() => validateUserId(userId), [userId])
@@ -146,8 +148,8 @@ export default function Login() {
       const result = await login({
         userId: idCheck.normalized,
         password,
-        captchaToken: captchaToken || undefined,
-        captchaResponse: captchaToken || undefined,
+        captchaToken: captchaToken?.token || undefined,
+        captchaResponse: captchaToken?.answer || undefined,
       })
       if (result.ok) {
         if (result.user.mustChangePassword) {
@@ -243,7 +245,7 @@ export default function Login() {
             <div className="mt-7 grid gap-3 sm:grid-cols-3">
               {[
                 { icon: ScanFace, title: 'Identidad fuerte', copy: 'User ID estándar + MFA' },
-                { icon: Gavel, title: 'Minimo privilegio', copy: '21 permisos revisables en caliente' },
+                { icon: Gavel, title: 'Minimo privilegio', copy: '22 permisos revisables en caliente' },
                 { icon: Scale, title: 'Evidencia', copy: 'Comprobantes firmados con hash SHA-256' },
               ].map(({ icon: Icon, title, copy }) => (
                 <div key={title} className="ls-panel">
@@ -355,10 +357,11 @@ export default function Login() {
                       className="overflow-hidden"
                     >
                       <CaptchaChallenge
-                        onVerify={(verified, token) => {
+                        onVerify={(verified, challenge) => {
                           setCaptchaVerified(verified)
                           if (verified) {
-                            setCaptchaToken(token)
+                            // { token, answer }: el servidor valida ambos al iniciar sesion
+                            setCaptchaToken(challenge)
                             // Resuelto el desafio, el bloque se oculta y se continua con la clave
                             passwordRef.current?.focus()
                           }
@@ -510,31 +513,44 @@ export default function Login() {
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              <button
+                type="button"
+                onClick={() => setShowReset((v) => !v)}
+                className="ls-btn-ghost mt-3 w-full text-xs"
+                aria-expanded={showReset}
+              >
+                ¿Olvidó su contraseña?
+              </button>
+              <AnimatePresence>
+                {showReset && (
+                  <PasswordResetPanel
+                    initialUserId={idCheck.valid ? idCheck.normalized : userId}
+                    onDone={() => {
+                      setShowReset(false)
+                      setPassword('')
+                    }}
+                  />
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </motion.section>
       </div>
 
-      <div className="pointer-events-auto fixed bottom-5 left-5 z-20 max-w-xs rounded-xl border border-line/60 bg-surface/90 p-4 shadow-xl backdrop-blur">
-        <p className="font-display text-xs font-semibold text-ink">Usuario Demo</p>
-        <p className="mt-1 font-mono text-[11px] text-muted">
-          <span className="text-ink">osi.seguridad</span>, <span className="text-ink">mariana.solis</span> o{' '}
-          <span className="text-ink">diego.ferrer</span>
-        </p>
-        <p className="mt-1 font-mono text-[11px] text-muted">
-          Contraseña Demo: <span className="text-ink">Juris2026!Abg</span>
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setUserId('osi.seguridad')
-            setPassword('Juris2026!Abg')
-          }}
-          className="mt-3 w-full rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-semibold text-accent transition hover:bg-accent/15"
-        >
-          Llenar con credenciales demo
-        </button>
-      </div>
+      {/* Solo fuera de produccion; la contrasena nunca se muestra ni se rellena. */}
+      {!import.meta.env.PROD && (
+        <div className="pointer-events-auto fixed bottom-5 left-5 z-20 max-w-xs rounded-xl border border-line/60 bg-surface/90 p-4 shadow-xl backdrop-blur">
+          <p className="font-display text-xs font-semibold text-ink">Usuario Demo</p>
+          <p className="mt-1 font-mono text-[11px] text-muted">
+            <span className="text-ink">osi.seguridad</span>, <span className="text-ink">mariana.solis</span> o{' '}
+            <span className="text-ink">diego.ferrer</span>
+          </p>
+          <p className="mt-1 font-mono text-[11px] text-muted">
+            La contraseña de demostración la entrega el equipo del proyecto.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

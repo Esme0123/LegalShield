@@ -1,11 +1,13 @@
 'use strict'
 
 /**
- * Criptografia del token OTP de desbloqueo.
+ * Criptografia de los tokens OTP de desbloqueo y de reinicio de contrasena.
  *   · generateOtp   CSPRNG de 6 digitos
  *   · hashOtp       HMAC-SHA256(secret, `${userId}:${otp}`) en hex (64 chars)
  *   · otpMatches    comparacion en tiempo constante
- * El OTP en claro nunca se persiste ni se registra.
+ * El token de reinicio usa un contexto distinto (`reset:${userId}:${otp}`): el mismo
+ * valor de 6 digitos produce otro hash, asi que un token de desbloqueo no sirve para
+ * reiniciar la clave ni al reves. El OTP en claro nunca se persiste ni se registra.
  */
 
 const crypto = require('crypto')
@@ -13,7 +15,10 @@ const crypto = require('crypto')
 const OTP_TTL_MINUTES = Number(process.env.UNLOCK_TOKEN_TTL_MINUTES || 15)
 const MAX_OTP_ATTEMPTS = Number(process.env.UNLOCK_TOKEN_MAX_ATTEMPTS || 5)
 const MAX_OTP_ISSUES_PER_HOUR = Number(process.env.UNLOCK_TOKEN_MAX_ISSUES_PER_HOUR || 3)
-const OTP_PATTERN = /^\d{6}$/
+const RESET_TTL_MINUTES = Number(process.env.PASSWORD_RESET_TTL_MINUTES || 15)
+const MAX_RESET_ATTEMPTS = Number(process.env.PASSWORD_RESET_MAX_ATTEMPTS || 5)
+const MAX_RESET_ISSUES_PER_HOUR = Number(process.env.PASSWORD_RESET_MAX_ISSUES_PER_HOUR || 3)
+const OTP_PATTERN =/^\d{6}$/
 
 function secret() {
   // Secreto propio y obligatorio: no se reutiliza JWT_SECRET para que una fuga de
@@ -43,12 +48,13 @@ function generateOtp() {
   return crypto.randomInt(0, 1000000).toString().padStart(6, '0')
 }
 
-function hashOtp(userId, otp) {
-  return crypto.createHmac('sha256', secret()).update(`${userId}:${otp}`).digest('hex')
+/** `context` separa los usos: '' (desbloqueo) o 'reset:' (reinicio de contrasena). */
+function hashOtp(userId, otp, context = '') {
+  return crypto.createHmac('sha256', secret()).update(`${context}${userId}:${otp}`).digest('hex')
 }
 
-function otpMatches(userId, otp, storedHex) {
-  const provided = Buffer.from(hashOtp(userId, otp), 'hex')
+function otpMatches(userId, otp, storedHex, context = '') {
+  const provided = Buffer.from(hashOtp(userId, otp, context), 'hex')
   const stored = Buffer.from(typeof storedHex === 'string' ? storedHex : '', 'hex')
   if (stored.length !== provided.length) {
     // Se ejecuta igualmente una comparacion para no filtrar por tiempo.
@@ -67,4 +73,7 @@ module.exports = {
   OTP_TTL_MINUTES,
   MAX_OTP_ATTEMPTS,
   MAX_OTP_ISSUES_PER_HOUR,
+  RESET_TTL_MINUTES,
+  MAX_RESET_ATTEMPTS,
+  MAX_RESET_ISSUES_PER_HOUR,
 }
