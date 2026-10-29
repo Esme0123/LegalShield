@@ -12,6 +12,7 @@ router.use(authenticate)
 
 // Bitacora de seguridad: eventos de acceso y control, exclusiva de OSI.
 router.get('/security', checkPermission('SECURITY_LOGS_VIEW'), asyncHandler(controller.listSecurityLogs))
+router.get('/all', checkPermission('SECURITY_LOGS_VIEW'), asyncHandler(controller.listAllLogs))
 router.get('/logs', checkPermission('SECURITY_LOGS_VIEW'), asyncHandler(controller.listSecurityLogs))
 router.get('/events', checkPermission('SECURITY_LOGS_VIEW'), asyncHandler(controller.listEventTypes))
 

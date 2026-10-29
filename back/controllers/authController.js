@@ -16,7 +16,7 @@ const { setRefreshCookie, clearRefreshCookie, readRefreshCookie } = require('../
 const { issueChallenge, verifyChallenge } = require('../utils/captcha')
 const ghostAttempts = require('../utils/ghostAttempts')
 const { badRequest, conflict, forbidden, notFound, unauthorized, unprocessable } = require('../utils/errors')
-const { evaluatePassword, PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
+const { evaluatePassword, PASSWORD_HISTORY_LIMIT, PASSWORD_MAX_AGE_DAYS } = require('../utils/passwordPolicy')
 const {
   USER_CODE_RE,
   USER_CODE_CI_RE,
@@ -45,9 +45,6 @@ const UNLOCK_TOKEN_REJECTED = 'Token de desbloqueo invalido, expirado o agotado.
 /** Unico mensaje para todo rechazo del token de reinicio: el motivo real solo va a security_logs. */
 const RESET_TOKEN_REJECTED = 'Token de reinicio invalido, expirado o agotado. Solicite uno nuevo al Oficial de Seguridad'
 const CAPTCHA_THRESHOLD = Number(process.env.CAPTCHA_THRESHOLD || 1)
-/** Edad maxima de la clave en dias; un valor invalido vuelve al predeterminado de 90. */
-const configuredMaxAge = Number(process.env.PASSWORD_MAX_AGE_DAYS)
-const PASSWORD_MAX_AGE_DAYS = process.env.PASSWORD_MAX_AGE_DAYS && configuredMaxAge >= 0 ? configuredMaxAge : 90
 
 /**
  * Cuerpos de respuesta compartidos por cuentas reales e identificadores

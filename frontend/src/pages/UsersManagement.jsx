@@ -33,6 +33,19 @@ const STATUS_FILTERS = [
   { id: 'inactivo', label: 'Inactivos' },
 ]
 
+/** Los 9 departamentos de Bolivia: sede del usuario. */
+const BO_DEPARTMENTS = [
+  'La Paz',
+  'Cochabamba',
+  'Santa Cruz',
+  'Oruro',
+  'Potosí',
+  'Chuquisaca',
+  'Tarija',
+  'Beni',
+  'Pando',
+]
+
 function initialsOf(user) {
   const a = (user.firstName ?? user.username ?? '')[0] ?? ''
   const b = (user.lastName ?? '')[0] ?? ''
@@ -60,8 +73,7 @@ function UserModal({ mode, user, onClose, onSecret }) {
     lastName: user?.lastName ?? '',
     email: user?.email ?? '',
     role: user?.role ?? 'abogado',
-    firm: user?.firm ?? '',
-    department: user?.department ?? '',
+    department: user?.department ?? 'La Paz',
     phone: user?.phone ?? '',
     password: '',
   })
@@ -95,7 +107,6 @@ function UserModal({ mode, user, onClose, onSecret }) {
           lastName: form.lastName.trim(),
           email: form.email.trim(),
           role: form.role,
-          firm: form.firm.trim(),
           department: form.department.trim(),
           phone: form.phone.trim(),
           password: form.password,
@@ -109,7 +120,6 @@ function UserModal({ mode, user, onClose, onSecret }) {
         await updateUserAdmin(user.id, {
           email: form.email.trim(),
           role: form.role,
-          firm: form.firm.trim(),
           department: form.department.trim(),
           phone: form.phone.trim(),
         })
@@ -170,7 +180,7 @@ function UserModal({ mode, user, onClose, onSecret }) {
                 onChange={set('firstName')}
                 disabled={isEdit}
                 className={cn('ls-input', isEdit && 'cursor-not-allowed opacity-70')}
-                placeholder="María José"
+                placeholder="Ej. Juan Carlos"
                 autoFocus={!isEdit}
               />
             </label>
@@ -181,7 +191,7 @@ function UserModal({ mode, user, onClose, onSecret }) {
                 onChange={set('lastName')}
                 disabled={isEdit}
                 className={cn('ls-input', isEdit && 'cursor-not-allowed opacity-70')}
-                placeholder="Pérez"
+                placeholder="Ej. Mamani"
               />
             </label>
           </div>
@@ -213,7 +223,7 @@ function UserModal({ mode, user, onClose, onSecret }) {
 
           <label className="block">
             <span className="ls-label">Correo institucional</span>
-            <input value={form.email} onChange={set('email')} type="email" className="ls-input" placeholder="usuario@despacho.co" />
+            <input value={form.email} onChange={set('email')} type="email" className="ls-input" placeholder={`${preview || 'juan.mamani'}@legalshield.bo`} />
           </label>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -229,20 +239,24 @@ function UserModal({ mode, user, onClose, onSecret }) {
             </label>
             <label className="block">
               <span className="ls-label">Departamento</span>
-              <input value={form.department} onChange={set('department')} className="ls-input" placeholder="Litigación" />
+              <select value={form.department} onChange={set('department')} className="ls-input">
+                {/* Cuentas antiguas guardaban el area (p. ej. Litigacion): se conserva como opcion. */}
+                {form.department && !BO_DEPARTMENTS.includes(form.department) && (
+                  <option value={form.department}>{form.department}</option>
+                )}
+                {BO_DEPARTMENTS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block">
-              <span className="ls-label">Despacho</span>
-              <input value={form.firm} onChange={set('firm')} className="ls-input" placeholder="Vidal & Penalto Bufetes" />
-            </label>
-            <label className="block">
-              <span className="ls-label">Teléfono</span>
-              <input value={form.phone} onChange={set('phone')} className="ls-input" placeholder="+591 12345678" />
-            </label>
-          </div>
+          <label className="block">
+            <span className="ls-label">Teléfono</span>
+            <input value={form.phone} onChange={set('phone')} className="ls-input" placeholder="+591 12345678" inputMode="tel" />
+          </label>
 
           {mode === 'create' && (
             <label className="block">
@@ -251,8 +265,11 @@ function UserModal({ mode, user, onClose, onSecret }) {
                 value={form.password}
                 onChange={set('password')}
                 autoComplete="new-password"
-                placeholder="Si se deja vacia, el servidor genera una temporal (cambio obligatorio al primer acceso)"
+                placeholder="Vacía = el sistema genera una temporal"
               />
+              <span className="mt-1 block text-[10.5px] text-muted">
+                El usuario debe cambiarla en su primer acceso.
+              </span>
             </label>
           )}
         </div>

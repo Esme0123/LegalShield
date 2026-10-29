@@ -20,6 +20,7 @@ import {
   usersApi,
 } from '@/lib/apiClient'
 import { cryptoId, nowIso, toggleInList } from '@/lib/format'
+import { describeAuditEvent } from '@/lib/auditDescribe'
 
 const MAX_ATTEMPTS = 3
 const PASSWORD_HISTORY_LIMIT = 5
@@ -138,9 +139,14 @@ const apiCaseToCase = (row) => ({
   deadline: row.deadline ? String(row.deadline).slice(0, 10) : null,
   progress: Number(row.progress ?? 0),
   owner: row.ownerUserCode ?? '',
+  ownerName: row.ownerName ?? null,
+  assistant: row.assistantName ? `${row.assistantName} · ${row.assistantUserCode}` : null,
+  clientUser: row.clientUserName ? `${row.clientUserName} · ${row.clientUserCode}` : null,
   privileged: row.isPrivileged,
   docs: [],
   documentCount: Number(row.documentCount ?? 0),
+  publicDocumentCount: Number(row.publicDocumentCount ?? 0),
+  hiddenDocuments: 0,
 })
 
 /** Fila de GET /api/cases/:id/documents -> tarjeta de prueba documental. */
@@ -157,18 +163,26 @@ const apiDocumentToDoc = (row) => ({
   content: row.content ?? null,
 })
 
-/** Fila de security_logs -> entrada de bitacora del frontend. */
+/**
+ * Fila de security_logs / activity_logs -> entrada de bitacora del frontend.
+ * `actor` es el usuario (nombre.apellido) que hizo el cambio y `message` la
+ * frase legible de lo que hizo; el id lleva el origen porque ambas tablas
+ * numeran por separado.
+ */
 const apiLogToLog = (row) => ({
-  id: `LG-${row.id}`,
+  id: `${row.stream === 'activity' ? 'LA' : 'LG'}-${row.id}`,
   ts: row.timestamp,
   type: row.action,
+  stream: row.stream ?? 'security',
   severity: row.status === 'CRITICO' ? 'critico' : row.status === 'WARN' ? 'warn' : 'info',
-  actor: row.userCode ?? 'SISTEMA',
+  actor: row.actorUsername ?? row.userCode ?? 'SISTEMA',
+  // Sin cuenta asociada, user_code guarda lo que se tecleo en el login.
+  actorCode: row.actorUsername ? row.userCode : null,
+  actorRole:
+    row.actorRole ??
+    (!row.userCode ? 'Sin sesión' : /^LEG-\d{4}-\d+$/.test(row.userCode) ? 'Cuenta eliminada' : 'Usuario no registrado'),
   target: row.ipAddress ?? 'api',
-  message:
-    typeof row.details?.message === 'string'
-      ? row.details.message
-      : `${row.action} · registrado desde ${row.ipAddress ?? 'origen desconocido'}`,
+  message: describeAuditEvent(row),
 })
 
 const CONNECTION_ERROR = 'Error de conexión con el servidor MySQL'
@@ -540,7 +554,9 @@ export const useAppStore = create((set, get) => ({
         return { ok: false, reason: 'current' }
       }
       if (error instanceof ApiError && error.status === 422) {
-        return { ok: false, reason: error.details?.reuseBlocked ? 'reused' : 'weak' }
+        return error.details?.reuseBlocked
+          ? { ok: false, reason: 'reused', reuse: error.details }
+          : { ok: false, reason: 'weak' }
       }
       noteApiFailure(set, error, 'password')
       return { ok: false, reason: 'error' }
@@ -698,7 +714,8 @@ export const useAppStore = create((set, get) => ({
       return 0
     }
     try {
-      const data = await auditApi.security({ limit: 80, ...filters })
+      // Vista unificada: seguridad + actividad de negocio de todos los roles.
+      const data = await auditApi.all({ limit: 200, ...filters })
       set({ logs: data.logs.map(apiLogToLog) })
       ok(set)
       return data.logs.length
@@ -789,6 +806,11 @@ export const useAppStore = create((set, get) => ({
 
   /** Carga los expedientes respetando el alcance por ambito del servidor. */
   loadCases: async (filters = {}) => {
+    // El OSI no ve expedientes (segregacion): sin CASES_READ ni se consulta.
+    if (!get().hasPermission('CASES_READ')) {
+      set({ cases: [] })
+      return 0
+    }
     try {
       const data = await casesApi.list({ limit: 60, ...filters })
       set((s) => {
@@ -809,6 +831,23 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
+  /**
+   * Alta de expediente. Sin alcance global el servidor lo asigna al propio
+   * abogado; devuelve el expediente ya mapeado y refresca la lista.
+   */
+  createCase: async (payload) => {
+    const data = await casesApi.create(payload)
+    await get().loadCases()
+    if (get().hasPermission('LOGS_VIEW')) get().loadActivityLogs().catch(() => {})
+    return apiCaseToCase(data.case)
+  },
+
+  /** Cuentas elegibles para el equipo del expediente (asistentes, clientes). */
+  loadCaseAssignees: async () => {
+    if (!get().hasPermission('CASES_CREATE')) return { lawyers: [], assistants: [], clients: [] }
+    return casesApi.assignees()
+  },
+
   /** Carga la prueba documental de un expediente bajo demanda. */
   loadCaseDocuments: async (caseDbId) => {
     try {
@@ -816,7 +855,12 @@ export const useAppStore = create((set, get) => ({
       set((s) => ({
         cases: s.cases.map((c) =>
           c.dbId === caseDbId
-            ? { ...c, docs: data.documents.map(apiDocumentToDoc), documentCount: Number(data.total) }
+            ? {
+                ...c,
+                docs: data.documents.map(apiDocumentToDoc),
+                documentCount: Number(data.total),
+                hiddenDocuments: Number(data.hidden ?? 0),
+              }
             : c,
         ),
       }))

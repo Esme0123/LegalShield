@@ -251,6 +251,8 @@ export const casesApi = {
   list: (filters, options) => get(`/cases${qs(filters)}`, options),
   get: (id, options) => get(`/cases/${id}`, options),
   create: (payload) => post('/cases', payload),
+  /** Asistentes y clientes (y abogados, para el socio) que se pueden sumar al equipo. */
+  assignees: () => get('/cases/assignees'),
   update: (id, payload) => put(`/cases/${id}`, payload),
   archiveCase: (id) => del(`/cases/${id}`),
   documents: (id) => get(`/cases/${id}/documents`),
@@ -291,6 +293,8 @@ export const usersApi = {
 export const auditApi = {
   /** Bitacora de seguridad (acceso y control): solo OSI con SECURITY_LOGS_VIEW. */
   security: (filters, options) => get(`/audit/security${qs(filters)}`, options),
+  /** Ambas bitacoras unidas, con autor y usuario afectado: solo OSI. */
+  all: (filters, options) => get(`/audit/all${qs(filters)}`, options),
   /** Alias historico de la bitacora de seguridad. */
   logs: (filters, options) => get(`/audit/logs${qs(filters)}`, options),
   /** Bitacora de actividad (acciones de negocio): LOGS_VIEW. */

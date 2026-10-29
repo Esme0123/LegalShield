@@ -8,6 +8,9 @@
 
 const PASSWORD_MIN_LENGTH = Number(process.env.PASSWORD_MIN_LENGTH || 12)
 const PASSWORD_HISTORY_LIMIT = Number(process.env.PASSWORD_HISTORY_LIMIT || 5)
+/** Edad maxima de la clave en dias; un valor invalido vuelve al predeterminado de 90. */
+const configuredMaxAge = Number(process.env.PASSWORD_MAX_AGE_DAYS)
+const PASSWORD_MAX_AGE_DAYS = process.env.PASSWORD_MAX_AGE_DAYS && configuredMaxAge >= 0 ? configuredMaxAge : 90
 
 const RULES = [
   {
@@ -60,4 +63,5 @@ module.exports = {
   isPasswordValid,
   PASSWORD_MIN_LENGTH,
   PASSWORD_HISTORY_LIMIT,
+  PASSWORD_MAX_AGE_DAYS,
 }

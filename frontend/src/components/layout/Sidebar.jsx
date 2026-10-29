@@ -125,6 +125,7 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
   // Cada modulo exige al menos uno de los permisos indicados (segregacion OSI).
   const permissionMap = {
     '/users': ['USERS_READ', 'USERS_MANAGE'],
+    '/cases': ['CASES_READ'],
     '/roles': ['RBAC_MANAGE', 'ROLES_MANAGE'],
     '/audit': ['SECURITY_LOGS_VIEW'],
     '/risk-assessment': ['RISK_ASSESS'],

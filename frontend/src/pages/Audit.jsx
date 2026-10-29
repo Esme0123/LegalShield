@@ -16,7 +16,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { exportCsv, exportPdf } from '@/lib/exporters'
 import { cn } from '@/lib/cn'
-import { formatDateTime } from '@/lib/format'
+import { formatDateTime, timeAgo } from '@/lib/format'
 
 const SEVERITY = {
   info: { tone: 'info', cls: 'text-info', dot: 'bg-info' },
@@ -122,6 +122,8 @@ export default function Audit() {
 
   const [category, setCategory] = useState('all')
   const [query, setQuery] = useState('')
+  // TOKEN_REFRESH lo emite el navegador solo cada pocos minutos: oculto por defecto.
+  const [showRefresh, setShowRefresh] = useState(false)
   const [tick, setTick] = useState(0)
 
   const canView = hasPermission('SECURITY_LOGS_VIEW')
@@ -146,15 +148,19 @@ export default function Audit() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return logs.filter((l) => {
-      const isSecurity = SECURITY_TYPES.has(l.type)
+      if (!showRefresh && l.type === 'TOKEN_REFRESH') return false
+      const isSecurity = l.stream ? l.stream === 'security' : SECURITY_TYPES.has(l.type)
       const okCategory =
         category === 'all' || (category === 'seguridad' ? isSecurity : !isSecurity)
       const okQuery =
         !q ||
-        [l.type, l.actor, l.message, l.target].join(' ').toLowerCase().includes(q)
+        [l.type, l.actor, l.actorCode, l.actorRole, l.message, l.target, formatDateTime(l.ts).full]
+          .join(' ')
+          .toLowerCase()
+          .includes(q)
       return okCategory && okQuery
     })
-  }, [logs, category, query])
+  }, [logs, category, query, showRefresh])
 
   const exportStamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
 
@@ -163,10 +169,10 @@ export default function Audit() {
       toast.danger('Exportacion bloqueada', 'LOGS_EXPORT no esta habilitado para tu rol')
       return
     }
-    const headers = ['Marca', 'Fecha', 'Hora', 'Evento', 'Clasificacion', 'Actor', 'Objetivo', 'Detalle']
+    const headers = ['Marca', 'Fecha', 'Hora', 'Usuario', 'Codigo', 'Rol', 'Accion realizada', 'Evento', 'Clasificacion', 'IP']
     const rows = filtered.map((l) => {
       const ts = formatDateTime(l.ts)
-      return [l.id, ts.date, ts.time, l.type, l.severity, l.actor, l.target, l.message]
+      return [l.id, ts.date, ts.time, l.actor, l.actorCode ?? '-', l.actorRole ?? '-', l.message, l.type, l.severity, l.target]
     })
     exportCsv(`bitacora-seguridad-${exportStamp()}.csv`, headers, rows)
     toast.info('CSV descargado', `${filtered.length} eventos exportados`)
@@ -212,8 +218,8 @@ export default function Audit() {
       <div className="space-y-5">
         <SectionTitle
           icon={Activity}
-          title="Bitácora de seguridad"
-          subtitle="Eventos de acceso y control en vivo · inspeccione cualquier fila con la linterna para amplificar su traza"
+          title="Bitácora de auditoría"
+          subtitle="Quién hizo qué y a qué hora · todos los roles en vivo · inspeccione cualquier fila con la linterna"
           actions={
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" onClick={handleExportCsv} className="ls-btn-secondary text-xs">
@@ -260,6 +266,20 @@ export default function Audit() {
                     {f.label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setShowRefresh((v) => !v)}
+                  aria-pressed={showRefresh}
+                  title="Renovaciones automáticas de sesión (TOKEN_REFRESH)"
+                  className={cn(
+                    'rounded-full border px-2.5 py-0.5 font-mono text-[10px] uppercase transition-all duration-300',
+                    showRefresh
+                      ? 'border-accent/70 bg-accent/15 text-accent'
+                      : 'border-line/50 text-muted hover:text-ink',
+                  )}
+                >
+                  Renovaciones
+                </button>
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
@@ -274,11 +294,10 @@ export default function Audit() {
               <table className="ls-table">
                 <thead>
                   <tr>
-                    <th>Marca</th>
-                    <th>Evento</th>
-                    <th>Actor</th>
-                    <th className="hidden sm:table-cell">Detalle</th>
-                    <th className="text-right">Accion</th>
+                    <th>Fecha y hora</th>
+                    <th>Usuario</th>
+                    <th>Acción realizada</th>
+                    <th className="text-right">Detalle</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -296,22 +315,27 @@ export default function Audit() {
                           transition={{ duration: 0.45 }}
                           className="group cursor-crosshair"
                         >
-                          <td className="whitespace-nowrap font-mono text-[10px] text-muted">
-                            <span className="flex items-center gap-1.5">
+                          <td className="whitespace-nowrap font-mono" title={ts.full}>
+                            <span className="flex items-center gap-1.5 text-[12px] font-bold text-ink">
                               <span className={cn('h-1.5 w-1.5 rounded-full', SEVERITY[l.severity].dot)} />
                               {ts.time}
                             </span>
-                            <span className="text-[9px] opacity-70">{ts.date}</span>
+                            <span className="block text-[10px] text-muted">{ts.date}</span>
+                            <span className="block text-[9px] text-muted/80">{timeAgo(l.ts)}</span>
                           </td>
-                          <td>
-                            <span className={cn('font-mono text-[10.5px] font-bold', TYPE_TONE[l.type] ?? 'text-info')}>
-                              {l.type}
+                          <td className="whitespace-nowrap">
+                            <span className="block text-[12px] font-semibold text-ink">{l.actor}</span>
+                            <span className="block font-mono text-[9.5px] text-muted">
+                              {[l.actorRole, l.actorCode].filter(Boolean).join(' · ')}
                             </span>
                           </td>
-                          <td className="whitespace-nowrap font-mono text-[10.5px] text-ink">{l.actor}</td>
-                          <td className="hidden max-w-md sm:table-cell">
-                            <p className="line-clamp-2 text-[11.5px] leading-snug text-ink/85">{l.message}</p>
-                            <p className="font-mono text-[9.5px] text-muted">target: {l.target}</p>
+                          <td className="min-w-[14rem] max-w-md">
+                            <p className="text-[12px] leading-snug text-ink">{l.message}</p>
+                            <p className="font-mono text-[9.5px] text-muted">
+                              <span className={cn('font-bold', TYPE_TONE[l.type] ?? 'text-info')}>{l.type}</span>
+                              {' · IP '}
+                              {l.target}
+                            </p>
                           </td>
                           <td className="text-right">
                             <button
@@ -319,7 +343,7 @@ export default function Audit() {
                               onClick={() => {
                                 const r = issueReceipt({
                                   title: 'Comprobante de auditoria',
-                                  subject: l.message,
+                                  subject: `${l.actor} · ${l.message} · ${formatDateTime(l.ts).full}`,
                                   logId: l.id,
                                 })
                                 toast.info('Comprobante emitido', `${r.id} listo para rasgar y validar`)

@@ -15,6 +15,8 @@ router.use(scopeCasesToOwner)
 
 router.get('/', checkPermission('CASES_READ'), asyncHandler(controller.listCases))
 router.post('/', checkPermission('CASES_CREATE'), asyncHandler(controller.createCase))
+// Antes de /:id para que "assignees" no se lea como un id de expediente.
+router.get('/assignees', checkPermission('CASES_CREATE'), asyncHandler(controller.listAssignees))
 
 router.get('/:id', checkPermission('CASES_READ'), asyncHandler(controller.getCase))
 router.get('/:id/documents', checkPermission('CASES_READ'), asyncHandler(controller.listDocuments))

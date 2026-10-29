@@ -41,6 +41,8 @@ const {
 } = require('../utils/identity')
 
 const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12)
+/** Despacho por defecto de toda cuenta nueva (el formulario de alta ya no lo pide). */
+const DEFAULT_FIRM = process.env.FIRM_NAME || 'LegalShield Bufetes'
 
 /** Clave temporal que cumple la politica 9.3 (>= 12 chars, 4 clases). */
 function generateTempPassword() {
@@ -185,7 +187,8 @@ async function createUser(req, res) {
         cleanEmail,
         passwordHash,
         roleRow.id,
-        String(firm ?? '').trim() || null,
+        // El alta ya no pide despacho: todas las cuentas pertenecen al mismo.
+        String(firm ?? '').trim() || DEFAULT_FIRM,
         String(department ?? '').trim() || null,
         String(phone ?? '').trim() || null,
       ],

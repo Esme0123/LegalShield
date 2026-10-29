@@ -126,6 +126,8 @@ CREATE TABLE IF NOT EXISTS legal_cases (
   title              VARCHAR(200)  NOT NULL,
   client_name        VARCHAR(160)  NOT NULL,
   assigned_lawyer_id INT,
+  assistant_id       INT,
+  client_user_id     INT,
   status             VARCHAR(30)   NOT NULL DEFAULT 'abierto',
   matter             VARCHAR(40),
   court              VARCHAR(160),
@@ -138,10 +140,14 @@ CREATE TABLE IF NOT EXISTS legal_cases (
   updated_at         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   archived_at        DATETIME,
   CONSTRAINT fk_cases_lawyer FOREIGN KEY (assigned_lawyer_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_cases_assistant FOREIGN KEY (assistant_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_cases_client FOREIGN KEY (client_user_id) REFERENCES users(id) ON DELETE SET NULL,
   CONSTRAINT chk_case_status CHECK (status IN ('abierto', 'en_tramite', 'suspendido', 'archivado', 'cerrado')),
   CONSTRAINT chk_case_risk   CHECK (risk_level IN ('baja', 'media', 'alta', 'critica')),
   CONSTRAINT chk_case_progress CHECK (progress >= 0 AND progress <= 100),
   INDEX idx_cases_lawyer (assigned_lawyer_id),
+  INDEX idx_cases_assistant (assistant_id),
+  INDEX idx_cases_client (client_user_id),
   INDEX idx_cases_status (status),
   INDEX idx_cases_created (created_at DESC)
 ) ENGINE=InnoDB;

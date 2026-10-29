@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import {
   AlertTriangle,
   Briefcase,
   Building2,
   CheckCircle2,
   Fingerprint,
+  History,
   IdCard,
   Key,
   KeyRound,
@@ -317,7 +318,7 @@ function PasswordModule({ user, mustChange, onChange }) {
           <Key className="h-3.5 w-3.5" /> {busy ? 'Rotando…' : 'Rotar contrasena'}
         </button>
         <span className="font-mono text-[10.5px] text-muted">
-          la clave anterior se conserva en el historial y queda bloqueada para siempre
+          cada clave del historial vuelve a estar disponible tras {PASSWORD_HISTORY_LIMIT} cambios con claves distintas
         </span>
       </div>
 
@@ -340,8 +341,11 @@ function PasswordModule({ user, mustChange, onChange }) {
                 <span className="font-mono text-[10.5px] text-muted">
                   {formatDateTime(entry.createdAt).full}
                 </span>
-                <span className="font-mono text-[9.5px] uppercase tracking-wider text-danger">
-                  #{i + 1} bloqueada
+                <span className="text-right font-mono text-[9.5px] uppercase tracking-wider text-danger">
+                  #{i + 1} {i === 0 ? 'actual' : 'bloqueada'}
+                  <span className="block normal-case tracking-normal text-muted">
+                    se libera tras {PASSWORD_HISTORY_LIMIT - i} cambio{PASSWORD_HISTORY_LIMIT - i === 1 ? '' : 's'}
+                  </span>
                 </span>
               </li>
             ))}
@@ -352,7 +356,95 @@ function PasswordModule({ user, mustChange, onChange }) {
   )
 }
 
+/**
+ * Ventana que explica por que se rechazo una clave del historial y cuanto falta
+ * para poder usarla de nuevo. El bloqueo es por cantidad de cambios; la fecha es
+ * una estimacion con la rotacion obligatoria (cambiar antes la acorta).
+ */
+function ReuseBlockedModal({ info, onClose }) {
+  const changes = Number(info.changesRequired ?? PASSWORD_HISTORY_LIMIT)
+  const plural = changes === 1 ? '' : 's'
+  const usedFrom = info.setAt ? formatDateTime(info.setAt).date : null
+  const usedUntil = info.usedUntil ? formatDateTime(info.usedUntil).date : null
+  const reusableFrom = info.reusableFrom ? formatDateTime(info.reusableFrom).date : null
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[70] grid place-items-center bg-navy/70 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        onClick={(e) => e.stopPropagation()}
+        initial={{ opacity: 0, y: 18, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -10, scale: 0.98 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+        className="ls-card w-full max-w-md p-5 sm:p-6"
+        role="alertdialog"
+        aria-labelledby="reuse-title"
+        aria-describedby="reuse-desc"
+      >
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-danger/50 bg-danger/10 text-danger">
+            <History className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h3 id="reuse-title" className="font-display text-base font-bold text-ink">
+              No puede reutilizar una contraseña antigua
+            </h3>
+            <p className="mt-1 font-mono text-[11px] text-muted">
+              Política del despacho · se recuerdan sus últimas {info.historyLimit ?? PASSWORD_HISTORY_LIMIT} contraseñas
+            </p>
+          </div>
+        </div>
+
+        <p id="reuse-desc" className="mt-4 text-[12.5px] leading-snug text-ink/85">
+          {info.isCurrent
+            ? `La contraseña que escribió es la que usa actualmente${usedFrom ? ` (desde el ${usedFrom})` : ''}.`
+            : `La contraseña que escribió ya la usó${usedFrom ? ` del ${usedFrom}` : ''}${usedUntil ? ` al ${usedUntil}` : ''}.`}{' '}
+          Para volver a usarla primero debe cambiar su contraseña{' '}
+          <strong className="text-ink">
+            {changes} {changes === 1 ? 'vez' : 'veces'} con contraseña{plural} distinta{plural}
+          </strong>
+          .
+        </p>
+
+        <div className="ls-panel mt-4 grid gap-1 p-3 font-mono text-[11px]">
+          <p className="flex justify-between gap-3">
+            <span className="text-muted">Cambios que faltan</span>
+            <span className="font-bold text-ink">{changes}</span>
+          </p>
+          <p className="flex justify-between gap-3">
+            <span className="text-muted">Rotación obligatoria</span>
+            <span className="text-ink">cada {info.maxAgeDays ?? 90} días</span>
+          </p>
+          <p className="flex justify-between gap-3">
+            <span className="text-muted">Tiempo de espera estimado</span>
+            <span className="text-right font-bold text-warn">
+              {info.waitDays ?? changes * 90} días{reusableFrom ? ` · ${reusableFrom}` : ''}
+            </span>
+          </p>
+        </div>
+        <p className="mt-2 text-[11px] leading-snug text-muted">
+          La espera es estimada con la rotación obligatoria; si cambia su contraseña antes, se libera antes.
+          Elija ahora una contraseña nueva que no haya usado.
+        </p>
+
+        <div className="mt-6 flex justify-end">
+          <button type="button" onClick={onClose} className="ls-btn-primary text-xs" autoFocus>
+            Entendido, elegiré otra
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
 export default function Profile() {
+  const [reuseInfo, setReuseInfo] = useState(null)
   const session = useAppStore((s) => s.session)
   const profile = useAppStore((s) => s.profile)
   const loadProfile = useAppStore((s) => s.loadProfile)
@@ -388,10 +480,13 @@ export default function Profile() {
       )
       return result
     }
+    if (result.reason === 'reused') {
+      setReuseInfo(result.reuse ?? {})
+      return result
+    }
     const messages = {
       current: ['Clave actual incorrecta', 'Verifique la contrasena vigente antes de rotar'],
       same: ['Contrasena identica', 'La nueva clave debe ser distinta de la actual'],
-      reused: ['Reutilizacion bloqueada', 'La clave pertenece al historial de las ultimas 5 (punto 9.3)'],
       weak: ['Contrasena insuficiente', 'Alcanze el nivel "Aceptable" del medidor de fortaleza'],
       unknown: ['Usuario no encontrado', 'La sesion caduco, inicie sesion nuevamente'],
     }
@@ -428,6 +523,10 @@ export default function Profile() {
         ficha como <span className="font-mono text-info">PROFILE_UPDATED</span> y las rotaciones de clave
         como <span className="font-mono text-info">PASSWORD_CHANGED</span> con severidad critica.
       </p>
+
+      <AnimatePresence>
+        {reuseInfo && <ReuseBlockedModal info={reuseInfo} onClose={() => setReuseInfo(null)} />}
+      </AnimatePresence>
     </motion.div>
   )
 }

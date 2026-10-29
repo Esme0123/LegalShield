@@ -12,25 +12,27 @@
  * este modulo: su lista de concesiones se mantiene sincronizada a mano con esta.
  *
  * Matriz estricta de segregacion de funciones:
- *   · OSI      -> ABM de usuarios, gestion de roles, desbloqueo y logs de seguridad.
- *   · Socio    -> expedientes (con alcance de todo el despacho), metricas y logs de aplicacion.
- *   · Abogado/Asistente/Cliente -> permisos operacionales sobre sus expedientes.
+ *   · OSI       -> seguridad: ABM de usuarios, roles, desbloqueos, bitacora e ISO 27001.
+ *                  No ve expedientes: custodia el sistema, no el secreto profesional.
+ *   · Socio     -> todos los expedientes del despacho; nada de seguridad ni de usuarios.
+ *   · Abogado   -> crea y lleva SUS expedientes (titular), con documentos confidenciales.
+ *   · Asistente -> apoyo en los expedientes donde esta asignado; sin documentos confidenciales.
+ *   · Cliente   -> solo consulta el expediente vinculado a su cuenta.
  */
 const RBAC_MATRIX = {
   osi: [
     'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
     'USERS_UNLOCK', 'ACCOUNT_UNLOCK',
     'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
-    'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT',
-    'CASES_READ',
+    'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'RISK_ASSESS',
   ],
   socio: [
     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL',
     'DOCS_REVEAL', 'DOCS_DOWNLOAD',
-    'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT', 'RISK_ASSESS',
+    'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT',
   ],
-  abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT', 'RISK_ASSESS'],
-  asistente: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'],
+  abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT'],
+  asistente: ['CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'],
   cliente: ['CASES_READ'],
 }
 

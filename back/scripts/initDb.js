@@ -123,6 +123,8 @@ const TABLES = [
      title              VARCHAR(200)  NOT NULL,
      client_name        VARCHAR(160)  NOT NULL,
      assigned_lawyer_id INT,
+     assistant_id       INT,
+     client_user_id     INT,
      status             VARCHAR(30)   NOT NULL DEFAULT 'abierto',
      matter             VARCHAR(40),
      court              VARCHAR(160),
@@ -135,10 +137,14 @@ const TABLES = [
      updated_at         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
      archived_at        DATETIME,
      CONSTRAINT fk_cases_lawyer FOREIGN KEY (assigned_lawyer_id) REFERENCES users(id) ON DELETE SET NULL,
+     CONSTRAINT fk_cases_assistant FOREIGN KEY (assistant_id) REFERENCES users(id) ON DELETE SET NULL,
+     CONSTRAINT fk_cases_client FOREIGN KEY (client_user_id) REFERENCES users(id) ON DELETE SET NULL,
      CONSTRAINT chk_case_status CHECK (status IN ('abierto', 'en_tramite', 'suspendido', 'archivado', 'cerrado')),
      CONSTRAINT chk_case_risk   CHECK (risk_level IN ('baja', 'media', 'alta', 'critica')),
      CONSTRAINT chk_case_progress CHECK (progress >= 0 AND progress <= 100),
      INDEX idx_cases_lawyer (assigned_lawyer_id),
+     INDEX idx_cases_assistant (assistant_id),
+     INDEX idx_cases_client (client_user_id),
      INDEX idx_cases_status (status),
      INDEX idx_cases_created (created_at DESC)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -376,11 +382,13 @@ const DEMO_CASES = [
   {
     caseNumber: 'EXP-2026-0014',
     title: 'Despido disciplinario · Metalurgia Andes',
-    clientName: 'Metalurgia Andes S.A.S.',
+    clientName: 'Metalurgia Andes S.R.L.',
     lawyerCode: 'LEG-2026-0142',
+    assistantCode: 'LEG-2026-0411', // paula.sando
+    clientCode: 'LEG-2026-0390', // carlos.cliente
     status: 'en_tramite',
     matter: 'Laboral',
-    court: 'Juzgado 12 Laboral de Bogota',
+    court: 'Juzgado Publico de Trabajo y Seguridad Social 2.o de La Paz',
     stage: 'Prueba',
     riskLevel: 'alta',
     progress: 62,
@@ -394,7 +402,7 @@ const DEMO_CASES = [
     lawyerCode: 'LEG-2026-0001',
     status: 'abierto',
     matter: 'Civil',
-    court: 'Tribunal Superior',
+    court: 'Tribunal Departamental de Justicia de Cochabamba',
     stage: 'Contestacion',
     riskLevel: 'critica',
     progress: 38,
@@ -406,9 +414,10 @@ const DEMO_CASES = [
     title: 'Derecho de peticion · Ministerio de Salud',
     clientName: 'Redaccion Norte (periodista)',
     lawyerCode: 'LEG-2026-0142',
+    assistantCode: 'LEG-2026-0411',
     status: 'en_tramite',
     matter: 'Administrativo',
-    court: 'Ministerio de Salud',
+    court: 'Ministerio de Salud y Deportes',
     stage: 'Seguimiento',
     riskLevel: 'media',
     progress: 84,
@@ -422,7 +431,7 @@ const DEMO_CASES = [
     lawyerCode: 'LEG-2026-0001',
     status: 'abierto',
     matter: 'Familia',
-    court: 'Juzgado 3 de Sucesiones',
+    court: 'Juzgado Publico de Familia 3.o de Santa Cruz',
     stage: 'Peritaje',
     riskLevel: 'baja',
     progress: 47,
@@ -432,11 +441,11 @@ const DEMO_CASES = [
   {
     caseNumber: 'EXP-2026-0058',
     title: 'Propiedad industrial · Trademark Falcon',
-    clientName: 'Falcon Studio SAS',
+    clientName: 'Falcon Studio S.R.L.',
     lawyerCode: 'LEG-2026-0142',
     status: 'en_tramite',
     matter: 'Comercial',
-    court: 'SIC - Decision 3',
+    court: 'SENAPI - Direccion de Propiedad Industrial',
     stage: 'Ejecucion',
     riskLevel: 'alta',
     progress: 71,
@@ -454,7 +463,7 @@ const DEMO_DOCUMENTS = [
     classification: 'Publica',
     isPrivileged: false,
     pages: 6,
-    content: 'Peticion formal presentada ante el Juzgado 12 Laboral de Bogota. Documento de demostracion.',
+    content: 'Peticion formal presentada ante el Juzgado Publico de Trabajo 2.o de La Paz. Documento de demostracion.',
   },
   {
     caseNumber: 'EXP-2026-0014',
@@ -463,7 +472,7 @@ const DEMO_DOCUMENTS = [
     classification: 'Publica',
     isPrivileged: false,
     pages: 3,
-    content: 'Poder notarial otorgado a la firma para representar a Metalurgia Andes S.A.S. Documento de demostracion.',
+    content: 'Poder notarial otorgado a la firma para representar a Metalurgia Andes S.R.L. Documento de demostracion.',
   },
   {
     caseNumber: 'EXP-2026-0014',
@@ -744,6 +753,22 @@ async function main() {
     logger.info('Columna agregada: users.lock_count')
   }
 
+  // Equipo del expediente: el asistente de apoyo y el cliente vinculado ven el
+  // caso igual que su abogado titular (alcance por asignacion, A01:2021).
+  for (const [column, after, fk, index] of [
+    ['assistant_id', 'assigned_lawyer_id', 'fk_cases_assistant', 'idx_cases_assistant'],
+    ['client_user_id', 'assistant_id', 'fk_cases_client', 'idx_cases_client'],
+  ]) {
+    if (!(await columnExists('legal_cases', column))) {
+      await run(`ALTER TABLE legal_cases ADD COLUMN ${column} INT NULL AFTER ${after}`)
+      await run(`ALTER TABLE legal_cases ADD CONSTRAINT ${fk} FOREIGN KEY (${column}) REFERENCES users(id) ON DELETE SET NULL`)
+      logger.info(`Columna agregada: legal_cases.${column}`)
+    }
+    if (!(await indexExists('legal_cases', index))) {
+      await run(`ALTER TABLE legal_cases ADD INDEX ${index} (${column})`)
+    }
+  }
+
   // 5. Seed data.
   for (const [code, name, description] of ROLES) {
     await run(
@@ -869,17 +894,26 @@ async function main() {
   for (const c of DEMO_CASES) {
     await run(
       `INSERT INTO legal_cases
-         (case_number, title, client_name, assigned_lawyer_id, status, matter, court, stage, risk_level, progress, deadline, is_privileged)
-       VALUES (?, ?, ?, (SELECT id FROM users WHERE user_code = ?), ?, ?, ?, ?, ?, ?, ?, ?)
+         (case_number, title, client_name, assigned_lawyer_id, assistant_id, client_user_id,
+          status, matter, court, stage, risk_level, progress, deadline, is_privileged)
+       VALUES (?, ?, ?,
+               (SELECT id FROM users WHERE user_code = ?),
+               (SELECT id FROM users WHERE user_code = ?),
+               (SELECT id FROM users WHERE user_code = ?),
+               ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          title = VALUES(title),
+         client_name = VALUES(client_name),
          assigned_lawyer_id = VALUES(assigned_lawyer_id),
+         assistant_id = VALUES(assistant_id),
+         client_user_id = VALUES(client_user_id),
+         court = VALUES(court),
          status = VALUES(status),
          progress = VALUES(progress),
          deadline = VALUES(deadline)`,
       [
-        c.caseNumber, c.title, c.clientName, c.lawyerCode, c.status, c.matter, c.court,
-        c.stage, c.riskLevel, c.progress, c.deadline, c.isPrivileged,
+        c.caseNumber, c.title, c.clientName, c.lawyerCode, c.assistantCode ?? null, c.clientCode ?? null,
+        c.status, c.matter, c.court, c.stage, c.riskLevel, c.progress, c.deadline, c.isPrivileged,
       ],
     )
   }

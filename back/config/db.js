@@ -23,7 +23,9 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: Number(process.env.DB_POOL_MAX || 10),
   queueLimit: 0,
-  timezone: 'Z',
+  // MySQL (XAMPP) guarda CURRENT_TIMESTAMP/NOW() en la hora local del equipo
+  // (America/La_Paz). Leerlo como UTC ('Z') desfasaba la bitacora 4 horas.
+  timezone: 'local',
   connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT_MS || 10000),
   decimalNumbers: true,
 })

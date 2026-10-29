@@ -5,33 +5,78 @@
  *
  * Control de acceso A01:2021 aplicado en dos capas:
  *   1. middleware `scopeCasesToOwner` -> quien tiene el permiso CASES_READ_ALL ve todo
- *      el despacho, el resto queda acotado a `assigned_lawyer_id = usuario.id`;
+ *      el despacho (socio); el resto queda acotado a los expedientes donde participa;
  *   2. cada consulta incluye el filtro por `req.scope`, de modo que la restriccion
  *      viaja en la propia sentencia SQL y no en el filtrado posterior.
  *
- * Un cliente tampoco puede leer expedientes ajenos: solo los asignados a su
- * usuario. Si un expediente no tiene titular, solo es visible con CASES_READ_ALL.
+ * Participar en un expediente es figurar en su equipo:
+ *   · assigned_lawyer_id  abogado titular (lo crea y lo lleva);
+ *   · assistant_id        asistente de apoyo (edita, sin documentos confidenciales);
+ *   · client_user_id      cliente vinculado (solo consulta).
+ * Si un expediente no tiene equipo, solo es visible con CASES_READ_ALL.
  */
 
 const { rows, one, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
 const { badRequest, forbidden, notFound } = require('../utils/errors')
 const { parsePagination } = require('../utils/helpers')
+const { hasPermission } = require('../middlewares/rbacMiddleware')
 
 const CASE_STATUSES = ['abierto', 'en_tramite', 'suspendido', 'archivado', 'cerrado']
 const RISK_LEVELS = ['baja', 'media', 'alta', 'critica']
 
 /** Columnas expuestas al cliente (nunca password ni hashes). */
 const SELECT_CASE = `
-  SELECT c.id, c.assigned_lawyer_id, c.case_number AS "caseNumber", c.title,
+  SELECT c.id, c.assigned_lawyer_id, c.assistant_id, c.client_user_id,
+         c.case_number AS "caseNumber", c.title,
          c.client_name AS "clientName", c.status, c.matter, c.court, c.stage,
          c.risk_level AS "riskLevel", c.progress, c.deadline,
          c.is_privileged AS "isPrivileged",
          c.created_at AS "createdAt", c.updated_at AS "updatedAt", c.archived_at AS "archivedAt",
          u.user_code AS "ownerUserCode", u.username AS "ownerName",
-         (SELECT COUNT(*) FROM case_documents d WHERE d.case_id = c.id) AS "documentCount"
+         a.user_code AS "assistantUserCode", a.username AS "assistantName",
+         cl.user_code AS "clientUserCode", cl.username AS "clientUserName",
+         (SELECT COUNT(*) FROM case_documents d WHERE d.case_id = c.id) AS "documentCount",
+         (SELECT COUNT(*) FROM case_documents d
+           WHERE d.case_id = c.id AND d.is_privileged = FALSE AND d.classification = 'Publica') AS "publicDocumentCount"
     FROM legal_cases c
-    LEFT JOIN users u ON u.id = c.assigned_lawyer_id`
+    LEFT JOIN users u ON u.id = c.assigned_lawyer_id
+    LEFT JOIN users a ON a.id = c.assistant_id
+    LEFT JOIN users cl ON cl.id = c.client_user_id`
+
+/** El usuario figura en el equipo del expediente (titular, asistente o cliente). */
+function isMember(scope, row) {
+  return scope.all || [row.assigned_lawyer_id, row.assistant_id, row.client_user_id].includes(scope.userId)
+}
+
+/** Puede operar el expediente: titular o asistente. El cliente solo consulta. */
+function canOperate(scope, row) {
+  return scope.all || row.assigned_lawyer_id === scope.userId || row.assistant_id === scope.userId
+}
+
+/**
+ * Sin DOCS_REVEAL (asistente, cliente) los documentos confidenciales, restringidos
+ * o privilegiados no existen para el usuario: ni siquiera se listan.
+ */
+function documentVisibility(user) {
+  return hasPermission(user, 'DOCS_REVEAL') ? '' : "AND is_privileged = FALSE AND classification = 'Publica'"
+}
+
+/**
+ * Resuelve el User ID de un integrante del equipo y comprueba que sea una cuenta
+ * activa con el rol esperado: nadie puede vincular a un OSI como "cliente".
+ */
+async function resolveMember(userCode, roles, label) {
+  const code = String(userCode ?? '').trim().toUpperCase()
+  if (!code) return null
+  const member = await one(
+    `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE u.user_code = ? AND u.is_active = TRUE AND r.code IN (?)`,
+    [code, roles],
+  )
+  if (!member) throw badRequest(`${label} ${code} no existe, esta dado de baja o no tiene el rol adecuado`)
+  return member.id
+}
 
 /** WHERE dinamico: alcance por usuario + filtros de consulta. */
 function buildFilters(req) {
@@ -39,8 +84,8 @@ function buildFilters(req) {
   const params = []
 
   if (!req.scope.all) {
-    where.push('c.assigned_lawyer_id = ?')
-    params.push(req.scope.userId)
+    where.push('(c.assigned_lawyer_id = ? OR c.assistant_id = ? OR c.client_user_id = ?)')
+    params.push(req.scope.userId, req.scope.userId, req.scope.userId)
   }
 
   const { status, riskLevel, owner, search } = req.query
@@ -110,14 +155,14 @@ async function getCase(req, res) {
   const found = await one(`${SELECT_CASE} WHERE c.id = ?`, params)
   if (!found) throw notFound(`No existe el expediente con id ${params[0]}`)
 
-  // Un expediente sin titular solo lo abre la direccion del despacho.
-  if (!scope.all && found.assigned_lawyer_id !== scope.userId) {
+  // Un expediente sin equipo solo lo abre la direccion del despacho.
+  if (!isMember(scope, found)) {
     record('ACCESS_DENIED', {
       userCode: req.user.user_code,
       req,
       details: { path: req.originalUrl, reason: 'expediente_fuera_de_ambito' },
     })
-    throw forbidden('No tiene acceso a este expediente: pertenece a otro abogado asignado')
+    throw forbidden('No tiene acceso a este expediente: no forma parte de su equipo')
   }
 
   record('CASE_READ', { userCode: req.user.user_code, req, details: { caseNumber: found.caseNumber } })
@@ -129,7 +174,10 @@ async function getCase(req, res) {
 /* -------------------------------------------------------------------------- */
 
 async function createCase(req, res) {
-  const { title, clientName, status = 'abierto', matter, court, stage, riskLevel = 'media', progress = 0, deadline, isPrivileged = false } = req.body ?? {}
+  const {
+    title, clientName, status = 'abierto', matter, court, stage, riskLevel = 'media', progress = 0, deadline,
+    isPrivileged = false, assistantCode, clientCode,
+  } = req.body ?? {}
 
   if (!String(title ?? '').trim()) throw badRequest('El titulo es obligatorio')
   if (!String(clientName ?? '').trim()) throw badRequest('El cliente es obligatorio')
@@ -142,8 +190,12 @@ async function createCase(req, res) {
   }
 
   // Sin alcance global, el expediente se autoasigna: el abogado no puede
-  // colarse como titular de un caso ajeno.
-  const ownerUserCode = req.scope.all ? req.body?.ownerUserCode : req.user.user_code
+  // colarse como titular de un caso ajeno. El socio puede asignarlo a un abogado.
+  const ownerId = req.scope.all && req.body?.ownerUserCode
+    ? await resolveMember(req.body.ownerUserCode, ['abogado', 'socio'], 'El abogado titular')
+    : req.user.id
+  const assistantId = await resolveMember(assistantCode, ['asistente'], 'El asistente')
+  const clientUserId = await resolveMember(clientCode, ['cliente'], 'El cliente')
 
   const created = await withTransaction(async (client) => {
     // Mismo criterio que el correlativo de User ID: GET_LOCK serializa a los
@@ -153,23 +205,29 @@ async function createCase(req, res) {
     await client.query('SELECT GET_LOCK(?, 10)', [lockName])
 
     try {
+      // El correlativo es el ultimo tramo (EXP-2026-0058 -> 58) dentro del ano en
+      // curso: quitar solo los no digitos mezclaba el ano con el numero.
+      const year = new Date().getFullYear()
       const { rows: seq } = await client.query(
-        `SELECT COALESCE(MAX(CAST(NULLIF(REGEXP_REPLACE(case_number, '[^0-9]', ''), '') AS UNSIGNED)), 0) AS serial
-           FROM legal_cases`,
+        `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(case_number, '-', -1) AS UNSIGNED)), 0) AS serial
+           FROM legal_cases
+          WHERE case_number LIKE ?`,
+        [`EXP-${year}-%`],
       )
-      const caseNumber = `EXP-${new Date().getFullYear()}-${String(Number(seq[0].serial) + 1).padStart(4, '0')}`
+      const caseNumber = `EXP-${year}-${String(Number(seq[0].serial) + 1).padStart(4, '0')}`
 
       const { insertId } = await client.query(
         `INSERT INTO legal_cases
-           (case_number, title, client_name, assigned_lawyer_id, status, matter, court, stage, risk_level, progress, deadline, is_privileged)
-         VALUES (?, ?, ?,
-                 (SELECT id FROM users WHERE user_code = ?),
-                 ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (case_number, title, client_name, assigned_lawyer_id, assistant_id, client_user_id,
+            status, matter, court, stage, risk_level, progress, deadline, is_privileged)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           caseNumber,
           String(title).trim(),
           String(clientName).trim(),
-          ownerUserCode ?? null,
+          ownerId,
+          assistantId,
+          clientUserId,
           status,
           String(matter ?? '').trim() || null,
           String(court ?? '').trim() || null,
@@ -222,13 +280,13 @@ const UPDATABLE = {
 async function updateCase(req, res) {
   const { params, scope } = findOneOr404(req)
   const existing = await one(
-    'SELECT id, assigned_lawyer_id, case_number, progress FROM legal_cases WHERE id = ?',
+    'SELECT id, assigned_lawyer_id, assistant_id, client_user_id, case_number, progress FROM legal_cases WHERE id = ?',
     params,
   )
   if (!existing) throw notFound(`No existe el expediente con id ${params[0]}`)
 
-  if (!scope.all && existing.assigned_lawyer_id !== scope.userId) {
-    throw forbidden('No tiene acceso a este expediente: pertenece a otro abogado asignado')
+  if (!canOperate(scope, existing)) {
+    throw forbidden('No puede editar este expediente: no es su titular ni su asistente')
   }
 
   const sets = []
@@ -300,7 +358,7 @@ async function archiveCase(req, res) {
   if (!existing) throw notFound(`No existe el expediente con id ${params[0]}`)
 
   if (!scope.all && existing.assigned_lawyer_id !== scope.userId) {
-    throw forbidden('No tiene acceso a este expediente: pertenece a otro abogado asignado')
+    throw forbidden('Solo el abogado titular o la direccion del despacho pueden archivar el expediente')
   }
   if (existing.status === 'archivado') throw badRequest('El expediente ya estaba archivado')
 
@@ -335,14 +393,17 @@ async function listDocuments(req, res) {
             is_privileged AS "isPrivileged", mime_type AS "mimeType",
             page_count AS "pages", checksum, created_at AS "createdAt"
        FROM case_documents
-      WHERE case_id = ?
+      WHERE case_id = ? ${documentVisibility(req.user)}
       ORDER BY is_privileged ASC, id ASC`,
     [target.id],
   )
+  const countRow = await one('SELECT COUNT(*) AS total FROM case_documents WHERE case_id = ?', [target.id])
 
   res.json({
     caseId: target.caseNumber,
     total: documents.length,
+    // Documentos que existen pero que el rol no puede ver (confidenciales).
+    hidden: Number(countRow.total) - documents.length,
     documents: documents.map((doc) => ({ ...doc, isPrivileged: Boolean(doc.isPrivileged) })),
   })
 }
@@ -396,6 +457,31 @@ async function revealDocument(req, res) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* GET /api/cases/assignees                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Cuentas activas que se pueden sumar al equipo de un expediente nuevo. Solo
+ * expone User ID y codigo: quien crea expedientes no administra usuarios. Los
+ * abogados titulares solo se listan a quien puede asignar casos (socio).
+ */
+async function listAssignees(req, res) {
+  const roles = req.scope.all ? ['asistente', 'cliente', 'abogado'] : ['asistente', 'cliente']
+  const people = await rows(
+    `SELECT u.user_code AS "userCode", u.username, r.code AS role
+       FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE u.is_active = TRUE AND r.code IN (?)
+      ORDER BY u.username`,
+    [roles],
+  )
+  res.json({
+    lawyers: people.filter((p) => p.role === 'abogado'),
+    assistants: people.filter((p) => p.role === 'asistente'),
+    clients: people.filter((p) => p.role === 'cliente'),
+  })
+}
+
+/* -------------------------------------------------------------------------- */
 /* Auxiliares                                                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -403,12 +489,12 @@ async function revealDocument(req, res) {
 async function findScopedCase(req) {
   const { params, scope } = findOneOr404(req)
   const found = await one(
-    'SELECT id, case_number, assigned_lawyer_id FROM legal_cases WHERE id = ?',
+    'SELECT id, case_number, assigned_lawyer_id, assistant_id, client_user_id FROM legal_cases WHERE id = ?',
     params,
   )
   if (!found) throw notFound(`No existe el expediente con id ${params[0]}`)
-  if (!scope.all && found.assigned_lawyer_id !== scope.userId) {
-    throw forbidden('No tiene acceso a este expediente: pertenece a otro abogado asignado')
+  if (!isMember(scope, found)) {
+    throw forbidden('No tiene acceso a este expediente: no forma parte de su equipo')
   }
   return { id: found.id, caseNumber: found.case_number }
 }
@@ -432,6 +518,7 @@ module.exports = {
   archiveCase,
   listDocuments,
   revealDocument,
+  listAssignees,
   CASE_STATUSES,
   RISK_LEVELS,
 }

@@ -166,14 +166,14 @@ export default function RiskAssessment() {
       <SectionTitle
         icon={ShieldCheck}
         title="Autoevaluacion ISO/IEC 27001:2022"
-        subtitle="Controles del Anexo A puntuados de 0 a 5 Â· cada ajuste genera evidencia de auditoria"
+        subtitle="Controles del Anexo A puntuados de 0 a 5 · cada ajuste genera evidencia de auditoria"
         actions={
           canEdit ? (
             <Badge tone="accent">
               <Target className="h-3 w-3" /> Evaluacion editable
             </Badge>
           ) : (
-            <Badge tone="danger">Solo lectura Â· falta RISK_ASSESS</Badge>
+            <Badge tone="danger">Solo lectura · falta RISK_ASSESS</Badge>
           )
         }
       />
@@ -272,7 +272,7 @@ export default function RiskAssessment() {
           <SectionTitle
             icon={Gauge}
             title="Autoevaluacion de controles"
-            subtitle="0 Inexistente Â· 5 Optimizado"
+            subtitle="0 Inexistente · 5 Optimizado"
           />
           <div className="space-y-4">
             {controls.map((c) => (
@@ -291,7 +291,7 @@ export default function RiskAssessment() {
                         : 'border-danger/50 bg-danger/10 text-danger',
                     )}
                   >
-                    {c.score}/5 Â· {SCORE_LABELS[c.score]}
+                    {c.score}/5 · {SCORE_LABELS[c.score]}
                   </span>
                 </div>
 
@@ -322,7 +322,7 @@ export default function RiskAssessment() {
           <SectionTitle
             icon={Grid3x3}
             title="Matriz de calor de riesgos"
-            subtitle="Probabilidad x Impacto Â· 1 a 5. Seleccione un riesgo y clic en la celda para recolocarlo."
+            subtitle="Probabilidad x Impacto · 1 a 5. Seleccione un riesgo y clic en la celda para recolocarlo."
           />
 
           {selected && (
@@ -349,7 +349,7 @@ export default function RiskAssessment() {
                 </div>
               </div>
               <p className="mt-1.5 font-mono text-[10px] text-muted">
-                Tratamiento: {selected.treatment} Â· celda actual ({selected.impact},{selected.probability})
+                Tratamiento: {selected.treatment} · celda actual ({selected.impact},{selected.probability})
               </p>
             </div>
           )}

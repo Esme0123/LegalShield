@@ -9,24 +9,44 @@
 const bcrypt = require('bcryptjs')
 const { rows } = require('../config/db')
 const { unprocessable } = require('./errors')
-const { PASSWORD_HISTORY_LIMIT } = require('./passwordPolicy')
+const { PASSWORD_HISTORY_LIMIT, PASSWORD_MAX_AGE_DAYS } = require('./passwordPolicy')
+
+const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
  * Rechaza (422) cualquier clave presente en las ultimas PASSWORD_HISTORY_LIMIT.
  * bcrypt.compare contra cada hash previo detecta tanto la clave actual como las
  * reutilizadas, sin comparar en texto plano.
+ *
+ * El bloqueo es por cantidad de cambios, no por fecha: la clave en la posicion k
+ * (0 = la actual) sale del historial tras `limite - k` cambios con claves
+ * distintas. La fecha estimada asume la rotacion obligatoria cada
+ * PASSWORD_MAX_AGE_DAYS dias; cambiar antes acorta la espera.
  */
 async function assertPasswordNotReused(userId, newPassword) {
   const recent = await rows(
-    'SELECT password_hash FROM password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+    'SELECT password_hash, created_at FROM password_history WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?',
     [userId, PASSWORD_HISTORY_LIMIT],
   )
 
-  for (const entry of recent) {
+  for (const [index, entry] of recent.entries()) {
     if (await bcrypt.compare(newPassword, entry.password_hash)) {
+      const changesRequired = PASSWORD_HISTORY_LIMIT - index
+      const waitDays = changesRequired * PASSWORD_MAX_AGE_DAYS
       throw unprocessable(
-        `La nueva contrasena coincide con una de las ultimas ${PASSWORD_HISTORY_LIMIT} contrasenas del usuario`,
-        { reuseBlocked: true, historyLimit: PASSWORD_HISTORY_LIMIT },
+        `No puede reutilizar una contrasena antigua: debe usar ${changesRequired} contrasena(s) distinta(s) antes de volver a usar esta`,
+        {
+          reuseBlocked: true,
+          historyLimit: PASSWORD_HISTORY_LIMIT,
+          isCurrent: index === 0,
+          setAt: entry.created_at,
+          // Hasta cuando estuvo vigente: la fecha en que la reemplazo la siguiente.
+          usedUntil: index === 0 ? null : recent[index - 1].created_at,
+          changesRequired,
+          maxAgeDays: PASSWORD_MAX_AGE_DAYS,
+          waitDays,
+          reusableFrom: new Date(Date.now() + waitDays * DAY_MS).toISOString(),
+        },
       )
     }
   }
