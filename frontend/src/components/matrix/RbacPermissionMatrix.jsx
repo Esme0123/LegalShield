@@ -6,9 +6,6 @@ import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { cn } from '@/lib/cn'
 
-/** Concesiones que el OSI no puede perder: el servidor tambien las rechaza. */
-const PROTECTED_CELLS = { osi: ['ROLES_MANAGE', 'RBAC_MANAGE'] }
-const isProtected = (roleCode, permissionCode) => Boolean(PROTECTED_CELLS[roleCode]?.includes(permissionCode))
 
 /**
  * Matriz RBAC atomica: rol x permiso, construida con lo que devuelve
@@ -24,7 +21,9 @@ export default function RbacPermissionMatrix() {
   const togglePermission = useAppStore((s) => s.togglePermission)
   const loadMatrix = useAppStore((s) => s.loadMatrix)
 
-  const canEdit = hasPermission('ROLES_MANAGE') || hasPermission('RBAC_MANAGE')
+  const canEdit = hasPermission('ROLES_MANAGE')
+  // Roles de solo lectura (OSI): un OSI no cambia los permisos de otro OSI. El servidor tambien lo rechaza.
+  const isLockedRole = (roleCode) => Boolean(rbacRoles.find((r) => r.code === roleCode)?.locked)
 
   // Un permiso del catalogo sin metadatos locales conserva su codigo y descripcion de la API.
   const groups = useMemo(() => {
@@ -33,7 +32,12 @@ export default function RbacPermissionMatrix() {
       const meta = PERMISSIONS.find((p) => p.id === perm.code)
       const group = meta?.group ?? 'Otros'
       if (!byGroup.has(group)) byGroup.set(group, [])
-      byGroup.get(group).push({ code: perm.code, label: meta?.label ?? perm.description ?? perm.code, group })
+      byGroup.get(group).push({
+        code: perm.code,
+        label: meta?.label ?? perm.description ?? perm.code,
+        group,
+        osiExclusive: Boolean(perm.osiExclusive),
+      })
     }
     return [...byGroup.entries()].map(([group, items]) => ({ group, items }))
   }, [rbacPermissions])
@@ -44,7 +48,7 @@ export default function RbacPermissionMatrix() {
   )
 
   const handleToggle = async (roleCode, permission) => {
-    if (!canEdit || isProtected(roleCode, permission.code)) return
+    if (!canEdit || isLockedRole(roleCode)) return
     const roleLabel = roles.find((r) => r.code === roleCode)?.name ?? roleCode
     try {
       const { granting } = await togglePermission(roleCode, permission.code)
@@ -72,7 +76,8 @@ export default function RbacPermissionMatrix() {
         <div>
           <p className="font-display text-sm font-bold tracking-tight">Matriz de permisos por rol</p>
           <p className="mt-0.5 text-[11px] text-muted">
-            {rbacPermissions.length} permisos atómicos × {roles.length} roles, tal como están guardados en la base de datos.
+            Pulse una celda para dar o quitar el permiso a <strong>todos</strong> los usuarios de ese rol. El cambio rige
+            de inmediato. La columna OSI es de solo lectura.
           </p>
         </div>
       </div>
@@ -88,6 +93,11 @@ export default function RbacPermissionMatrix() {
                 <th key={role.code} scope="col" className="!py-3 text-center">
                   <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">{role.short}</span>
                   <span className="block text-[11px] font-semibold text-ink">{role.name}</span>
+                  {role.locked && (
+                    <span className="mt-0.5 inline-flex items-center gap-0.5 font-mono text-[8.5px] uppercase text-muted">
+                      <Lock className="h-2.5 w-2.5" /> fijo
+                    </span>
+                  )}
                 </th>
               ))}
             </tr>
@@ -110,7 +120,9 @@ export default function RbacPermissionMatrix() {
                     </th>
                     {roles.map((role) => {
                       const granted = (rbac[role.code] ?? []).includes(perm.code)
-                      const locked = isProtected(role.code, perm.code)
+                      // Un permiso exclusivo del OSI solo puede retirarse de otro rol, nunca concederse.
+                      const exclusive = perm.osiExclusive && !role.locked && !granted
+                      const locked = Boolean(role.locked) || exclusive
                       const disabled = !canEdit || locked
                       return (
                         <td key={role.code} className="!py-2 !text-center">
@@ -119,7 +131,13 @@ export default function RbacPermissionMatrix() {
                             whileTap={disabled ? undefined : { scale: 0.85 }}
                             onClick={() => handleToggle(role.code, perm)}
                             disabled={disabled}
-                            title={locked ? 'El OSI no puede perder este permiso: nadie podría administrar la seguridad' : undefined}
+                            title={
+                              exclusive
+                                ? 'Exclusivo del OSI: no se puede conceder a otro rol'
+                                : locked
+                                  ? `Permisos del OSI fijos (${granted ? 'lo tiene' : 'no lo tiene'}): un OSI no cambia los permisos de otro OSI`
+                                  : `${granted ? 'Quitar' : 'Dar'} a todos los ${role.name}`
+                            }
                             aria-label={`${perm.label} para ${role.name}: ${granted ? 'concedido' : 'no concedido'}`}
                             className={cn(
                               'mx-auto grid h-7 w-7 place-items-center rounded-md border transition-all duration-200',
@@ -127,7 +145,13 @@ export default function RbacPermissionMatrix() {
                               disabled && 'cursor-not-allowed opacity-60',
                             )}
                           >
-                            {locked ? <Lock className="h-3.5 w-3.5" /> : granted ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                            {granted ? (
+                              <Check className="h-3.5 w-3.5" />
+                            ) : exclusive ? (
+                              <Lock className="h-3 w-3" />
+                            ) : (
+                              <X className="h-3.5 w-3.5" />
+                            )}
                           </motion.button>
                         </td>
                       )

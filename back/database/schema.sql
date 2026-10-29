@@ -116,6 +116,22 @@ CREATE TABLE IF NOT EXISTS password_history (
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
+-- 5b. user_permissions
+--     Excepciones por usuario sobre su rol: granted=TRUE concede un permiso
+--     extra, granted=FALSE lo retira solo a esa cuenta.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_permissions (
+  user_id       INT NOT NULL,
+  permission_id INT NOT NULL,
+  granted       BOOLEAN NOT NULL,
+  granted_by    VARCHAR(20),
+  granted_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, permission_id),
+  CONSTRAINT fk_up_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_up_permission FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------------
 -- 6. legal_cases
 --    Expedientes judiciales. assigned_lawyer_id aplica control de acceso
 --    por ambito (A01:2021): un abogado solo lee los expedientes asignados.
@@ -168,6 +184,9 @@ CREATE TABLE IF NOT EXISTS case_documents (
   page_count     INT          NOT NULL DEFAULT 1,
   checksum       CHAR(64),
   content        LONGTEXT,
+  file_path      VARCHAR(255),
+  size_bytes     INT,
+  uploaded_by    VARCHAR(20),
   created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_docs_case FOREIGN KEY (case_id) REFERENCES legal_cases(id) ON DELETE CASCADE,
   CONSTRAINT chk_doc_classification CHECK (classification IN ('Publica', 'Uso interno', 'Restringida', 'Confidencial')),
@@ -297,7 +316,7 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('LOGS_VIEW',     'Ver logs de aplicacion (actividad del despacho)'),
   ('LOGS_EXPORT',   'Exportar logs de aplicacion'),
   ('AUDIT_RECEIPT', 'Emitir comprobantes'),
-  ('RBAC_MANAGE',   'Administrar matriz RBAC'),
+  ('DOCS_UPLOAD',   'Subir prueba documental a sus expedientes'),
   ('TOKEN_RESET',   'Emitir tokens de reseteo'),
   ('RISK_ASSESS',   'Modificar evaluacion de riesgo'),
   ('USERS_READ',    'Ver lista y detalles de usuarios'),

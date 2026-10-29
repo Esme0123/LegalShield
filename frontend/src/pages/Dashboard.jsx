@@ -30,7 +30,7 @@ export default function Dashboard() {
   const loadActivityLogs = useAppStore((s) => s.loadActivityLogs)
   const loadMatrix = useAppStore((s) => s.loadMatrix)
   const hasAnyPermission = useAppStore((s) => s.hasAnyPermission)
-  const canViewRbac = hasAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE'])
+  const canViewRbac = hasAnyPermission(['ROLES_MANAGE'])
 
   useEffect(() => {
     loadCases()

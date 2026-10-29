@@ -204,6 +204,33 @@ export async function request(path, { method = 'GET', body, signal, auth = true,
   return payload
 }
 
+/**
+ * Descarga binaria autenticada (prueba documental). Devuelve { blob, filename }
+ * con el nombre que envia el servidor en Content-Disposition.
+ */
+export async function downloadBlob(path, { retry = true } = {}) {
+  const headers = { ...AJAX_HEADERS }
+  if (tokens.access) headers.Authorization = `Bearer ${tokens.access}`
+  let response
+  try {
+    response = await fetch(`${API_BASE}${path}`, { headers, credentials: 'include' })
+  } catch {
+    throw new ApiError('No hay conexion con la API REST', { status: 0 })
+  }
+  if (response.status === 401 && retry && isAuthenticated()) {
+    const renewed = await tryRefresh()
+    if (renewed) return downloadBlob(path, { retry: false })
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    throw new ApiError(payload?.error ?? `Error HTTP ${response.status}`, { status: response.status, payload })
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
+  const plain = /filename="([^"]+)"/i.exec(disposition)?.[1]
+  return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : plain ?? 'documento' }
+}
+
 const get = (path, options) => request(path, { ...options, method: 'GET' })
 const post = (path, body, options) => request(path, { ...options, method: 'POST', body })
 const put = (path, body, options) => request(path, { ...options, method: 'PUT', body })
@@ -257,6 +284,9 @@ export const casesApi = {
   archiveCase: (id) => del(`/cases/${id}`),
   documents: (id) => get(`/cases/${id}/documents`),
   revealDocument: (id, payload) => post(`/cases/${id}/documents/reveal`, payload),
+  /** { filename, data (base64), classification, isPrivileged } */
+  uploadDocument: (id, payload) => post(`/cases/${id}/documents`, payload),
+  downloadDocument: (id, docId) => downloadBlob(`/cases/${id}/documents/${docId}/file`),
 }
 
 /* -------------------------------------------------------------------------- */
@@ -267,6 +297,11 @@ export const rolesApi = {
   matrix: () => get('/roles/matrix'),
   updatePermissions: (grants) => post('/roles/permissions', { grants }),
   reset: () => post('/roles/reset'),
+  /** Permisos de una cuenta: rol, excepciones y efectivos. */
+  userPermissions: (userCode) => get(`/roles/users/${encodeURIComponent(userCode)}/permissions`),
+  /** granted: true | false | null (null = volver a lo que da el rol). */
+  setUserPermission: (userCode, permission, granted) =>
+    post(`/roles/users/${encodeURIComponent(userCode)}/permissions`, { permission, granted }),
   create: (payload) => post('/roles', payload),
   update: (code, payload) => put(`/roles/${encodeURIComponent(code)}`, payload),
   remove: (code) => del(`/roles/${encodeURIComponent(code)}`),

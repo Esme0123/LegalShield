@@ -158,7 +158,11 @@ app.use(
   }),
 )
 
-app.use(express.json({ limit: '1mb' }))
+// La subida de prueba documental (POST /cases/:id/documents) trae el archivo en
+// base64 y tiene su propio parser con limite mayor; el resto queda en 1 MB.
+const DOCUMENT_UPLOAD_RE = new RegExp(`^${API_PREFIX}/cases/\\d+/documents/?$`)
+const isDocumentUpload = (req) => req.method === 'POST' && DOCUMENT_UPLOAD_RE.test(req.path)
+app.use(express.json({ limit: '1mb', type: (req) => !isDocumentUpload(req) && /json/i.test(req.headers['content-type'] ?? '') }))
 app.use(express.urlencoded({ extended: true, limit: '1mb' }))
 
 /* -------------------------------------------------------------------------- */
@@ -236,6 +240,10 @@ app.use((err, req, res, _next) => {
   }
   if (isDuplicate) {
     return res.status(409).json({ error: 'El registro ya existe' })
+  }
+  // Cuerpo mas grande que el limite del parser (p. ej. un documento de mas de 5 MB).
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'El archivo o la solicitud supera el tamaño máximo permitido (5 MB)' })
   }
   if (isMissingRef) {
     return res.status(400).json({ error: 'Referencia invalida a un registro inexistente' })

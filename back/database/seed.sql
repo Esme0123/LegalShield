@@ -30,7 +30,7 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('LOGS_VIEW',     'Ver logs de aplicacion (actividad del despacho)'),
   ('LOGS_EXPORT',   'Exportar logs de aplicacion'),
   ('AUDIT_RECEIPT', 'Emitir comprobantes'),
-  ('RBAC_MANAGE',   'Administrar matriz RBAC'),
+  ('DOCS_UPLOAD',   'Subir prueba documental a sus expedientes'),
   ('TOKEN_RESET',   'Emitir tokens de reseteo'),
   ('RISK_ASSESS',   'Modificar evaluacion de riesgo'),
   ('USERS_READ',    'Ver lista y detalles de usuarios'),
@@ -54,42 +54,42 @@ FROM roles r
 JOIN permissions p ON 1 = 1
 WHERE (r.code = 'osi' AND p.code IN (
   'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
-  'USERS_UNLOCK', 'ACCOUNT_UNLOCK', 'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
+  'USERS_UNLOCK', 'ACCOUNT_UNLOCK', 'ROLES_MANAGE', 'TOKEN_RESET',
   'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'RISK_ASSESS'
 ))
    OR (r.code = 'socio' AND p.code IN (
   'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL', 'DOCS_REVEAL',
-  'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT'
+  'DOCS_DOWNLOAD', 'DOCS_UPLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT'
 ))
    OR (r.code = 'abogado' AND p.code IN (
-  'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW',
+  'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'DOCS_UPLOAD', 'DOCS_DOWNLOAD', 'LOGS_VIEW',
   'AUDIT_RECEIPT'
 ))
    OR (r.code = 'asistente' AND p.code IN (
-  'CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'
+  'CASES_READ', 'CASES_WRITE', 'DOCS_UPLOAD', 'DOCS_DOWNLOAD', 'AUDIT_RECEIPT'
 ))
    OR (r.code = 'cliente' AND p.code IN ('CASES_READ'));
 
 -- Revocacion estricta: cualquier concesion fuera de la matriz (p. ej. seeds
--- previos que daban USERS_* o RBAC_MANAGE al socio) se retira al re-sembrar.
+-- previos que daban USERS_* o ROLES_MANAGE al socio) se retira al re-sembrar.
 DELETE rp FROM role_permissions rp
   JOIN roles       r ON r.id = rp.role_id
   JOIN permissions p ON p.id = rp.permission_id
  WHERE NOT (
    (r.code = 'osi' AND p.code IN (
      'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
-     'USERS_UNLOCK', 'ACCOUNT_UNLOCK', 'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
+     'USERS_UNLOCK', 'ACCOUNT_UNLOCK', 'ROLES_MANAGE', 'TOKEN_RESET',
      'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'RISK_ASSESS'
    ))
    OR (r.code = 'socio' AND p.code IN (
      'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL', 'DOCS_REVEAL',
-     'DOCS_DOWNLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT'
+     'DOCS_DOWNLOAD', 'DOCS_UPLOAD', 'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT'
    ))
    OR (r.code = 'abogado' AND p.code IN (
-     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW',
+     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'DOCS_UPLOAD', 'DOCS_DOWNLOAD', 'LOGS_VIEW',
      'AUDIT_RECEIPT'
    ))
-   OR (r.code = 'asistente' AND p.code IN ('CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'))
+   OR (r.code = 'asistente' AND p.code IN ('CASES_READ', 'CASES_WRITE', 'DOCS_UPLOAD', 'DOCS_DOWNLOAD', 'AUDIT_RECEIPT'))
    OR (r.code = 'cliente' AND p.code IN ('CASES_READ'))
  );
 

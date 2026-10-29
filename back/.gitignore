@@ -8,3 +8,5 @@ yarn-error.log*
 coverage/
 .DS_Store
 dist/
+# Prueba documental subida por los usuarios (nunca al repositorio)
+storage/

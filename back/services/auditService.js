@@ -59,6 +59,7 @@ const EVENT = {
   PASSWORD_RESET_EXHAUSTED: { status: 'CRITICO', stream: 'security' },
   PERMISSION_CHANGED: { status: 'WARN', stream: 'security' },
   PERMISSION_CHANGE_BLOCKED: { status: 'WARN', stream: 'security' },
+  USER_PERMISSION_CHANGED: { status: 'WARN', stream: 'security' },
   ROLE_CREATED: { status: 'WARN', stream: 'security' },
   ROLE_UPDATED: { status: 'WARN', stream: 'security' },
   ROLE_DELETED: { status: 'WARN', stream: 'security' },
@@ -69,6 +70,8 @@ const EVENT = {
   CASE_PROGRESS_UPDATED: { status: 'INFO', stream: 'activity' },
   CASE_ARCHIVED: { status: 'WARN', stream: 'activity' },
   DOCUMENT_REVEALED: { status: 'WARN', stream: 'activity' },
+  DOCUMENT_UPLOADED: { status: 'INFO', stream: 'activity' },
+  DOCUMENT_DOWNLOADED: { status: 'INFO', stream: 'activity' },
   PROFILE_UPDATED: { status: 'INFO', stream: 'activity' },
 }
 

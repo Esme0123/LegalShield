@@ -132,6 +132,7 @@ const apiCaseToCase = (row) => ({
   id: row.caseNumber,
   title: row.title,
   client: row.clientName,
+  status: row.status,
   court: row.court ?? '',
   matter: row.matter ?? '',
   stage: row.stage ?? '',
@@ -161,7 +162,19 @@ const apiDocumentToDoc = (row) => ({
   checksum: row.checksum,
   createdAt: row.createdAt,
   content: row.content ?? null,
+  hasFile: Boolean(row.hasFile),
+  sizeBytes: row.sizeBytes ? Number(row.sizeBytes) : null,
+  uploadedBy: row.uploadedBy ?? null,
 })
+
+/** Lee un File del navegador como base64 (sin el prefijo data:). */
+const fileToBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^;]*;base64,/, ''))
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo'))
+    reader.readAsDataURL(file)
+  })
 
 /**
  * Fila de security_logs / activity_logs -> entrada de bitacora del frontend.
@@ -678,7 +691,7 @@ export const useAppStore = create((set, get) => ({
 
   /** Carga la matriz rol x permiso desde MySQL (solo administradores RBAC). */
   loadMatrix: async () => {
-    if (get().session?.mustChangePassword || !get().hasAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE'])) {
+    if (get().session?.mustChangePassword || !get().hasAnyPermission(['ROLES_MANAGE'])) {
       set({ rbac: {}, rbacRoles: [], rbacPermissions: [] })
       return null
     }
@@ -694,6 +707,40 @@ export const useAppStore = create((set, get) => ({
     } catch (error) {
       noteApiFailure(set, error, 'matrix')
       return null
+    }
+  },
+
+  /** Permisos de una cuenta concreta (rol + excepciones + efectivos). */
+  loadUserPermissions: (userCode) => rolesApi.userPermissions(userCode),
+
+  /**
+   * Excepcion solo para una cuenta. granted: true/false, o null para volver a
+   * lo que da su rol. Si es la propia sesion, se refrescan sus permisos.
+   */
+  setUserPermission: async (userCode, permission, granted) => {
+    const data = await rolesApi.setUserPermission(userCode, permission, granted)
+    if (userCode === get().session?.userId) await get().refreshPermissions()
+    return data
+  },
+
+  /**
+   * Relee los permisos vigentes desde el servidor. La matriz puede cambiar en
+   * cualquier momento (otro OSI la edita): sin esto el menu y los botones
+   * seguirian mostrando los permisos del momento del login.
+   * Devuelve true si cambiaron.
+   */
+  refreshPermissions: async () => {
+    const session = get().session
+    if (!session || session.mustChangePassword) return false
+    try {
+      const data = await authApi.me()
+      const next = data.user.permissions ?? []
+      const prev = session.permissions ?? []
+      const changed = next.length !== prev.length || next.some((p) => !prev.includes(p))
+      if (changed) set((s) => ({ session: s.session ? { ...s.session, permissions: next } : null }))
+      return changed
+    } catch {
+      return false
     }
   },
 
@@ -872,6 +919,32 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
+  /** Sube un archivo a la prueba documental y recarga la lista del expediente. */
+  uploadCaseDocument: async (caseDbId, file, { classification = 'Publica', isPrivileged = false } = {}) => {
+    const data = await casesApi.uploadDocument(caseDbId, {
+      filename: file.name,
+      data: await fileToBase64(file),
+      classification,
+      isPrivileged,
+    })
+    await get().loadCaseDocuments(caseDbId)
+    get().loadCases().catch(() => {})
+    return data.document
+  },
+
+  /** Descarga el archivo original y lo entrega al navegador. */
+  downloadCaseDocument: async (caseDbId, docDbId) => {
+    const { blob, filename } = await casesApi.downloadDocument(caseDbId, docDbId)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  },
+
   /* --------------------------- DOCUMENTOS RESTRINGIDOS -------------------- */
   revealDocument: async (docId, meta = {}) => {
     if (!get().hasPermission('DOCS_REVEAL')) {
@@ -969,7 +1042,7 @@ export const useAppStore = create((set, get) => ({
       state.hasPermission('CASES_READ') ? state.loadCases() : Promise.resolve(),
       state.hasPermission('SECURITY_LOGS_VIEW') ? state.loadSecurityLogs() : Promise.resolve(),
       state.hasPermission('LOGS_VIEW') ? state.loadActivityLogs() : Promise.resolve(),
-      state.hasAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE']) ? state.loadMatrix() : Promise.resolve(),
+      state.hasAnyPermission(['ROLES_MANAGE']) ? state.loadMatrix() : Promise.resolve(),
       state.hasAnyPermission(['USERS_READ', 'USERS_MANAGE']) ? state.loadUsers() : Promise.resolve(),
     ])
   },

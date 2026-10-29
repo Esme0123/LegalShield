@@ -23,17 +23,37 @@ const RBAC_MATRIX = {
   osi: [
     'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
     'USERS_UNLOCK', 'ACCOUNT_UNLOCK',
-    'ROLES_MANAGE', 'RBAC_MANAGE', 'TOKEN_RESET',
+    'ROLES_MANAGE', 'TOKEN_RESET',
     'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'RISK_ASSESS',
   ],
   socio: [
     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL',
-    'DOCS_REVEAL', 'DOCS_DOWNLOAD',
+    'DOCS_REVEAL', 'DOCS_DOWNLOAD', 'DOCS_UPLOAD',
     'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT',
   ],
-  abogado: ['CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'DOCS_REVEAL', 'LOGS_VIEW', 'AUDIT_RECEIPT'],
-  asistente: ['CASES_READ', 'CASES_WRITE', 'AUDIT_RECEIPT'],
+  abogado: [
+    'CASES_CREATE', 'CASES_READ', 'CASES_WRITE',
+    'DOCS_REVEAL', 'DOCS_UPLOAD', 'DOCS_DOWNLOAD', 'LOGS_VIEW', 'AUDIT_RECEIPT',
+  ],
+  // El asistente sube prueba documental, pero siempre como documento publico.
+  asistente: ['CASES_READ', 'CASES_WRITE', 'DOCS_UPLOAD', 'DOCS_DOWNLOAD', 'AUDIT_RECEIPT'],
   cliente: ['CASES_READ'],
 }
 
-module.exports = { RBAC_MATRIX }
+/**
+ * Roles cuyos permisos no se editan desde la interfaz: un OSI no puede cambiar
+ * los permisos de otro OSI (ni de si mismo). Su matriz es siempre la base.
+ */
+const LOCKED_ROLES = ['osi']
+
+/**
+ * Permisos de administracion de seguridad que solo puede tener el OSI. No se
+ * conceden a otro rol ni como excepcion por usuario: si un abogado recibiera
+ * ROLES_MANAGE podria editar la matriz, y la segregacion de funciones caeria.
+ */
+const OSI_EXCLUSIVE = [
+  'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
+  'USERS_UNLOCK', 'ACCOUNT_UNLOCK', 'ROLES_MANAGE', 'TOKEN_RESET', 'SECURITY_LOGS_VIEW',
+]
+
+module.exports = { RBAC_MATRIX, LOCKED_ROLES, OSI_EXCLUSIVE }

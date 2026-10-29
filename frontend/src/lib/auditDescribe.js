@@ -96,6 +96,13 @@ const BUILDERS = {
     `Cambió el avance de ${d.caseNumber}: ${d.previousProgress}% → ${d.progress}%`,
   CASE_ARCHIVED: (d) => `Archivó el expediente${d.caseNumber ? ` ${d.caseNumber}` : ` #${d.caseId}`}`,
   DOCUMENT_REVEALED: (d) => `Reveló ${d.documentCode ?? 'un documento'} de ${d.caseNumber}`,
+  DOCUMENT_UPLOADED: (d) =>
+    `Subió «${d.filename}» (${d.classification ?? 'Publica'}) a ${d.caseNumber} como ${d.documentCode}`,
+  DOCUMENT_DOWNLOADED: (d) => `Descargó «${d.filename ?? d.documentCode}» de ${d.caseNumber}`,
+  USER_PERMISSION_CHANGED: (d, t) =>
+    d.effect === 'segun_rol'
+      ? `Devolvió a ${t} a los permisos de su rol en ${d.permission}`
+      : `${d.effect === 'revocado' ? 'Quitó' : 'Dio'} ${d.permission} solo a ${t}`,
 }
 
 /** Texto del usuario afectado: "juan.perez (LEG-2026-0411)". */

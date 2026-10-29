@@ -116,6 +116,19 @@ const TABLES = [
      INDEX idx_password_history_user (user_id, created_at DESC)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  // 3.5b user_permissions · excepciones por usuario sobre su rol. granted=TRUE
+  //      concede un permiso extra; granted=FALSE se lo retira solo a esa cuenta.
+  `CREATE TABLE IF NOT EXISTS user_permissions (
+     user_id       INT NOT NULL,
+     permission_id INT NOT NULL,
+     granted       BOOLEAN NOT NULL,
+     granted_by    VARCHAR(20),
+     granted_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     PRIMARY KEY (user_id, permission_id),
+     CONSTRAINT fk_up_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+     CONSTRAINT fk_up_permission FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   // 3.6 legal_cases
   `CREATE TABLE IF NOT EXISTS legal_cases (
      id                 INT AUTO_INCREMENT PRIMARY KEY,
@@ -162,6 +175,9 @@ const TABLES = [
      page_count     INT          NOT NULL DEFAULT 1,
      checksum       CHAR(64),
      content        LONGTEXT,
+     file_path      VARCHAR(255),
+     size_bytes     INT,
+     uploaded_by    VARCHAR(20),
      created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
      CONSTRAINT fk_docs_case FOREIGN KEY (case_id) REFERENCES legal_cases(id) ON DELETE CASCADE,
      CONSTRAINT chk_doc_classification CHECK (classification IN ('Publica', 'Uso interno', 'Restringida', 'Confidencial')),
@@ -264,10 +280,10 @@ const PERMISSIONS = [
   ['CASES_READ_ALL', 'Ver y operar todos los expedientes del despacho (alcance transversal)'],
   ['DOCS_REVEAL', 'Revelar documentos restringidos'],
   ['DOCS_DOWNLOAD', 'Descargar documentos'],
+  ['DOCS_UPLOAD', 'Subir prueba documental a sus expedientes'],
   ['LOGS_VIEW', 'Ver logs de aplicacion (actividad del despacho)'],
   ['LOGS_EXPORT', 'Exportar logs de aplicacion'],
   ['AUDIT_RECEIPT', 'Emitir comprobantes'],
-  ['RBAC_MANAGE', 'Administrar matriz RBAC'],
   ['TOKEN_RESET', 'Emitir tokens de reseteo'],
   ['RISK_ASSESS', 'Modificar evaluacion de riesgo'],
   ['USERS_READ', 'Ver lista y detalles de usuarios'],
@@ -282,8 +298,11 @@ const PERMISSIONS = [
   ['SECURITY_LOGS_VIEW', 'Ver la bitacora de seguridad (eventos de acceso y control)'],
 ]
 
-/** Catalogos obsoletos del seed previo: se limpian para alinear la matriz. */
-const OBSOLETE_PERMISSIONS = ['CASES_UPDATE']
+/**
+ * Catalogos obsoletos: se limpian para alinear la matriz. RBAC_MANAGE duplicaba
+ * a ROLES_MANAGE (ambos abrian la misma matriz): queda solo ROLES_MANAGE.
+ */
+const OBSOLETE_PERMISSIONS = ['CASES_UPDATE', 'RBAC_MANAGE']
 
 /** Personas civiles de demostracion: replican DIRECTORY/USER_PROFILES (seed.js). */
 const DEMO_USERS = [
@@ -766,6 +785,19 @@ async function main() {
     }
     if (!(await indexExists('legal_cases', index))) {
       await run(`ALTER TABLE legal_cases ADD INDEX ${index} (${column})`)
+    }
+  }
+
+  // Prueba documental subida por los abogados: el archivo vive en disco
+  // (back/storage/documents) y la fila guarda su ruta, tamano y autor.
+  for (const [column, ddl] of [
+    ['file_path', 'VARCHAR(255) NULL AFTER content'],
+    ['size_bytes', 'INT NULL AFTER file_path'],
+    ['uploaded_by', 'VARCHAR(20) NULL AFTER size_bytes'],
+  ]) {
+    if (!(await columnExists('case_documents', column))) {
+      await run(`ALTER TABLE case_documents ADD COLUMN ${column} ${ddl}`)
+      logger.info(`Columna agregada: case_documents.${column}`)
     }
   }
 

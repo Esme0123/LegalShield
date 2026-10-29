@@ -13,8 +13,9 @@
 
 const { one, query, rows, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
-const { RBAC_MATRIX } = require('../config/rbacBaseline')
+const { RBAC_MATRIX, LOCKED_ROLES, OSI_EXCLUSIVE } = require('../config/rbacBaseline')
 const { badRequest, conflict, notFound, unprocessable } = require('../utils/errors')
+const { loadPermissions } = require('../services/authService')
 
 /* -------------------------------------------------------------------------- */
 /* GET /api/roles/matrix                                                       */
@@ -45,8 +46,18 @@ async function getMatrix(_req, res) {
   }
 
   res.json({
-    roles: roleList.map(({ id, code, name, description }) => ({ id, code, name, description })),
-    permissions: permissionList.map(({ code, description }) => ({ code, description })),
+    roles: roleList.map(({ id, code, name, description }) => ({
+      id,
+      code,
+      name,
+      description,
+      locked: LOCKED_ROLES.includes(code),
+    })),
+    permissions: permissionList.map(({ code, description }) => ({
+      code,
+      description,
+      osiExclusive: OSI_EXCLUSIVE.includes(code),
+    })),
     assignments,
     matrix: roleList.map((role) => ({
       role: role.code,
@@ -56,8 +67,6 @@ async function getMatrix(_req, res) {
   })
 }
 
-/** Concesiones que el rol indicado nunca puede perder desde la matriz. */
-const PROTECTED_GRANTS = { osi: ['ROLES_MANAGE', 'RBAC_MANAGE'] }
 
 /* -------------------------------------------------------------------------- */
 /* POST /api/roles/permissions                                                 */
@@ -85,16 +94,26 @@ async function updatePermissions(req, res) {
   const invalid = entries.find((g) => !g.role || !g.permission)
   if (invalid) throw unprocessable('Cada entrada debe traer role y permission', { entry: invalid })
 
-  // Proteccion contra el autobloqueo: si el OSI perdiera ROLES_MANAGE o RBAC_MANAGE,
-  // nadie podria volver a administrar la matriz. Se rechaza el lote completo.
-  const blocked = entries.filter((g) => !g.granted && PROTECTED_GRANTS[g.role]?.includes(g.permission))
+  // Un OSI no cambia los permisos de los OSI (ni los suyos): evita que uno se
+  // otorgue mas poder o deje sin administracion a los demas. Se rechaza el lote.
+  const exclusive = entries.filter((g) => g.granted && OSI_EXCLUSIVE.includes(g.permission))
+  if (exclusive.length > 0) {
+    record('PERMISSION_CHANGE_BLOCKED', {
+      userCode: req.user.user_code,
+      req,
+      details: { blocked: exclusive.map(({ role, permission }) => ({ role, permission })), reason: 'exclusivo_osi' },
+    })
+    throw unprocessable(`${exclusive[0].permission} es exclusivo del OSI: no se puede conceder a otro rol`)
+  }
+
+  const blocked = entries.filter((g) => LOCKED_ROLES.includes(g.role))
   if (blocked.length > 0) {
     record('PERMISSION_CHANGE_BLOCKED', {
       userCode: req.user.user_code,
       req,
       details: { blocked: blocked.map(({ role, permission }) => ({ role, permission })) },
     })
-    throw unprocessable('El rol osi no puede perder ROLES_MANAGE ni RBAC_MANAGE: nadie podria administrar la seguridad', {
+    throw unprocessable('Los permisos del rol OSI no se pueden modificar: un OSI no cambia los permisos de otro OSI', {
       blocked: blocked.map(({ role, permission }) => ({ role, permission })),
     })
   }
@@ -184,6 +203,8 @@ async function updatePermissions(req, res) {
 /** Restaura la matriz base de segregacion (config/rbacBaseline.js, la misma que siembra init-db). */
 async function resetMatrix(req, res) {
   await withTransaction(async (client) => {
+    // La base tambien descarta las excepciones por usuario.
+    await client.query('DELETE FROM user_permissions')
     await client.query('DELETE FROM role_permissions')
     for (const [role, permissions] of Object.entries(RBAC_MATRIX)) {
       await client.query(
@@ -203,6 +224,119 @@ async function resetMatrix(req, res) {
   })
 
   res.json({ message: 'Matriz restaurada a la configuracion base' })
+}
+
+/* -------------------------------------------------------------------------- */
+/* GET/POST /api/roles/users/:userCode/permissions                             */
+/* -------------------------------------------------------------------------- */
+
+/** Cuenta objetivo de una consulta o excepcion por usuario. */
+async function findTargetUser(userCode) {
+  const code = String(userCode ?? '').trim().toUpperCase()
+  const user = await one(
+    `SELECT u.id, u.user_code, u.username, u.is_active, r.code AS role_code, r.name AS role_name
+       FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE u.user_code = ?`,
+    [code],
+  )
+  if (!user) throw notFound(`No existe el usuario ${code}`)
+  return user
+}
+
+/** Permisos del rol, excepciones y permisos efectivos de una cuenta. */
+async function describeUserPermissions(user) {
+  const [rolePermissions, overrides, effective] = await Promise.all([
+    rows(
+      `SELECT p.code FROM role_permissions rp
+         JOIN roles r ON r.id = rp.role_id
+         JOIN permissions p ON p.id = rp.permission_id
+        WHERE r.code = ? ORDER BY p.code`,
+      [user.role_code],
+    ),
+    rows(
+      `SELECT p.code AS permission, up.granted, up.granted_by AS "grantedBy", up.granted_at AS "grantedAt"
+         FROM user_permissions up JOIN permissions p ON p.id = up.permission_id
+        WHERE up.user_id = ? ORDER BY p.code`,
+      [user.id],
+    ),
+    loadPermissions(user.id),
+  ])
+  return {
+    user: {
+      userCode: user.user_code,
+      username: user.username,
+      role: user.role_code,
+      roleLabel: user.role_name,
+      isActive: Boolean(user.is_active),
+      locked: LOCKED_ROLES.includes(user.role_code),
+    },
+    rolePermissions: rolePermissions.map((r) => r.code),
+    overrides: overrides.map((o) => ({ ...o, granted: Boolean(o.granted) })),
+    effective,
+  }
+}
+
+/** Que puede hacer hoy una cuenta concreta y de donde sale cada permiso. */
+async function getUserPermissions(req, res) {
+  const user = await findTargetUser(req.params.userCode)
+  res.json(await describeUserPermissions(user))
+}
+
+/**
+ * Excepcion para una sola cuenta, sin tocar al resto de su rol.
+ * Cuerpo: { permission, granted: true | false | null }  (null = volver a lo del rol)
+ */
+async function setUserPermission(req, res) {
+  const user = await findTargetUser(req.params.userCode)
+  const permission = String(req.body?.permission ?? '').trim().toUpperCase()
+  const raw = req.body?.granted
+  const granted = raw === null || raw === undefined ? null : Boolean(raw)
+
+  if (LOCKED_ROLES.includes(user.role_code)) {
+    record('PERMISSION_CHANGE_BLOCKED', {
+      userCode: req.user.user_code,
+      req,
+      details: { target: user.user_code, permission },
+    })
+    throw unprocessable('Los permisos de un OSI no se pueden modificar: un OSI no cambia los permisos de otro OSI')
+  }
+
+  const perm = await one('SELECT id FROM permissions WHERE code = ?', [permission])
+  if (!perm) throw unprocessable(`El permiso ${permission} no existe en el catalogo`)
+  if (granted && OSI_EXCLUSIVE.includes(permission)) {
+    throw unprocessable(`${permission} es exclusivo del OSI: no se puede conceder a otro usuario`)
+  }
+
+  // Si la excepcion coincide con lo que ya da el rol, no aporta nada: se elimina.
+  const fromRole = await one(
+    `SELECT 1 AS ok FROM role_permissions rp JOIN roles r ON r.id = rp.role_id
+      WHERE r.code = ? AND rp.permission_id = ?`,
+    [user.role_code, perm.id],
+  )
+  const redundant = granted !== null && granted === Boolean(fromRole)
+
+  if (granted === null || redundant) {
+    await query('DELETE FROM user_permissions WHERE user_id = ? AND permission_id = ?', [user.id, perm.id])
+  } else {
+    await query(
+      `INSERT INTO user_permissions (user_id, permission_id, granted, granted_by)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE granted = VALUES(granted), granted_by = VALUES(granted_by), granted_at = NOW()`,
+      [user.id, perm.id, granted, req.user.user_code],
+    )
+  }
+
+  record('USER_PERMISSION_CHANGED', {
+    userCode: req.user.user_code,
+    req,
+    details: {
+      target: user.user_code,
+      permission,
+      effect: granted === null || redundant ? 'segun_rol' : granted ? 'concedido' : 'revocado',
+    },
+  })
+
+  res.json(await describeUserPermissions(user))
 }
 
 /* -------------------------------------------------------------------------- */
@@ -326,4 +460,13 @@ async function updateRole(req, res) {
   })
 }
 
-module.exports = { getMatrix, updatePermissions, resetMatrix, createRole, updateRole, deleteRole }
+module.exports = {
+  getMatrix,
+  updatePermissions,
+  resetMatrix,
+  createRole,
+  updateRole,
+  deleteRole,
+  getUserPermissions,
+  setUserPermission,
+}

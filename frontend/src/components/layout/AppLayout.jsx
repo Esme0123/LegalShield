@@ -8,6 +8,7 @@ import EffectsToggle from '@/components/ui/EffectsToggle'
 import ConnectionError from '@/components/ui/ConnectionError'
 import AeroShards from '@/components/reactbits/AeroShards'
 import { useAppStore } from '@/store/useAppStore'
+import { toast } from '@/store/toastStore'
 import { displayNameFor } from '@/lib/identity'
 import { cn } from '@/lib/cn'
 import { timeAgo } from '@/lib/format'
@@ -41,6 +42,24 @@ export default function AppLayout() {
     setSidebarOpen(false)
     setBellOpen(false)
   }, [location.pathname])
+
+  // Permisos en vivo: si un OSI cambia la matriz, el menu y los botones se
+  // ajustan sin cerrar sesion (al navegar, al volver a la pestana y cada 15 s).
+  const refreshPermissions = useAppStore((s) => s.refreshPermissions)
+  useEffect(() => {
+    const check = async () => {
+      if (await refreshPermissions()) {
+        toast.info('Sus permisos cambiaron', 'El Oficial de Seguridad actualizó sus accesos')
+      }
+    }
+    check()
+    const timer = setInterval(check, 15000)
+    window.addEventListener('focus', check)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', check)
+    }
+  }, [location.pathname, refreshPermissions])
 
   return (
     <div className="relative min-h-screen">

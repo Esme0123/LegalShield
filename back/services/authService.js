@@ -42,8 +42,9 @@ function assertSecretsConfigured() {
 
 /**
  * Carga permisos RBAC vigentes del usuario (fuente de verdad: la base de datos).
- * Se resuelve por el rol del usuario, de modo que un cambio en la matriz surte
- * efecto en la siguiente peticion sin reemitir el token.
+ * Permisos efectivos = los de su rol + las excepciones de user_permissions
+ * (granted=TRUE suma, granted=FALSE resta). Se resuelve en cada peticion, de
+ * modo que un cambio en la matriz surte efecto sin reemitir el token.
  */
 async function loadPermissions(userId) {
   const result = await rows(
@@ -52,8 +53,16 @@ async function loadPermissions(userId) {
        JOIN role_permissions rp ON rp.role_id = u.role_id
        JOIN permissions      p  ON p.id = rp.permission_id
       WHERE u.id = ?
-      ORDER BY p.code`,
-    [userId],
+        AND NOT EXISTS (
+          SELECT 1 FROM user_permissions up
+           WHERE up.user_id = u.id AND up.permission_id = p.id AND up.granted = FALSE)
+     UNION
+     SELECT p.code
+       FROM user_permissions up
+       JOIN permissions p ON p.id = up.permission_id
+      WHERE up.user_id = ? AND up.granted = TRUE
+     ORDER BY code`,
+    [userId, userId],
   )
   return result.map((row) => row.code)
 }

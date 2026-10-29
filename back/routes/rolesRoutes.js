@@ -3,27 +3,49 @@
 const { Router } = require('express')
 const controller = require('../controllers/rolesController')
 const { authenticate } = require('../middlewares/authMiddleware')
-const { checkAnyPermission, checkPermission } = require('../middlewares/rbacMiddleware')
+const { checkPermission } = require('../middlewares/rbacMiddleware')
 const { auditAction } = require('../middlewares/auditMiddleware')
 const { asyncHandler } = require('../utils/helpers')
 
 const router = Router()
 
-// La matriz solo es visible para quien administra roles o RBAC. Modificarla
-// exige los mismos permisos.
+// La matriz solo es visible para quien administra roles (ROLES_MANAGE, rol OSI).
+// Modificarla exige el mismo permiso.
 router.use(authenticate)
 
-router.get(
-  '/matrix',
-  checkAnyPermission(['ROLES_MANAGE', 'RBAC_MANAGE']),
-  asyncHandler(controller.getMatrix),
-)
+router.get('/matrix', checkPermission('ROLES_MANAGE'), asyncHandler(controller.getMatrix))
 router.post(
   '/',
   checkPermission('ROLES_MANAGE'),
   auditAction('ROLE_CREATED'),
   asyncHandler(controller.createRole),
 )
+router.post(
+  '/permissions',
+  checkPermission('ROLES_MANAGE'),
+  auditAction('PERMISSION_CHANGED'),
+  asyncHandler(controller.updatePermissions),
+)
+router.post(
+  '/reset',
+  checkPermission('ROLES_MANAGE'),
+  auditAction('PERMISSION_CHANGED'),
+  asyncHandler(controller.resetMatrix),
+)
+
+// Permisos de una cuenta concreta: consulta y excepciones solo para ella.
+router.get(
+  '/users/:userCode/permissions',
+  checkPermission('ROLES_MANAGE'),
+  asyncHandler(controller.getUserPermissions),
+)
+router.post(
+  '/users/:userCode/permissions',
+  checkPermission('ROLES_MANAGE'),
+  auditAction('USER_PERMISSION_CHANGED'),
+  asyncHandler(controller.setUserPermission),
+)
+
 router.put(
   '/:code',
   checkPermission('ROLES_MANAGE'),
@@ -35,18 +57,6 @@ router.delete(
   checkPermission('ROLES_MANAGE'),
   auditAction('ROLE_DELETED'),
   asyncHandler(controller.deleteRole),
-)
-router.post(
-  '/permissions',
-  checkAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE']),
-  auditAction('PERMISSION_CHANGED'),
-  asyncHandler(controller.updatePermissions),
-)
-router.post(
-  '/reset',
-  checkAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE']),
-  auditAction('PERMISSION_CHANGED'),
-  asyncHandler(controller.resetMatrix),
 )
 
 module.exports = router

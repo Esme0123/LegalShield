@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Archive,
+  Download,
   Eye,
   EyeOff,
   FileText,
@@ -10,6 +11,7 @@ import {
   Lock,
   ShieldCheck,
   Trash2,
+  Upload,
   Users,
   X,
 } from 'lucide-react'
@@ -57,6 +59,112 @@ function DocumentPreview({ doc }) {
       <p className="mt-2 font-mono text-[8.5px] opacity-70">
         Clasificacion: {doc.classification} · sello SHA-256 pendiente de firma
       </p>
+    </div>
+  )
+}
+
+const UPLOAD_ACCEPT = '.pdf,.png,.jpg,.jpeg,.docx,.txt'
+const UPLOAD_MAX_MB = 5
+const DOC_CLASSIFICATIONS = ['Publica', 'Uso interno', 'Restringida', 'Confidencial']
+
+const formatSize = (bytes) =>
+  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
+
+/**
+ * Subida de prueba documental. Quien no puede ver documentos confidenciales
+ * (asistente) solo sube documentos publicos: el servidor tambien lo fuerza.
+ */
+function DocumentUploader({ caseItem, canConfidential }) {
+  const uploadCaseDocument = useAppStore((s) => s.uploadCaseDocument)
+  const [file, setFile] = useState(null)
+  const [classification, setClassification] = useState('Publica')
+  const [isPrivileged, setIsPrivileged] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [inputKey, setInputKey] = useState(0)
+
+  const reset = () => {
+    setFile(null)
+    setClassification('Publica')
+    setIsPrivileged(false)
+    setInputKey((k) => k + 1)
+  }
+
+  const pick = (e) => {
+    const chosen = e.target.files?.[0]
+    if (!chosen) return
+    if (chosen.size > UPLOAD_MAX_MB * 1024 * 1024) {
+      toast.danger('Archivo demasiado grande', `El máximo es ${UPLOAD_MAX_MB} MB`)
+      setInputKey((k) => k + 1)
+      return
+    }
+    setFile(chosen)
+  }
+
+  const upload = async () => {
+    if (!file || busy) return
+    setBusy(true)
+    try {
+      const doc = await uploadCaseDocument(caseItem.dbId, file, { classification, isPrivileged })
+      toast.mint('Documento subido', `${doc.documentCode} · ${doc.name} agregado a ${caseItem.id}`)
+      reset()
+    } catch (error) {
+      toast.danger('No se pudo subir el documento', error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="ls-panel mb-3 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="ls-btn-secondary cursor-pointer text-xs">
+          <Upload className="h-3.5 w-3.5" /> {file ? 'Cambiar archivo' : 'Subir documento'}
+          <input key={inputKey} type="file" accept={UPLOAD_ACCEPT} onChange={pick} className="sr-only" />
+        </label>
+        {file ? (
+          <span className="min-w-0 truncate font-mono text-[11px] text-ink">
+            {file.name} · {formatSize(file.size)}
+          </span>
+        ) : (
+          <span className="text-[11px] text-muted">PDF, imagen (PNG/JPG), Word (.docx) o texto · máximo {UPLOAD_MAX_MB} MB</span>
+        )}
+      </div>
+
+      {file && (
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          {canConfidential ? (
+            <>
+              <label className="block">
+                <span className="ls-label">Clasificación</span>
+                <select value={classification} onChange={(e) => setClassification(e.target.value)} className="ls-input h-9 py-1 text-[12px]">
+                  {DOC_CLASSIFICATIONS.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 pb-2 text-[11.5px] text-ink/85">
+                <input
+                  type="checkbox"
+                  checked={isPrivileged}
+                  onChange={(e) => setIsPrivileged(e.target.checked)}
+                  className="h-4 w-4 accent-[rgb(var(--ls-accent))]"
+                />
+                Privilegiado (secreto profesional)
+              </label>
+            </>
+          ) : (
+            <span className="pb-2 text-[11px] text-muted">Se guardará como documento público.</span>
+          )}
+          <div className="ml-auto flex gap-2">
+            <button type="button" onClick={reset} disabled={busy} className="ls-btn-ghost text-xs">
+              Cancelar
+            </button>
+            <button type="button" onClick={upload} disabled={busy} className="ls-btn-primary text-xs">
+              <Upload className="h-3.5 w-3.5" /> {busy ? 'Subiendo…' : 'Subir'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -317,6 +425,17 @@ export default function Cases() {
   const canArchive = hasPermission('CASES_ARCHIVE')
   const canWrite = hasPermission('CASES_WRITE')
   const canRevealDocs = hasPermission('DOCS_REVEAL')
+  const canUploadDocs = hasPermission('DOCS_UPLOAD')
+  const canDownloadDocs = hasPermission('DOCS_DOWNLOAD')
+  const downloadCaseDocument = useAppStore((s) => s.downloadCaseDocument)
+
+  const onDownload = async (caseItem, doc) => {
+    try {
+      await downloadCaseDocument(caseItem.dbId, doc.dbId)
+    } catch (error) {
+      toast.danger('No se pudo descargar', error.message)
+    }
+  }
 
   useEffect(() => {
     if (!canRead) return
@@ -653,6 +772,9 @@ export default function Cases() {
                     · {selected.docs.length} documentos visibles para su rol
                   </span>
                 </div>
+                {canUploadDocs && selected.status !== 'archivado' && (
+                  <DocumentUploader caseItem={selected} canConfidential={canRevealDocs} />
+                )}
                 {!canRevealDocs && selected.hiddenDocuments > 0 && (
                   <p className="mb-3 flex items-center gap-1.5 rounded-lg border border-line/40 bg-surface2/40 px-3 py-2 text-[11.5px] text-muted">
                     <EyeOff className="h-3.5 w-3.5 shrink-0" />
@@ -674,6 +796,23 @@ export default function Cases() {
                           </span>
                         </div>
                         <DocumentPreview doc={doc} />
+                        {doc.hasFile && (
+                          <div className="mt-1.5 flex items-center justify-between gap-2 font-mono text-[9.5px] text-muted">
+                            <span className="truncate">
+                              {doc.sizeBytes ? formatSize(doc.sizeBytes) : ''}
+                              {doc.uploadedBy ? ` · subido por ${doc.uploadedBy}` : ''}
+                            </span>
+                            {canDownloadDocs && (
+                              <button
+                                type="button"
+                                onClick={() => onDownload(selected, doc)}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-line/60 px-2 py-1 text-[10px] text-ink/80 hover:border-accent/60 hover:text-accent"
+                              >
+                                <Download className="h-3 w-3" /> Descargar
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )
 

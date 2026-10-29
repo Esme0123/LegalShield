@@ -16,7 +16,9 @@
  * Si un expediente no tiene equipo, solo es visible con CASES_READ_ALL.
  */
 
-const { rows, one, withTransaction } = require('../config/db')
+const crypto = require('crypto')
+const { rows, one, query, withTransaction } = require('../config/db')
+const { validateUpload, countPages, saveFile, resolveStoredFile, removeFile } = require('../services/documentStorage')
 const { record } = require('../services/auditService')
 const { badRequest, forbidden, notFound } = require('../utils/errors')
 const { parsePagination } = require('../utils/helpers')
@@ -391,7 +393,8 @@ async function listDocuments(req, res) {
   const documents = await rows(
     `SELECT id, document_code AS "documentCode", filename AS "name", classification,
             is_privileged AS "isPrivileged", mime_type AS "mimeType",
-            page_count AS "pages", checksum, created_at AS "createdAt"
+            page_count AS "pages", checksum, created_at AS "createdAt",
+            file_path IS NOT NULL AS "hasFile", size_bytes AS "sizeBytes", uploaded_by AS "uploadedBy"
        FROM case_documents
       WHERE case_id = ? ${documentVisibility(req.user)}
       ORDER BY is_privileged ASC, id ASC`,
@@ -404,7 +407,11 @@ async function listDocuments(req, res) {
     total: documents.length,
     // Documentos que existen pero que el rol no puede ver (confidenciales).
     hidden: Number(countRow.total) - documents.length,
-    documents: documents.map((doc) => ({ ...doc, isPrivileged: Boolean(doc.isPrivileged) })),
+    documents: documents.map((doc) => ({
+      ...doc,
+      isPrivileged: Boolean(doc.isPrivileged),
+      hasFile: Boolean(doc.hasFile),
+    })),
   })
 }
 
@@ -454,6 +461,136 @@ async function revealDocument(req, res) {
     justification: justification || 'sin justificacion',
     document: { ...document, isPrivileged: Boolean(document.isPrivileged) },
   })
+}
+
+/* -------------------------------------------------------------------------- */
+/* POST /api/cases/:id/documents                                               */
+/* -------------------------------------------------------------------------- */
+
+const DOC_CLASSIFICATIONS = ['Publica', 'Uso interno', 'Restringida', 'Confidencial']
+
+/**
+ * Sube prueba documental al expediente. Solo el equipo que opera el caso
+ * (titular, asistente o socio). Sin DOCS_REVEAL el documento queda siempre
+ * como Publico: quien no puede ver confidenciales tampoco puede crearlos.
+ *
+ * Cuerpo: { filename, data (base64), classification, isPrivileged }
+ */
+async function uploadDocument(req, res) {
+  const { params, scope } = findOneOr404(req)
+  const target = await one(
+    'SELECT id, case_number, assigned_lawyer_id, assistant_id, client_user_id, status FROM legal_cases WHERE id = ?',
+    params,
+  )
+  if (!target) throw notFound(`No existe el expediente con id ${params[0]}`)
+  if (!canOperate(scope, target)) {
+    throw forbidden('Solo el titular o el asistente del expediente pueden subir documentos')
+  }
+  if (target.status === 'archivado') throw badRequest('El expediente esta archivado: no admite documentos nuevos')
+
+  const canConfidential = hasPermission(req.user, 'DOCS_REVEAL')
+  const classification = canConfidential ? String(req.body?.classification ?? 'Publica') : 'Publica'
+  if (!DOC_CLASSIFICATIONS.includes(classification)) {
+    throw badRequest(`classification debe ser una de: ${DOC_CLASSIFICATIONS.join(', ')}`)
+  }
+  const isPrivileged = canConfidential && Boolean(req.body?.isPrivileged)
+
+  const file = validateUpload({ filename: req.body?.filename, data: req.body?.data })
+  const checksum = crypto.createHash('sha256').update(file.buffer).digest('hex')
+  const storedName = await saveFile(file.buffer, file.ext)
+
+  let created
+  try {
+    // DOC-2026-0014-04: mismo correlativo que el expediente + numero de documento.
+    const prefix = `DOC-${target.case_number.replace(/^EXP-/, '')}-`
+    const last = await one(
+      `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(document_code, '-', -1) AS UNSIGNED)), 0) AS n
+         FROM case_documents WHERE document_code LIKE ?`,
+      [`${prefix}%`],
+    )
+    const documentCode = `${prefix}${String(Number(last.n) + 1).padStart(2, '0')}`
+    const { insertId } = await query(
+      `INSERT INTO case_documents
+         (case_id, document_code, filename, classification, is_privileged, mime_type, page_count,
+          checksum, file_path, size_bytes, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        target.id, documentCode, file.filename, classification, isPrivileged, file.mime,
+        countPages(file.buffer, file.ext), checksum, storedName, file.buffer.length, req.user.user_code,
+      ],
+    )
+    created = { id: insertId, documentCode }
+  } catch (err) {
+    await removeFile(storedName)
+    throw err
+  }
+
+  await record('DOCUMENT_UPLOADED', {
+    userCode: req.user.user_code,
+    req,
+    details: {
+      caseNumber: target.case_number,
+      documentCode: created.documentCode,
+      filename: file.filename,
+      classification,
+      sizeBytes: file.buffer.length,
+    },
+  })
+
+  res.status(201).json({
+    message: 'Documento agregado a la prueba documental',
+    document: {
+      id: created.id,
+      documentCode: created.documentCode,
+      name: file.filename,
+      classification,
+      isPrivileged,
+      mimeType: file.mime,
+      sizeBytes: file.buffer.length,
+      checksum,
+      hasFile: true,
+    },
+  })
+}
+
+/* -------------------------------------------------------------------------- */
+/* GET /api/cases/:id/documents/:docId/file                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Descarga el archivo original. Exige DOCS_DOWNLOAD (ruta), ser del equipo del
+ * expediente y, si el documento es restringido, DOCS_REVEAL: un documento que
+ * el rol no puede listar tampoco se puede descargar.
+ */
+async function downloadDocument(req, res) {
+  const target = await findScopedCase(req)
+  const documentId = Number(req.params.docId)
+  if (!Number.isInteger(documentId) || documentId < 1) throw badRequest('El id del documento debe ser un entero positivo')
+
+  const document = await one(
+    `SELECT id, document_code, filename, mime_type, file_path
+       FROM case_documents
+      WHERE id = ? AND case_id = ? ${documentVisibility(req.user)}`,
+    [documentId, target.id],
+  )
+  if (!document) throw notFound(`No existe el documento ${documentId} en el expediente ${target.caseNumber}`)
+  if (!document.file_path) {
+    throw notFound('Este documento es de demostracion y no tiene archivo adjunto')
+  }
+
+  await record('DOCUMENT_DOWNLOADED', {
+    userCode: req.user.user_code,
+    req,
+    details: { caseNumber: target.caseNumber, documentCode: document.document_code, filename: document.filename },
+  })
+
+  res.setHeader('Content-Type', document.mime_type)
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${document.filename.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(document.filename)}`,
+  )
+  res.setHeader('Cache-Control', 'no-store')
+  res.sendFile(resolveStoredFile(document.file_path))
 }
 
 /* -------------------------------------------------------------------------- */
@@ -518,6 +655,8 @@ module.exports = {
   archiveCase,
   listDocuments,
   revealDocument,
+  uploadDocument,
+  downloadDocument,
   listAssignees,
   CASE_STATUSES,
   RISK_LEVELS,
