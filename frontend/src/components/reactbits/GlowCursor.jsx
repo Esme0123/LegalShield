@@ -37,11 +37,14 @@ export default function GlowCursor({ color = '--ls-accent', trail = 16 }) {
     let visible = false
     let inspected = null
 
+    // Se mide la ventana, nunca el propio canvas: medir el canvas y luego fijar
+    // su resolucion por devicePixelRatio (> 1 con escala de Windows al 125 %)
+    // lo agrandaba en cada ResizeObserver hasta el maximo del navegador
+    // (33 554 433 px), que se pinta como un bloque blanco sobre toda la app.
     const resize = () => {
       dpr = Math.min(window.devicePixelRatio || 1, 2)
-      const rect = canvas.getBoundingClientRect()
-      width = Math.max(1, rect.width)
-      height = Math.max(1, rect.height)
+      width = Math.max(1, window.innerWidth)
+      height = Math.max(1, window.innerHeight)
       canvas.width = Math.round(width * dpr)
       canvas.height = Math.round(height * dpr)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -101,8 +104,7 @@ export default function GlowCursor({ color = '--ls-accent', trail = 16 }) {
       if (!reduced) raf = requestAnimationFrame(draw)
     }
 
-    const observer = new ResizeObserver(resize)
-    observer.observe(canvas)
+    window.addEventListener('resize', resize)
     window.addEventListener('pointermove', onMove, { passive: true })
     document.addEventListener('pointerleave', onLeave)
     resize()
@@ -110,7 +112,7 @@ export default function GlowCursor({ color = '--ls-accent', trail = 16 }) {
 
     return () => {
       cancelAnimationFrame(raf)
-      observer.disconnect()
+      window.removeEventListener('resize', resize)
       window.removeEventListener('pointermove', onMove)
       document.removeEventListener('pointerleave', onLeave)
     }
@@ -120,7 +122,7 @@ export default function GlowCursor({ color = '--ls-accent', trail = 16 }) {
     <canvas
       ref={canvasRef}
       aria-hidden="true"
-      className="fixed inset-0 pointer-events-none z-[99999] hidden md:block"
+      className="fixed inset-0 pointer-events-none z-[99999] hidden h-full w-full md:block"
     />
   )
 }

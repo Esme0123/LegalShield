@@ -20,6 +20,25 @@ export default defineConfig({
       },
     },
   },
+  // Pre-empaqueta todas las dependencias al arrancar. Sin esto, la primera vez
+  // Vite las descubre durante la navegacion, las re-optimiza y recarga la pagina,
+  // lo que puede dejar la pestana en blanco a mitad de uso.
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-dom/client',
+      'react-router-dom',
+      'framer-motion',
+      'lucide-react',
+      'zustand',
+      'clsx',
+      'tailwind-merge',
+      'jspdf',
+      'jspdf-autotable',
+      'write-excel-file/browser',
+    ],
+  },
   server: {
     port: 5173,
     open: false,

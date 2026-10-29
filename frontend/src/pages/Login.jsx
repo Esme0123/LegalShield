@@ -14,6 +14,7 @@ import {
 import AeroShards from '@/components/reactbits/AeroShards'
 import PasswordStrength, { LockCounter } from '@/components/auth/PasswordStrength'
 import ThemeToggle from '@/components/ui/ThemeToggle'
+import PasswordInput from '@/components/ui/PasswordInput'
 import { Badge } from '@/components/ui/primitives'
 import { MAX_ATTEMPTS, useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
@@ -39,7 +40,6 @@ export default function Login() {
 
   const [userId, setUserId] = useState(lastIdentifier || 'mariana.solis')
   const [password, setPassword] = useState('')
-  const [showPass, setShowPass] = useState(false)
   const [busy, setBusy] = useState(false)
   const [step, setStep] = useState(-1)
   const [now, setNow] = useState(Date.now())
@@ -170,7 +170,11 @@ export default function Login() {
         : '3 de 3 - Cuenta inhabilitada temporalmente'
       toast.danger(
         result.locked ? 'Acceso suspendido' : 'Credencial invalida',
-        result.locked ? lockMessage : `Intento ${Math.min(result.attempts, MAX_ATTEMPTS)} de ${MAX_ATTEMPTS}`,
+        result.locked
+          ? lockMessage
+          : result.lockExempt
+            ? 'Cuenta sin bloqueo · resuelva el CAPTCHA en cada intento'
+            : `Intento ${Math.min(result.attempts, MAX_ATTEMPTS)} de ${MAX_ATTEMPTS}`,
       )
       if (result.locked) {
         setLocalError(lockMessage)
@@ -322,25 +326,15 @@ export default function Login() {
                   <label className="ls-label" htmlFor="password">
                     Contrasena
                   </label>
-                  <div className="relative">
-                    <input
-                      id="password"
-                      ref={passwordRef}
-                      type={showPass ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••••••"
-                      disabled={locked}
-                      className="ls-input pr-16"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPass((v) => !v)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted transition hover:bg-surface2/60 hover:text-accent"
-                    >
-                      {showPass ? 'Ocultar' : 'Ver'}
-                    </button>
-                  </div>
+                  <PasswordInput
+                    id="password"
+                    ref={passwordRef}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                    disabled={locked}
+                    autoComplete="current-password"
+                  />
                   <PasswordStrength value={password} className="mt-3" />
                 </div>
               </form>
@@ -466,7 +460,7 @@ export default function Login() {
                 </AnimatePresence>
 
                 <p className="text-center font-mono text-[10px] text-muted">
-                  Tres intentos fallidos bloquean la cuenta 15 minutos (30 si se repite) · al tercer bloqueo solo el Oficial de Seguridad puede habilitarla
+                  Tres intentos fallidos bloquean la cuenta 1 minuto (también al repetirse) · al tercer bloqueo solo el Oficial de Seguridad puede habilitarla
                 </p>
               </div>
 

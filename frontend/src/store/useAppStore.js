@@ -274,7 +274,8 @@ export const useAppStore = create((set, get) => ({
         set({ session: apiUserToSession(data.user) })
         await get().loadProfile()
         get().loadNotifications().catch(() => {})
-        get().loadMatrix().catch(() => {})
+        // Con la clave inicial pendiente el servidor veta el resto de rutas.
+        if (!get().session?.mustChangePassword) get().loadMatrix().catch(() => {})
       } catch {
         clearTokens()
         set({ session: null })
@@ -299,9 +300,12 @@ export const useAppStore = create((set, get) => ({
 
       const user = apiUserToSession(data.user)
       set({ session: user, attempts: 0, lockedUntil: null, lockRequiresOsi: false })
-      get().loadDirectory().catch(() => {})
       get().loadNotifications().catch(() => {})
-      get().loadMatrix().catch(() => {})
+      // Con la clave inicial pendiente el servidor veta el resto de rutas: se cargan al cambiarla.
+      if (!user.mustChangePassword) {
+        get().loadDirectory().catch(() => {})
+        get().loadMatrix().catch(() => {})
+      }
       return { ok: true, user }
     } catch (error) {
       if (error instanceof ApiError && error.status === 0) {
@@ -333,7 +337,7 @@ export const useAppStore = create((set, get) => ({
           lockedUntil: requiresOsi ? Number.MAX_SAFE_INTEGER : locked ? Date.now() + remainingSeconds * 1000 : null,
           lockRequiresOsi: requiresOsi,
         })
-        return { ok: false, locked, requiresOsi, attempts, remainingSeconds, error: error.message }
+        return { ok: false, locked, requiresOsi, lockExempt: error.lockExempt, attempts, remainingSeconds, error: error.message }
       }
 
       noteApiFailure(set, error, 'login')
@@ -504,16 +508,13 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
-  /** Edicion autoexigible de datos. El servidor normaliza nombre y correo. */
-  updateProfile: async ({ firstName, lastName, phone, email }) => {
+  /** Edicion autoexigible de contacto. El User ID y el codigo no son editables. */
+  updateProfile: async ({ phone, email }) => {
     const userId = get().session?.userId
-    const data = await authApi.updateProfile({ firstName, lastName, phone, email })
-    const username = data.profile.username
+    const data = await authApi.updateProfile({ phone, email })
     set((s) => ({
-      directory: s.directory.map((u) =>
-        u.userId === userId ? { ...u, name: username, phone, email } : u,
-      ),
-      session: s.session ? { ...s.session, name: username, email } : null,
+      directory: s.directory.map((u) => (u.userId === userId ? { ...u, phone, email } : u)),
+      session: s.session ? { ...s.session, email } : null,
     }))
     await get().loadProfile()
     ok(set)
@@ -530,6 +531,8 @@ export const useAppStore = create((set, get) => ({
       // La clave inicial ya fue reemplazada: se levanta la restriccion de la sesion.
       set((s) => ({ session: s.session ? { ...s.session, mustChangePassword: false } : null }))
       await get().loadProfile()
+      get().loadDirectory().catch(() => {})
+      get().loadMatrix().catch(() => {})
       ok(set)
       return { ok: true }
     } catch (error) {
@@ -659,7 +662,7 @@ export const useAppStore = create((set, get) => ({
 
   /** Carga la matriz rol x permiso desde MySQL (solo administradores RBAC). */
   loadMatrix: async () => {
-    if (!get().hasAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE'])) {
+    if (get().session?.mustChangePassword || !get().hasAnyPermission(['RBAC_MANAGE', 'ROLES_MANAGE'])) {
       set({ rbac: {}, rbacRoles: [], rbacPermissions: [] })
       return null
     }

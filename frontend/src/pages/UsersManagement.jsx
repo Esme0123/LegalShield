@@ -12,11 +12,14 @@ import {
   Search,
   ShieldCheck,
   Unlock,
+  UserCheck,
   UserPlus,
+  UserX,
   Users,
   X,
 } from 'lucide-react'
 import { Badge, EmptyState, SectionTitle } from '@/components/ui/primitives'
+import PasswordInput from '@/components/ui/PasswordInput'
 import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { cn } from '@/lib/cn'
@@ -71,10 +74,14 @@ function UserModal({ mode, user, onClose, onSecret }) {
     () => users.filter((u) => u.id !== user?.id).map((u) => u.username),
     [users, user?.id],
   )
-  const preview = previewUsername(form.firstName, form.lastName, usedNames)
+  // En edicion el User ID es el ya asignado: la identidad no se recompone.
+  const isEdit = mode === 'edit'
+  const preview = isEdit ? user?.username : previewUsername(form.firstName, form.lastName, usedNames)
   const emailOk = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(form.email.trim())
 
-  const canSubmit = form.firstName.trim().length > 1 && form.lastName.trim().length > 1 && emailOk && Boolean(preview)
+  const canSubmit = isEdit
+    ? emailOk
+    : form.firstName.trim().length > 1 && form.lastName.trim().length > 1 && emailOk && Boolean(preview)
 
   const submit = async (e) => {
     e.preventDefault()
@@ -100,8 +107,6 @@ function UserModal({ mode, user, onClose, onSecret }) {
         }
       } else {
         await updateUserAdmin(user.id, {
-          firstName: form.firstName.trim(),
-          lastName: form.lastName.trim(),
           email: form.email.trim(),
           role: form.role,
           firm: form.firm.trim(),
@@ -143,7 +148,7 @@ function UserModal({ mode, user, onClose, onSecret }) {
             <p className="mt-0.5 text-[11.5px] text-muted">
               {mode === 'create'
                 ? 'El User ID se calcula con la regla nombre.apellido (punto 9.1).'
-                : 'Cambiar el nombre recompone el User ID estandarizado.'}
+                : 'El User ID y el codigo son fijos: solo se editan contacto, rol y area.'}
             </p>
           </div>
           <button
@@ -160,11 +165,24 @@ function UserModal({ mode, user, onClose, onSecret }) {
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="ls-label">Nombre</span>
-              <input value={form.firstName} onChange={set('firstName')} className="ls-input" placeholder="María José" />
+              <input
+                value={form.firstName}
+                onChange={set('firstName')}
+                disabled={isEdit}
+                className={cn('ls-input', isEdit && 'cursor-not-allowed opacity-70')}
+                placeholder="María José"
+                autoFocus={!isEdit}
+              />
             </label>
             <label className="block">
               <span className="ls-label">Apellido</span>
-              <input value={form.lastName} onChange={set('lastName')} className="ls-input" placeholder="Pérez" />
+              <input
+                value={form.lastName}
+                onChange={set('lastName')}
+                disabled={isEdit}
+                className={cn('ls-input', isEdit && 'cursor-not-allowed opacity-70')}
+                placeholder="Pérez"
+              />
             </label>
           </div>
 
@@ -180,10 +198,16 @@ function UserModal({ mode, user, onClose, onSecret }) {
               <p className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted">User ID estandarizado · 9.1</p>
               <p className="truncate font-mono text-[15px] font-bold text-ink">{preview || 'nombre.apellido'}</p>
             </div>
-            {preview && (
-              <Badge tone="pastel">
-                <ShieldCheck className="h-3 w-3" /> Libre
+            {isEdit ? (
+              <Badge tone="neutral">
+                <Lock className="h-3 w-3" /> {user?.userCode}
               </Badge>
+            ) : (
+              preview && (
+                <Badge tone="pastel">
+                  <ShieldCheck className="h-3 w-3" /> Libre
+                </Badge>
+              )
             )}
           </div>
 
@@ -216,18 +240,17 @@ function UserModal({ mode, user, onClose, onSecret }) {
             </label>
             <label className="block">
               <span className="ls-label">Teléfono</span>
-              <input value={form.phone} onChange={set('phone')} className="ls-input" placeholder="+57 ..." />
+              <input value={form.phone} onChange={set('phone')} className="ls-input" placeholder="+591 12345678" />
             </label>
           </div>
 
           {mode === 'create' && (
             <label className="block">
               <span className="ls-label">Contraseña inicial (opcional)</span>
-              <input
+              <PasswordInput
                 value={form.password}
                 onChange={set('password')}
-                type="password"
-                className="ls-input"
+                autoComplete="new-password"
                 placeholder="Si se deja vacia, el servidor genera una temporal (cambio obligatorio al primer acceso)"
               />
             </label>
@@ -244,6 +267,80 @@ function UserModal({ mode, user, onClose, onSecret }) {
           </button>
         </div>
       </motion.form>
+    </motion.div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Confirmacion de baja logica / activacion                                    */
+/* -------------------------------------------------------------------------- */
+
+function StatusConfirmModal({ user, busy, onConfirm, onClose }) {
+  const deactivating = user.isActive
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[70] grid place-items-center bg-navy/70 p-4 backdrop-blur-sm"
+      onClick={busy ? undefined : onClose}
+    >
+      <motion.div
+        onClick={(e) => e.stopPropagation()}
+        initial={{ opacity: 0, y: 18, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -10, scale: 0.98 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+        className="ls-card w-full max-w-md p-5 sm:p-6"
+        role="alertdialog"
+        aria-labelledby="status-confirm-title"
+      >
+        <div className="flex items-start gap-3">
+          <span
+            className={cn(
+              'grid h-10 w-10 shrink-0 place-items-center rounded-xl border',
+              deactivating ? 'border-danger/50 bg-danger/10 text-danger' : 'border-ok/50 bg-ok/10 text-ok',
+            )}
+          >
+            {deactivating ? <UserX className="h-5 w-5" /> : <UserCheck className="h-5 w-5" />}
+          </span>
+          <div className="min-w-0">
+            <h3 id="status-confirm-title" className="font-display text-base font-bold text-ink">
+              {deactivating ? 'Dar de baja la cuenta' : 'Activar la cuenta'}
+            </h3>
+            <p className="mt-1 font-mono text-[12px] text-info">
+              {user.username} · {user.userCode}
+            </p>
+          </div>
+        </div>
+
+        <p className="mt-4 text-[12.5px] leading-snug text-ink/80">
+          {deactivating
+            ? 'El usuario no podrá iniciar sesión desde ahora. Sus datos, expedientes y registros de auditoría se conservan (baja lógica) y puede reactivarse en cualquier momento.'
+            : 'El usuario podrá volver a iniciar sesión con su contraseña actual. Si la cuenta estaba bloqueada, el bloqueo se mantiene hasta que se levante.'}
+        </p>
+
+        <div className="mt-6 flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={busy} className="ls-btn-ghost text-xs">
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            autoFocus
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-semibold transition disabled:opacity-60',
+              deactivating
+                ? 'border-danger/60 bg-danger/15 text-danger hover:bg-danger/25'
+                : 'border-ok/60 bg-ok/15 text-ok hover:bg-ok/25',
+            )}
+          >
+            {deactivating ? <UserX className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}
+            {busy ? 'Aplicando...' : deactivating ? 'Sí, dar de baja' : 'Sí, activar cuenta'}
+          </button>
+        </div>
+      </motion.div>
     </motion.div>
   )
 }
@@ -353,6 +450,8 @@ export default function UsersManagement() {
   const [filter, setFilter] = useState('todos')
   const [modal, setModal] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  // Cuenta a la que se le confirma la baja o la activacion.
+  const [statusTarget, setStatusTarget] = useState(null)
   // OTP o clave inicial: vive solo aqui y se descarta al cerrar el modal (nunca en el store).
   const [secret, setSecret] = useState(null)
 
@@ -383,32 +482,25 @@ export default function UsersManagement() {
     })
   }, [users, search, filter])
 
-  const deactivate = async (user) => {
-    if (user.userCode === session?.userId) {
-      toast.danger('Accion bloqueada', 'No puede desactivar su propio usuario')
+  const askStatusChange = (user) => {
+    if (user.isActive && user.userCode === session?.userId) {
+      toast.danger('Accion bloqueada', 'No puede dar de baja su propio usuario')
       return
     }
-    if (!window.confirm(`Dar de baja a ${user.username} (${user.userCode})?\nLa cuenta dejara de iniciar sesion (baja logica).`)) {
-      return
-    }
-    setBusyId(user.id)
-    try {
-      await setUserStatusAdmin(user.id, false)
-      toast.pastel('Cuenta desactivada', `${user.username} paso a baja logica`)
-    } catch (error) {
-      toast.danger('No se aplico la baja', error.message ?? 'Permiso insuficiente o fallo de API')
-    } finally {
-      setBusyId(null)
-    }
+    setStatusTarget(user)
   }
 
-  const reactivate = async (user) => {
+  const confirmStatusChange = async () => {
+    const user = statusTarget
+    const activate = !user.isActive
     setBusyId(user.id)
     try {
-      await setUserStatusAdmin(user.id, true)
-      toast.mint('Cuenta reactivada', `${user.username} vuelve a estar activa`)
+      await setUserStatusAdmin(user.id, activate)
+      if (activate) toast.mint('Cuenta activada', `${user.username} puede volver a iniciar sesion`)
+      else toast.pastel('Cuenta dada de baja', `${user.username} ya no puede iniciar sesion`)
+      setStatusTarget(null)
     } catch (error) {
-      toast.danger('No se pudo reactivar', error.message ?? 'Permiso insuficiente o fallo de API')
+      toast.danger(activate ? 'No se pudo activar' : 'No se aplico la baja', error.message ?? 'Permiso insuficiente o fallo de API')
     } finally {
       setBusyId(null)
     }
@@ -463,7 +555,7 @@ export default function UsersManagement() {
             </button>
             {can.create && (
               <button type="button" onClick={() => setModal({ mode: 'create' })} className="ls-btn-primary text-xs">
-                <UserPlus className="h-3.5 w-3.5" /> Alta de usuario
+                <UserPlus className="h-3.5 w-3.5" /> Nuevo usuario
               </button>
             )}
           </div>
@@ -538,8 +630,9 @@ export default function UsersManagement() {
               {filtered.map((user) => {
                 const status = statusOf(user)
                 const busy = busyId === user.id
+                const isSelf = user.userCode === session?.userId
                 return (
-                  <tr key={user.id}>
+                  <tr key={user.id} className={cn(!user.isActive && 'opacity-60 transition-opacity hover:opacity-100')}>
                     <td>
                       <div className="flex items-center gap-2.5">
                         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-accent/40 bg-accent/10 font-mono text-[11px] font-bold text-accent">
@@ -591,25 +684,29 @@ export default function UsersManagement() {
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
                         )}
-                        {can.remove && (user.isActive ? (
+                        {can.remove && (isSelf ? (
+                          <span className="whitespace-nowrap rounded-lg border border-line/40 px-2.5 py-1.5 font-mono text-[10.5px] text-muted">
+                            Su cuenta
+                          </span>
+                        ) : user.isActive ? (
                           <button
                             type="button"
                             disabled={busy}
-                            onClick={() => deactivate(user)}
-                            className="rounded-lg border border-line/50 p-2 text-muted transition hover:border-danger/60 hover:text-danger"
-                            title="Dar de baja (baja logica)"
+                            onClick={() => askStatusChange(user)}
+                            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-danger/50 bg-danger/10 px-2.5 py-1.5 text-[11px] font-semibold text-danger transition hover:bg-danger/20 disabled:opacity-50"
+                            title="Baja logica: la cuenta deja de iniciar sesion"
                           >
-                            <PowerOff className="h-3.5 w-3.5" />
+                            <UserX className="h-3.5 w-3.5" /> Dar de baja
                           </button>
                         ) : (
                           <button
                             type="button"
                             disabled={busy}
-                            onClick={() => reactivate(user)}
-                            className="rounded-lg border border-line/50 p-2 text-muted transition hover:border-ok/60 hover:text-ok"
-                            title="Reactivar cuenta"
+                            onClick={() => askStatusChange(user)}
+                            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-ok/50 bg-ok/10 px-2.5 py-1.5 text-[11px] font-semibold text-ok transition hover:bg-ok/20 disabled:opacity-50"
+                            title="Reactivar la cuenta"
                           >
-                            <ShieldCheck className="h-3.5 w-3.5" />
+                            <UserCheck className="h-3.5 w-3.5" /> Activar cuenta
                           </button>
                         ))}
                         {can.token && user.isLocked && user.isActive && (
@@ -669,6 +766,18 @@ export default function UsersManagement() {
             user={modal.user}
             onClose={() => setModal(null)}
             onSecret={setSecret}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Confirmacion de baja / activacion */}
+      <AnimatePresence>
+        {statusTarget && (
+          <StatusConfirmModal
+            user={statusTarget}
+            busy={busyId === statusTarget.id}
+            onConfirm={confirmStatusChange}
+            onClose={() => setStatusTarget(null)}
           />
         )}
       </AnimatePresence>

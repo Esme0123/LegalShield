@@ -16,6 +16,11 @@ const NOTICE = {
     title: 'Cuenta bloqueada por intentos fallidos',
     message: `Su cuenta se bloqueo el ${stamp()} tras 3 intentos fallidos desde la IP ${ip ?? 'desconocida'}. Si no fue usted, reporte un incidente al OSI.`,
   }),
+  PRIVILEGED_FAILURES: (ip, count) => ({
+    type: 'LOGIN_FAILURES',
+    title: 'Intentos fallidos sobre su cuenta',
+    message: `Se registraron ${count} intentos fallidos sobre su cuenta (ultimo el ${stamp()} desde la IP ${ip ?? 'desconocida'}). Si no fue usted, revise los logs de seguridad.`,
+  }),
   TOKEN_ISSUED: () => ({
     type: 'UNLOCK_TOKEN_ISSUED',
     title: 'Token de desbloqueo emitido',

@@ -92,6 +92,11 @@ export class ApiError extends Error {
     return Number(this.payload?.failedAttempts ?? this.details?.failedAttempts ?? 0)
   }
 
+  /** Cuenta exenta del bloqueo (OSI) que ya supero el umbral de intentos. */
+  get lockExempt() {
+    return Boolean(this.payload?.lockExempt)
+  }
+
   get maxAttempts() {
     return Number(this.payload?.maxAttempts ?? this.details?.maxAttempts ?? 3)
   }

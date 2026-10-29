@@ -4,9 +4,9 @@
  * Perfil del usuario autenticado.
  *
  * GET  /api/auth/profile        -> identidad visible del titular
- * PUT  /api/auth/profile        -> edicion autoexigible (nombre, correo, despacho,
- *                                  departamento, telefono). No toca el rol: el rol
- *                                  lo concede el administrador, no el usuario.
+ * PUT  /api/auth/profile        -> edicion autoexigible (correo, despacho,
+ *                                  departamento, telefono). No toca el rol ni la
+ *                                  identidad (User ID nombre.apellido y codigo).
  * PUT  /api/auth/password       -> cambio de clave con validacion de la actual y
  *                                  bloqueo de reutilizacion de las ultimas 5.
  * GET  /api/auth/notifications  -> ultimos avisos de seguridad del titular
@@ -19,7 +19,7 @@ const { record } = require('../services/auditService')
 const { badRequest, conflict, notFound, unauthorized, unprocessable } = require('../utils/errors')
 const { evaluatePassword, PASSWORD_HISTORY_LIMIT } = require('../utils/passwordPolicy')
 const { assertPasswordNotReused, pushPasswordHistory } = require('../utils/passwordHistory')
-const { sanitizeEmail, normalizeUsername } = require('../utils/identity')
+const { sanitizeEmail } = require('../utils/identity')
 
 const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12)
 
@@ -59,16 +59,29 @@ async function getProfile(req, res) {
 /* -------------------------------------------------------------------------- */
 
 const PROFILE_FIELDS = {
-  firstName: 'username',
-  lastName: 'username',
   email: 'email',
   firm: 'firm',
   department: 'department',
   phone: 'phone',
 }
 
+/**
+ * Identidad inmutable: el User ID (nombre.apellido) y el codigo son la llave con
+ * la que el sistema firma la bitacora y los expedientes; el titular no los cambia.
+ */
+const IDENTITY_FIELDS = ['username', 'userCode', 'user_code', 'firstName', 'lastName']
+
 async function updateProfile(req, res) {
   const body = req.body ?? {}
+  const identity = IDENTITY_FIELDS.filter((key) => body[key] !== undefined)
+  if (identity.length > 0) {
+    record('PROFILE_IDENTITY_CHANGE_BLOCKED', {
+      userCode: req.user.user_code,
+      req,
+      details: { fields: identity },
+    })
+    throw unprocessable('El User ID (nombre.apellido) y el codigo de usuario no son editables')
+  }
   const fields = Object.keys(body).filter((key) => key in PROFILE_FIELDS)
   if (fields.length === 0) throw badRequest(`No se envio ningun campo editable. Permitidos: ${Object.keys(PROFILE_FIELDS).join(', ')}`)
 
@@ -86,22 +99,6 @@ async function updateProfile(req, res) {
     if (taken) throw conflict('El correo ya pertenece a otro usuario')
     values.push(email)
     sets.push('email = ?')
-  }
-
-  if (body.firstName !== undefined || body.lastName !== undefined) {
-    const current = await one('SELECT username FROM users WHERE id = ?', [req.user.id])
-    const parts = String(current.username).split('.')
-    const currentFirst = parts[0] ?? ''
-    const currentLast = parts.slice(1).join('.')
-
-    const first = body.firstName !== undefined ? normalizeUsername(body.firstName) : currentFirst
-    const last = body.lastName !== undefined ? normalizeUsername(body.lastName) : currentLast
-    const username = [first, last].filter(Boolean).join('.')
-
-    const taken = await one('SELECT id FROM users WHERE username = ? AND id <> ?', [username, req.user.id])
-    if (taken) throw conflict('Ese nombre de usuario ya esta en uso')
-    values.push(username)
-    sets.push('username = ?')
   }
 
   for (const key of ['firm', 'department', 'phone']) {

@@ -328,6 +328,50 @@ const DEMO_USERS = [
   },
 ]
 
+/**
+ * Cuentas de pruebas del equipo LegalShield. Cada integrante tiene su cuenta OSI
+ * (nombre.apellido) y una cuenta por rol operativo (nombre.rol), para que cada
+ * uno haga sus pruebas sin depender de que otra cuenta este bloqueada.
+ * Se crean una sola vez con la clave inicial y must_change_password = TRUE:
+ * re-ejecutar init-db NO las sobrescribe (cada titular ya cambio su clave).
+ */
+const TEAM_MEMBERS = [
+  { first: 'luis', last: 'paredes', fullName: 'Luis Angel Paredes Torrez' },
+  { first: 'rodny', last: 'siles', fullName: 'Rodny Gerald Siles Barrenechea' },
+  { first: 'carlos', last: 'pinell', fullName: 'Carlos Fernando Pinell Mealla' },
+  { first: 'fabricio', last: 'condarco', fullName: 'Fabricio Condarco Poma' },
+  { first: 'esmeralda', last: 'medina', fullName: 'Esmeralda Paula Medina Paredes' },
+  { first: 'joan', last: 'riveros', fullName: 'Joan Marcelo Riveros Soria' },
+]
+
+const TEAM_ROLES = [
+  { role: 'osi', suffix: null, firm: 'LegalShield Bufetes', department: 'Seguridad de la Informacion' },
+  { role: 'socio', suffix: 'socio', firm: 'LegalShield Bufetes', department: 'Direccion Juridica' },
+  { role: 'abogado', suffix: 'abogado', firm: 'LegalShield Bufetes', department: 'Litigacion' },
+  { role: 'asistente', suffix: 'asistente', firm: 'LegalShield Bufetes', department: 'Archivo' },
+  { role: 'cliente', suffix: 'cliente', firm: 'Cliente Externo', department: 'Externo' },
+]
+
+/** "carlos.cliente" ya es la cuenta demo LEG-2026-0390: se aplica la regla 9.1 (sufijo 1). */
+const TEAM_USERNAME_OVERRIDES = { 'carlos.cliente': 'carlos.cliente1' }
+
+/** User ID fijo por integrante y rol: LEG-2026-05<integrante><rol> (0511..0565). */
+const TEAM_USERS = TEAM_MEMBERS.flatMap((member, i) =>
+  TEAM_ROLES.map((r, j) => {
+    const base = `${member.first}.${r.suffix ?? member.last}`
+    const username = TEAM_USERNAME_OVERRIDES[base] ?? base
+    return {
+      userCode: `LEG-2026-05${i + 1}${j + 1}`,
+      username,
+      email: `${username}@legalshield.bo`,
+      role: r.role,
+      firm: r.firm,
+      department: r.department,
+      fullName: member.fullName,
+    }
+  }),
+)
+
 const DEMO_CASES = [
   {
     caseNumber: 'EXP-2026-0014',
@@ -789,6 +833,25 @@ async function main() {
       [passwordHash, user.userCode],
     )
     logger.info(`Usuario de demostracion listo: ${user.userCode} / ${user.username} (${user.role})`)
+  }
+
+  // Cuentas de pruebas del equipo: alta unica (nunca se sobrescribe la clave que
+  // el titular ya cambio). must_change_password obliga al cambio en el 1.er acceso.
+  for (const user of TEAM_USERS) {
+    const [result] = await run(
+      `INSERT IGNORE INTO users
+         (user_code, username, email, password_hash, role_id, firm, department, phone, password_updated_at, must_change_password)
+       VALUES (?, ?, ?, ?, (SELECT id FROM roles WHERE code = ?), ?, ?, NULL, NOW(), TRUE)`,
+      [user.userCode, user.username, user.email, passwordHash, user.role, user.firm, user.department],
+    )
+    if (result.affectedRows > 0) {
+      await run(
+        `INSERT INTO password_history (user_id, password_hash)
+         SELECT u.id, ? FROM users u WHERE u.user_code = ?`,
+        [passwordHash, user.userCode],
+      )
+      logger.info(`Cuenta de equipo creada: ${user.userCode} / ${user.username} (${user.role})`)
+    }
   }
 
   // La cuenta tecnica "admin" (socio con clave de demostracion conocida) violaba

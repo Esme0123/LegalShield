@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { KeyRound } from 'lucide-react'
 import PasswordStrength from '@/components/auth/PasswordStrength'
+import PasswordInput from '@/components/ui/PasswordInput'
 import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 
@@ -83,10 +84,8 @@ export default function PasswordResetPanel({ initialUserId = '', onDone }) {
       </div>
       <div>
         <label htmlFor="reset-new" className="ls-label">Nueva contraseña</label>
-        <input
+        <PasswordInput
           id="reset-new"
-          type="password"
-          className="ls-input"
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
           autoComplete="new-password"
@@ -95,10 +94,8 @@ export default function PasswordResetPanel({ initialUserId = '', onDone }) {
       </div>
       <div>
         <label htmlFor="reset-confirm" className="ls-label">Confirmar contraseña</label>
-        <input
+        <PasswordInput
           id="reset-confirm"
-          type="password"
-          className="ls-input"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           autoComplete="new-password"

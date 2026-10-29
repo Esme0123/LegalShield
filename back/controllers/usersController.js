@@ -234,6 +234,13 @@ async function updateUser(req, res) {
 
   const body = req.body ?? {}
 
+  // El User ID (nombre.apellido) y el codigo se fijan en el alta: son la identidad
+  // que firma la bitacora y los expedientes, y ni el OSI los reescribe.
+  const identity = ['username', 'userCode', 'user_code', 'firstName', 'lastName'].filter((key) => body[key] !== undefined)
+  if (identity.length > 0) {
+    throw unprocessable('El User ID (nombre.apellido) y el codigo de usuario no son editables', { fields: identity })
+  }
+
   const updated = await withTransaction(async (client) => {
     const sets = []
     const values = []
@@ -254,18 +261,6 @@ async function updateUser(req, res) {
       if (!roleRow) throw unprocessable('El rol solicitado no existe en el catalogo', { role: body.role })
       values.push(body.role.trim().toLowerCase())
       sets.push('role_id = (SELECT id FROM roles WHERE code = ?)')
-    }
-
-    // Cambio de nombre -> se recompone el User ID estandar (punto 9.1) con la
-    // misma regla de disponibilidad, respetando el username propio del titular.
-    if (body.firstName !== undefined || body.lastName !== undefined) {
-      const firstName = body.firstName !== undefined ? String(body.firstName) : null
-      const lastName = body.lastName !== undefined ? String(body.lastName) : null
-      const base = buildUsername(firstName ?? existing.username, lastName ?? existing.username)
-      if (!base) throw unprocessable('Nombre o apellido invalidos para generar el User ID')
-      const username = await findAvailableUsername(client, base, id)
-      values.push(username)
-      sets.push('username = ?')
     }
 
     for (const key of ['firm', 'department', 'phone']) {

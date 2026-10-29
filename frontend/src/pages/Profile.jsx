@@ -18,6 +18,7 @@ import {
   UserCheck,
 } from 'lucide-react'
 import PasswordStrength from '@/components/auth/PasswordStrength'
+import PasswordInput from '@/components/ui/PasswordInput'
 import { Badge, SectionTitle } from '@/components/ui/primitives'
 import { PASSWORD_HISTORY_LIMIT, useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
@@ -99,8 +100,6 @@ function IdentityCard({ user }) {
 
 function PersonalDataForm({ user, onSave }) {
   const [form, setForm] = useState({
-    firstName: user?.firstName ?? '',
-    lastName: user?.lastName ?? '',
     phone: user?.phone ?? '',
     email: user?.email ?? '',
   })
@@ -108,8 +107,14 @@ function PersonalDataForm({ user, onSave }) {
 
   const emailOk = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(form.email.trim())
   const phoneOk = form.phone.trim() === '' || /^[+\d][\d\s()-]{6,}$/.test(form.phone.trim())
-  const valid =
-    form.firstName.trim().length > 1 && form.lastName.trim().length > 1 && emailOk && phoneOk
+  const valid = emailOk && phoneOk
+
+  // El perfil llega de la API despues del primer render: sin esto el formulario
+  // quedaria con los valores vacios iniciales.
+  useEffect(() => {
+    if (dirty) return
+    setForm({ phone: user?.phone ?? '', email: user?.email ?? '' })
+  }, [user?.phone, user?.email, dirty])
 
   const set = (key) => (e) => {
     setForm((f) => ({ ...f, [key]: e.target.value }))
@@ -121,22 +126,32 @@ function PersonalDataForm({ user, onSave }) {
       <SectionTitle
         icon={UserCheck}
         title="Datos personales"
-        subtitle="El nombre completo se refleja de inmediato en la sesion y en la bitacora."
+        subtitle="Puede actualizar su correo y telefono. Su identidad institucional es fija."
       />
 
       <div className="mt-5 grid gap-5 sm:grid-cols-2">
-        <div>
-          <label className="ls-label" htmlFor="p-firstName">
-            Nombre
-          </label>
-          <input id="p-firstName" value={form.firstName} onChange={set('firstName')} className="ls-input" />
-        </div>
-        <div>
-          <label className="ls-label" htmlFor="p-lastName">
-            Apellido
-          </label>
-          <input id="p-lastName" value={form.lastName} onChange={set('lastName')} className="ls-input" />
-        </div>
+        {[
+          { id: 'p-username', label: 'Usuario (nombre.apellido)', value: user?.name },
+          { id: 'p-usercode', label: 'Codigo de usuario', value: user?.userId },
+        ].map(({ id, label, value }) => (
+          <div key={id}>
+            <label className="ls-label" htmlFor={id}>
+              <Lock className="mr-1 inline h-3 w-3" /> {label}
+            </label>
+            <input
+              id={id}
+              value={value ?? ''}
+              readOnly
+              disabled
+              title="Asignado por el sistema: no se puede modificar"
+              className="ls-input cursor-not-allowed font-mono opacity-70"
+            />
+          </div>
+        ))}
+        <p className="-mt-2 flex items-start gap-1.5 font-mono text-[10.5px] text-muted sm:col-span-2">
+          <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
+          El usuario y el codigo identifican sus acciones en la bitacora: los asigna el sistema y no se pueden cambiar.
+        </p>
         <div>
           <label className="ls-label" htmlFor="p-phone">
             <Phone className="mr-1 inline h-3 w-3" /> Telefono
@@ -145,7 +160,7 @@ function PersonalDataForm({ user, onSave }) {
             id="p-phone"
             value={form.phone}
             onChange={set('phone')}
-            placeholder="+57 601 000 0000"
+            placeholder="+591 12345678"
             className={cn('ls-input', form.phone && !phoneOk && 'border-danger/70')}
           />
           {form.phone && !phoneOk ? (
@@ -175,8 +190,6 @@ function PersonalDataForm({ user, onSave }) {
           disabled={!valid || !dirty}
           onClick={() => {
             onSave({
-              firstName: form.firstName.trim(),
-              lastName: form.lastName.trim(),
               phone: form.phone.trim(),
               email: form.email.trim(),
             })
@@ -240,13 +253,11 @@ function PasswordModule({ user, mustChange, onChange }) {
             <label className="ls-label" htmlFor="cur-pass">
               <KeyRound className="mr-1 inline h-3 w-3" /> Contrasena actual
             </label>
-            <input
+            <PasswordInput
               id="cur-pass"
-              type="password"
               value={current}
               onChange={(e) => setCurrent(e.target.value)}
               autoComplete="current-password"
-              className="ls-input"
             />
           </div>
 
@@ -254,13 +265,11 @@ function PasswordModule({ user, mustChange, onChange }) {
             <label className="ls-label" htmlFor="new-pass">
               <Key className="mr-1 inline h-3 w-3" /> Nueva contrasena
             </label>
-            <input
+            <PasswordInput
               id="new-pass"
-              type="password"
               value={next}
               onChange={(e) => setNext(e.target.value)}
               autoComplete="new-password"
-              className="ls-input"
             />
           </div>
 
@@ -268,13 +277,12 @@ function PasswordModule({ user, mustChange, onChange }) {
             <label className="ls-label" htmlFor="conf-pass">
               <CheckCircle2 className="mr-1 inline h-3 w-3" /> Confirmar contrasena
             </label>
-            <input
+            <PasswordInput
               id="conf-pass"
-              type="password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               autoComplete="new-password"
-              className={cn('ls-input', confirm && !matches && 'border-warn/70')}
+              className={cn(confirm && !matches && 'border-warn/70')}
             />
           </div>
         </div>

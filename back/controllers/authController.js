@@ -33,9 +33,10 @@ const MAX_FAILED_ATTEMPTS = Number(process.env.MAX_FAILED_ATTEMPTS || 3)
  * LOCK_MINUTES, los siguientes LOCK_MINUTES_SECOND y, al llegar a
  * LOCK_HARD_THRESHOLD bloqueos consecutivos sin login exitoso, el bloqueo es
  * indefinido (status LOCKED_OSI) y solo lo levanta el Oficial de Seguridad.
+ * El OSI esta exento (ver isLockExempt): es quien desbloquea a los demas.
  */
-const LOCK_MINUTES = Number(process.env.LOCK_MINUTES || 15)
-const LOCK_MINUTES_SECOND = Number(process.env.LOCK_MINUTES_SECOND || 30)
+const LOCK_MINUTES = Number(process.env.LOCK_MINUTES || 1)
+const LOCK_MINUTES_SECOND = Number(process.env.LOCK_MINUTES_SECOND || 1)
 const LOCK_HARD_THRESHOLD = Number(process.env.LOCK_HARD_THRESHOLD || 3)
 const LOCK_MESSAGE = '3 de 3 - Cuenta inhabilitada temporalmente'
 const LOCK_OSI_MESSAGE = 'Cuenta bloqueada por reincidencia. Requiere desbloqueo del Oficial de Seguridad'
@@ -82,9 +83,12 @@ function lockedBody({ requiresOsi, remainingSeconds, failedAttempts }) {
   }
 }
 
-function failureBody({ failedAttempts, lockedNow, requiresOsi, remainingSeconds }) {
+function failureBody({ failedAttempts, lockedNow, requiresOsi, remainingSeconds, lockExempt = false }) {
   const lockMessage = requiresOsi ? LOCK_OSI_MESSAGE : LOCK_MESSAGE
   return {
+    // Solo se anexa cuando la cuenta exenta supera el umbral: hasta ahi la
+    // respuesta es identica a la de cualquier cuenta (no revela el rol antes).
+    ...(lockExempt ? { lockExempt: true } : {}),
     message: lockedNow ? lockMessage : 'Credencial inválida',
     error: lockedNow ? lockMessage : 'Credencial inválida',
     failedAttempts,
@@ -140,6 +144,27 @@ async function releaseExpiredLock(userId) {
         SET is_locked = FALSE, status = 'ACTIVE', failed_attempts = 0,
             locked_at = NULL, locked_until = NULL
       WHERE id = ? AND status <> 'LOCKED_OSI'`,
+    [userId],
+  )
+}
+
+/**
+ * El Oficial de Seguridad es el unico que puede levantar un bloqueo indefinido:
+ * si su propia cuenta se bloqueara, nadie podria desbloquearla. Por eso no se
+ * bloquea nunca; a cambio, el CAPTCHA se exige en cada intento tras el primer
+ * fallo hasta un login exitoso, y cada MAX_FAILED_ATTEMPTS fallos se le avisa.
+ */
+function isLockExempt(user) {
+  return user?.role_code === 'osi'
+}
+
+/** Levanta cualquier bloqueo (incluido LOCKED_OSI) de una cuenta exenta. */
+async function releaseExemptLock(userId) {
+  await query(
+    `UPDATE users
+        SET is_locked = FALSE, status = 'ACTIVE', lock_count = 0,
+            locked_at = NULL, locked_until = NULL
+      WHERE id = ?`,
     [userId],
   )
 }
@@ -268,6 +293,17 @@ async function login(req, res) {
   // incrementa failed_attempts sobre una cuenta bloqueada. La baja logica ya se
   // atendio arriba con la respuesta uniforme.
 
+  // 0. Cuenta exenta (OSI): un bloqueo heredado de la politica anterior se
+  //    levanta. failed_attempts se conserva para seguir exigiendo el CAPTCHA.
+  const lockExempt = isLockExempt(user)
+  if (lockExempt && (user.is_locked || user.status === 'LOCKED_OSI')) {
+    await releaseExemptLock(user.id)
+    user.is_locked = false
+    user.status = 'ACTIVE'
+    user.locked_until = null
+    user.remaining_seconds = null
+  }
+
   // 1. Bloqueo temporal persistido en MySQL: si NOW() < locked_until se informa
   //    el tiempo restante exacto; si ya vencio, la cuenta se libera sola.
   //    El bloqueo indefinido (LOCKED_OSI, locked_until = NULL) nunca se libera
@@ -341,6 +377,29 @@ async function login(req, res) {
   // y `failed_attempts + 1` / `lock_count + 1` son los valores resultantes.
   // Backoff: 1.er bloqueo -> LOCK_MINUTES; siguientes -> LOCK_MINUTES_SECOND;
   // al llegar a LOCK_HARD_THRESHOLD -> locked_until NULL y status LOCKED_OSI.
+  // La cuenta exenta (OSI) solo suma el fallo: nunca se bloquea ni espera.
+  if (!matches && lockExempt) {
+    await query('UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id = ?', [user.id])
+    const updated = await one('SELECT failed_attempts FROM users WHERE id = ?', [user.id])
+    const failedAttempts = Number(updated.failed_attempts)
+    record('AUTH_FAILED', {
+      userCode: user.user_code,
+      req,
+      details: { failedAttempts, lockExempt: true, ip },
+    })
+    // Aviso al titular cada MAX_FAILED_ATTEMPTS fallos: puede ser un ataque ajeno.
+    if (failedAttempts % MAX_FAILED_ATTEMPTS === 0) {
+      await notifyUser(user.id, NOTICE.PRIVILEGED_FAILURES(ip, failedAttempts))
+    }
+    return res.status(401).json(failureBody({
+      failedAttempts,
+      lockedNow: false,
+      requiresOsi: false,
+      remainingSeconds: 0,
+      lockExempt: failedAttempts >= MAX_FAILED_ATTEMPTS,
+    }))
+  }
+
   if (!matches) {
     await query(
       `UPDATE users
@@ -501,10 +560,11 @@ async function lockStatus(req, res) {
   }
 
   const user = await one(
-    `SELECT id, failed_attempts, is_locked, is_active, status, locked_until,
-            TIMESTAMPDIFF(SECOND, NOW(), locked_until) AS remaining_seconds
-       FROM users
-      WHERE username = ? OR email = ? OR user_code = ?`,
+    `SELECT u.id, u.failed_attempts, u.is_locked, u.is_active, u.status, u.locked_until,
+            TIMESTAMPDIFF(SECOND, NOW(), u.locked_until) AS remaining_seconds,
+            r.code AS role_code
+       FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE u.username = ? OR u.email = ? OR u.user_code = ?`,
     [identifier.toLowerCase(), sanitizeEmail(identifier), normalizeUserCode(identifier) ?? identifier],
   )
 
@@ -518,6 +578,17 @@ async function lockStatus(req, res) {
       return res.json({ isLocked: true, requiresOsi: false, remainingSeconds: state.remainingSeconds, failedAttempts: state.failed, message: LOCK_MESSAGE })
     }
     return res.json({ isLocked: false, requiresOsi: false, remainingSeconds: 0, failedAttempts: state.failed })
+  }
+
+  // Cuenta exenta (OSI): nunca reporta bloqueo; uno heredado se levanta aqui.
+  if (isLockExempt(user)) {
+    if (user.is_locked || user.status === 'LOCKED_OSI') await releaseExemptLock(user.id)
+    return res.json({
+      isLocked: false,
+      requiresOsi: false,
+      remainingSeconds: 0,
+      failedAttempts: Number(user.failed_attempts),
+    })
   }
 
   // Bloqueo indefinido: locked_until es NULL, asi que no hay cuenta regresiva y

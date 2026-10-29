@@ -34,8 +34,34 @@ const SESSION_TOOLS = [
   { to: '/dashboard', label: 'Despacho', icon: Building2, hint: 'Sede asignada' },
 ]
 
-function NavItem({ item, collapsed, onNavigate, allowed = true }) {
+function NavItem({ item, collapsed, onNavigate, allowed = true, passwordPending = false }) {
   const Icon = item.icon
+
+  // Clave inicial pendiente: el modulo existe pero se habilita al cambiarla.
+  if (allowed && passwordPending) {
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          toast.pastel('Primero cambie su contraseña', 'Los módulos se habilitan al definir su clave personal en Mi perfil')
+        }
+        className={cn(
+          'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-muted/60 transition hover:bg-warn/10 hover:text-warn',
+          collapsed && 'justify-center px-0',
+        )}
+        title="Cambie su contraseña para habilitar este módulo"
+      >
+        <Icon className="h-[18px] w-[18px] shrink-0" />
+        {!collapsed && (
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate text-sm font-medium">{item.label}</span>
+            <span className="truncate text-[10px] text-warn/80">Cambie su clave para habilitar</span>
+          </span>
+        )}
+        {!collapsed && <Lock className="ml-auto h-3 w-3 shrink-0 text-warn/80" />}
+      </button>
+    )
+  }
 
   if (!allowed) {
     return (
@@ -94,6 +120,7 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
   const session = useAppStore((s) => s.session)
   const hasAnyPermission = useAppStore((s) => s.hasAnyPermission)
   const logout = useAppStore((s) => s.logout)
+  const passwordPending = Boolean(session?.mustChangePassword)
 
   // Cada modulo exige al menos uno de los permisos indicados (segregacion OSI).
   const permissionMap = {
@@ -166,6 +193,7 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
                   collapsed={collapsed}
                   onNavigate={onClose}
                   allowed={required ? hasAnyPermission(required) : true}
+                  passwordPending={passwordPending}
                 />
               )
             })}
@@ -183,6 +211,7 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
                     item={item}
                     collapsed={collapsed}
                     onNavigate={onClose}
+                    passwordPending={passwordPending && item.to !== '/profile'}
                   />
                 ))}
               </div>

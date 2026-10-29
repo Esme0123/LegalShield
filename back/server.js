@@ -10,7 +10,7 @@ const rateLimit = require('express-rate-limit')
 
 const { assertConnection, closePool } = require('./config/db')
 const { assertSecretsConfigured } = require('./services/authService')
-const { baseOptions: refreshCookieOptions } = require('./utils/refreshCookie')
+const { baseOptions: refreshCookieOptions, readRefreshCookie } = require('./utils/refreshCookie')
 const { auditMiddleware } = require('./middlewares/auditMiddleware')
 const { logger } = require('./utils/logger')
 const errors = require('./utils/errors')
@@ -169,6 +169,12 @@ app.use(
   rateLimit({
     windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 900000),
     max: Number(process.env.RATE_LIMIT_MAX || 300),
+    // Solo cuentan las respuestas de error (4xx/5xx): el uso normal de una sesion
+    // (iniciar, navegar, cerrar) no agota el cupo; el abuso con fallos si.
+    skipSuccessfulRequests: true,
+    // La pantalla de login intenta restaurar la sesion sin cookie (responde 401):
+    // es el flujo normal tras cerrar sesion y no debe consumir el cupo.
+    skip: (req) => req.path === `${API_PREFIX}/auth/refresh` && !readRefreshCookie(req),
     standardHeaders: true,
     legacyHeaders: false,
   }),

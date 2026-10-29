@@ -9,17 +9,20 @@ const { checkPermission } = require('../middlewares/rbacMiddleware')
 const { auditAction } = require('../middlewares/auditMiddleware')
 const { record } = require('../services/auditService')
 const { asyncHandler } = require('../utils/helpers')
-const { requireAjaxHeader } = require('../utils/refreshCookie')
+const { requireAjaxHeader, readRefreshCookie } = require('../utils/refreshCookie')
 
 const router = Router()
 
 /**
- * Limitador mas estricto para autenticacion (20 intentos por ventana global).
- * El bloqueo por cuenta vive en la base; esto frena el barrido masivo de IDs.
+ * Limitador mas estricto para autenticacion (20 intentos FALLIDOS por ventana).
+ * Solo cuentan las respuestas de error: iniciar y cerrar sesion con la clave
+ * correcta no tiene tope, mientras que el barrido de claves o de IDs se frena.
+ * El bloqueo por cuenta vive en la base.
  */
 const authLimiter = rateLimit({
   windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 900000),
   max: Number(process.env.AUTH_RATE_LIMIT_MAX || 20),
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
@@ -47,11 +50,15 @@ const captchaLimiter = rateLimit({
 /**
  * Limitador propio del refresh: con la cookie, cada recarga de la pagina restaura la
  * sesion con una llamada. El token firmado no se adivina por fuerza bruta, asi que no
- * comparte el cupo estricto de los endpoints de credenciales.
+ * comparte el cupo estricto de los endpoints de credenciales. Solo cuentan los
+ * rechazos de una cookie presentada: una renovacion exitosa, o la consulta sin
+ * cookie que hace la pantalla de login tras cerrar sesion, no consumen cupo.
  */
 const refreshLimiter = rateLimit({
   windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 900000),
   max: Number(process.env.REFRESH_RATE_LIMIT_MAX || 60),
+  skipSuccessfulRequests: true,
+  skip: (req) => !readRefreshCookie(req),
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
