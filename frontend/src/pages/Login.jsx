@@ -9,7 +9,9 @@ import {
   LogIn,
   Scale,
   ScanFace,
+  ShieldAlert,
   ShieldCheck,
+  UserX,
 } from 'lucide-react'
 import AeroShards from '@/components/reactbits/AeroShards'
 import PasswordStrength, { LockCounter } from '@/components/auth/PasswordStrength'
@@ -25,6 +27,56 @@ import PasswordResetPanel from '@/components/auth/PasswordResetPanel'
 
 const SIGNAL_STEPS = ['Analisis de User ID…', 'Verificacion de politica…', 'MFA · passkey', 'Emision de sesion']
 
+/** Aviso de cuenta dada de baja por el OSI (solo aparece con la clave correcta). */
+function SuspendedAccountModal({ userId, onClose }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[80] grid place-items-center bg-navy/80 p-4 backdrop-blur-md"
+      onClick={onClose}
+    >
+      <motion.div
+        onClick={(e) => e.stopPropagation()}
+        initial={{ opacity: 0, y: 24, scale: 0.94 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -12, scale: 0.97 }}
+        transition={{ type: 'spring', stiffness: 240, damping: 22 }}
+        className="ls-card relative w-full max-w-md overflow-hidden border-danger/60 p-6 text-center shadow-[0_0_60px_-10px_rgb(var(--ls-danger)/0.55)]"
+        role="alertdialog"
+        aria-labelledby="suspended-title"
+        aria-describedby="suspended-desc"
+      >
+        <div className="absolute inset-x-0 top-0 h-1.5 bg-danger" />
+        <motion.span
+          initial={{ scale: 0.6, rotate: -12 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 14, delay: 0.1 }}
+          className="mx-auto mt-2 grid h-16 w-16 place-items-center rounded-2xl border border-danger/60 bg-danger/15 text-danger"
+        >
+          <UserX className="h-8 w-8" />
+        </motion.span>
+        <h2 id="suspended-title" className="mt-4 font-display text-xl font-bold text-ink">
+          Su cuenta fue suspendida
+        </h2>
+        <p className="mt-1 font-mono text-[12px] text-info">{userId}</p>
+        <p id="suspended-desc" className="mt-4 text-[13px] leading-relaxed text-ink/85">
+          El <strong>Oficial de Seguridad de la Información (OSI)</strong> desactivó esta cuenta. Sus datos y
+          expedientes se conservan, pero no puede iniciar sesión mientras siga suspendida.
+        </p>
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-warn/50 bg-warn/10 px-3.5 py-3 text-left text-[12px] leading-snug text-ink/85">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+          Comuníquese con su administrador (OSI) para que revise su caso y vuelva a activar su cuenta.
+        </div>
+        <button type="button" onClick={onClose} className="ls-btn-primary mt-6 w-full justify-center text-xs" autoFocus>
+          Entendido
+        </button>
+      </motion.div>
+    </motion.div>
+  )
+}
+
 export default function Login() {
   const navigate = useNavigate()
   const attempts = useAppStore((s) => s.attempts)
@@ -38,7 +90,9 @@ export default function Login() {
   const lockRequiresOsi = useAppStore((s) => s.lockRequiresOsi)
   const lastIdentifier = useAppStore((s) => s.lastIdentifier)
 
-  const [userId, setUserId] = useState(lastIdentifier || 'mariana.solis')
+  const [userId, setUserId] = useState(lastIdentifier || '')
+  // Cuenta dada de baja por el OSI: se muestra el aviso en lugar de "clave incorrecta".
+  const [suspendedUser, setSuspendedUser] = useState(null)
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [step, setStep] = useState(-1)
@@ -163,6 +217,11 @@ export default function Login() {
       }
       if (result.rateLimited) {
         toast.danger('Demasiados intentos', result.error)
+        return
+      }
+      if (result.suspended) {
+        setPassword('')
+        setSuspendedUser(idCheck.normalized)
         return
       }
       const lockMessage = result.requiresOsi
@@ -532,19 +591,11 @@ export default function Login() {
         </motion.section>
       </div>
 
-      {/* Solo fuera de produccion; la contrasena nunca se muestra ni se rellena. */}
-      {!import.meta.env.PROD && (
-        <div className="pointer-events-auto fixed bottom-5 left-5 z-20 max-w-xs rounded-xl border border-line/60 bg-surface/90 p-4 shadow-xl backdrop-blur">
-          <p className="font-display text-xs font-semibold text-ink">Usuario Demo</p>
-          <p className="mt-1 font-mono text-[11px] text-muted">
-            <span className="text-ink">osi.seguridad</span>, <span className="text-ink">mariana.solis</span> o{' '}
-            <span className="text-ink">diego.ferrer</span>
-          </p>
-          <p className="mt-1 font-mono text-[11px] text-muted">
-            La contraseña de demostración la entrega el equipo del proyecto.
-          </p>
-        </div>
-      )}
+      <AnimatePresence>
+        {suspendedUser && (
+          <SuspendedAccountModal userId={suspendedUser} onClose={() => setSuspendedUser(null)} />
+        )}
+      </AnimatePresence>
     </div>
   )
 }

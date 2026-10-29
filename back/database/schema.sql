@@ -315,6 +315,7 @@ INSERT IGNORE INTO permissions (code, description) VALUES
   ('DOCS_DOWNLOAD', 'Descargar documentos'),
   ('LOGS_VIEW',     'Ver logs de aplicacion (actividad del despacho)'),
   ('LOGS_EXPORT',   'Exportar logs de aplicacion'),
+  ('AUDIT_VIEW',    'Ver la seccion Auditoria (bitacora de actividad del despacho)'),
   ('AUDIT_RECEIPT', 'Emitir comprobantes'),
   ('DOCS_UPLOAD',   'Subir prueba documental a sus expedientes'),
   ('TOKEN_RESET',   'Emitir tokens de reseteo'),

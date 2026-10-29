@@ -283,6 +283,7 @@ const PERMISSIONS = [
   ['DOCS_UPLOAD', 'Subir prueba documental a sus expedientes'],
   ['LOGS_VIEW', 'Ver logs de aplicacion (actividad del despacho)'],
   ['LOGS_EXPORT', 'Exportar logs de aplicacion'],
+  ['AUDIT_VIEW', 'Ver la seccion Auditoria (bitacora de actividad del despacho)'],
   ['AUDIT_RECEIPT', 'Emitir comprobantes'],
   ['TOKEN_RESET', 'Emitir tokens de reseteo'],
   ['RISK_ASSESS', 'Modificar evaluacion de riesgo'],

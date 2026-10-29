@@ -126,13 +126,17 @@ export default function Audit() {
   const [showRefresh, setShowRefresh] = useState(false)
   const [tick, setTick] = useState(0)
 
-  const canView = hasPermission('SECURITY_LOGS_VIEW')
+  // OSI: bitacora completa (seguridad + actividad). Con AUDIT_VIEW (activado por
+  // el OSI a un usuario o rol): solo la actividad del despacho.
+  const fullAudit = hasPermission('SECURITY_LOGS_VIEW')
+  const canView = fullAudit || hasPermission('AUDIT_VIEW')
   const canExport = hasPermission('LOGS_EXPORT')
   const canTokens = hasPermission('ACCOUNT_UNLOCK') || hasPermission('TOKEN_RESET')
 
+  // Se recarga si cambian los permisos en vivo (p. ej. el OSI activa la seccion).
   useEffect(() => {
-    loadSecurityLogs()
-  }, [loadSecurityLogs])
+    if (canView) loadSecurityLogs()
+  }, [canView, fullAudit, loadSecurityLogs])
 
   useEffect(() => {
     if (!liveFeedOn) return undefined
@@ -204,10 +208,10 @@ export default function Audit() {
     return (
       <div className="ls-card grid place-items-center gap-2 p-12 text-center">
         <ShieldCheck className="h-8 w-8 text-danger" />
-        <p className="font-display text-sm font-bold">Acceso denegado · SECURITY_LOGS_VIEW requerido</p>
+        <p className="font-display text-sm font-bold">Sección Auditoría no activada para su cuenta</p>
         <p className="max-w-sm text-[12px] text-muted">
-          La bitacora de seguridad solo se abre al Oficial de Seguridad (OSI). Solicite a un OSI que
-          reevalue la matriz de roles.
+          El Oficial de Seguridad (OSI) puede activarla desde la Matriz de Permisos. Cuando lo haga, esta
+          pantalla se abrirá sola, sin cerrar sesión.
         </p>
       </div>
     )
@@ -218,17 +222,23 @@ export default function Audit() {
       <div className="space-y-5">
         <SectionTitle
           icon={Activity}
-          title="Bitácora de auditoría"
-          subtitle="Quién hizo qué y a qué hora · todos los roles en vivo · inspeccione cualquier fila con la linterna"
+          title={fullAudit ? 'Bitácora de auditoría' : 'Bitácora de actividad'}
+          subtitle={
+            fullAudit
+              ? 'Quién hizo qué y a qué hora · todos los roles en vivo · inspeccione cualquier fila con la linterna'
+              : 'Quién hizo qué y a qué hora en los expedientes y perfiles del despacho'
+          }
           actions={
-            <div className="flex flex-wrap items-center gap-2">
-              <button type="button" onClick={handleExportCsv} className="ls-btn-secondary text-xs">
-                <Download className="h-3.5 w-3.5" /> Exportar CSV
-              </button>
-              <button type="button" onClick={handleExportPdf} className="ls-btn-secondary text-xs">
-                <FileText className="h-3.5 w-3.5" /> Exportar PDF
-              </button>
-            </div>
+            canExport ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={handleExportCsv} className="ls-btn-secondary text-xs">
+                  <Download className="h-3.5 w-3.5" /> Exportar CSV
+                </button>
+                <button type="button" onClick={handleExportPdf} className="ls-btn-secondary text-xs">
+                  <FileText className="h-3.5 w-3.5" /> Exportar PDF
+                </button>
+              </div>
+            ) : null
           }
         />
 
@@ -251,7 +261,7 @@ export default function Audit() {
 
               <div className="ml-auto flex flex-wrap items-center gap-1.5">
                 <Filter className="h-3.5 w-3.5 text-muted" />
-                {FILTERS.map((f) => (
+                {fullAudit && FILTERS.map((f) => (
                   <button
                     key={f.id}
                     type="button"
@@ -266,7 +276,7 @@ export default function Audit() {
                     {f.label}
                   </button>
                 ))}
-                <button
+                {fullAudit && <button
                   type="button"
                   onClick={() => setShowRefresh((v) => !v)}
                   aria-pressed={showRefresh}
@@ -279,7 +289,7 @@ export default function Audit() {
                   )}
                 >
                   Renovaciones
-                </button>
+                </button>}
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
@@ -415,7 +425,7 @@ export default function Audit() {
               </div>
             </div>
 
-            <div className="ls-card p-4">
+            {canTokens && <div className="ls-card p-4">
               <SectionTitle
                 icon={ShieldCheck}
                 title="Tokens de desbloqueo"
@@ -471,7 +481,7 @@ export default function Audit() {
                   recomendada cada 15 min
                 </p>
               )}
-            </div>
+            </div>}
           </div>
         </div>
       </div>

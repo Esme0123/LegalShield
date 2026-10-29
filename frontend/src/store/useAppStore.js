@@ -345,9 +345,11 @@ export const useAppStore = create((set, get) => ({
         return { ok: false, locked: false, rateLimited: true, attempts: get().attempts, error: error.message }
       }
 
-      // 403 = cuenta desactivada por un administrador (baja logica).
+      // 403 = cuenta suspendida por el OSI (baja logica). El servidor solo lo
+      // dice con la clave correcta; con una clave erronea responde 401 uniforme.
       if (error instanceof ApiError && error.isForbidden) {
-        return { ok: false, locked: false, attempts: get().attempts, error: error.message }
+        const suspended = error.payload?.code === 'ACCOUNT_SUSPENDED'
+        return { ok: false, locked: false, suspended, attempts: get().attempts, error: error.message }
       }
 
       // 401: credencial incorrecta, cuenta bloqueada (isLocked) o desactivada.
@@ -675,9 +677,11 @@ export const useAppStore = create((set, get) => ({
 
     set((s) => ({ rbac: { ...s.rbac, [roleId]: toggleInList(current, permissionId) } }))
 
+    let applied = []
     try {
       const data = await rolesApi.updatePermissions([{ role: roleId, permission: permissionId, granted: granting }])
       set({ rbac: structuredClone(data.assignments) })
+      applied = data.applied ?? []
       ok(set)
     } catch (error) {
       // La API rechazo el cambio: se revierte el estado optimista.
@@ -686,7 +690,8 @@ export const useAppStore = create((set, get) => ({
       throw error
     }
 
-    return { granting }
+    // Dependencias que el servidor aplico ademas (p. ej. LOGS_EXPORT -> AUDIT_VIEW).
+    return { granting, alsoChanged: applied.filter((a) => a.derivedFrom).map((a) => a.permission) }
   },
 
   /** Carga la matriz rol x permiso desde MySQL (solo administradores RBAC). */
@@ -756,13 +761,17 @@ export const useAppStore = create((set, get) => ({
    * degradada (el 403 es una restriccion de RBAC esperada, no un fallo).
    */
   loadSecurityLogs: async (filters = {}) => {
-    if (!get().hasPermission('SECURITY_LOGS_VIEW')) {
+    const full = get().hasPermission('SECURITY_LOGS_VIEW')
+    if (!full && !get().hasPermission('AUDIT_VIEW')) {
       set({ logs: [] })
       return 0
     }
     try {
-      // Vista unificada: seguridad + actividad de negocio de todos los roles.
-      const data = await auditApi.all({ limit: 200, ...filters })
+      // OSI: vista unificada (seguridad + actividad de todos los roles). Con solo
+      // AUDIT_VIEW: la bitacora de actividad del despacho, sin eventos de seguridad.
+      const data = full
+        ? await auditApi.all({ limit: 200, ...filters })
+        : await auditApi.activity({ limit: 200, ...filters })
       set({ logs: data.logs.map(apiLogToLog) })
       ok(set)
       return data.logs.length
@@ -1040,7 +1049,7 @@ export const useAppStore = create((set, get) => ({
     const state = get()
     await Promise.allSettled([
       state.hasPermission('CASES_READ') ? state.loadCases() : Promise.resolve(),
-      state.hasPermission('SECURITY_LOGS_VIEW') ? state.loadSecurityLogs() : Promise.resolve(),
+      state.hasAnyPermission(['SECURITY_LOGS_VIEW', 'AUDIT_VIEW']) ? state.loadSecurityLogs() : Promise.resolve(),
       state.hasPermission('LOGS_VIEW') ? state.loadActivityLogs() : Promise.resolve(),
       state.hasAnyPermission(['ROLES_MANAGE']) ? state.loadMatrix() : Promise.resolve(),
       state.hasAnyPermission(['USERS_READ', 'USERS_MANAGE']) ? state.loadUsers() : Promise.resolve(),

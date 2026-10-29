@@ -13,6 +13,7 @@ export const PERMISSIONS = [
   { id: 'DOCS_UPLOAD', label: 'Subir prueba documental', group: 'Documentación', severity: 'alta' },
   { id: 'LOGS_VIEW', label: 'Consultar historial', group: 'Auditoría', severity: 'media' },
   { id: 'LOGS_EXPORT', label: 'Exportar bitácora', group: 'Auditoría', severity: 'alta' },
+  { id: 'AUDIT_VIEW', label: 'Ver la sección Auditoría', group: 'Auditoría', severity: 'alta' },
   { id: 'AUDIT_RECEIPT', label: 'Emitir comprobantes', group: 'Auditoría', severity: 'media' },
   { id: 'TOKEN_RESET', label: 'Emitir tokens de reseteo', group: 'Seguridad', severity: 'critica' },
   { id: 'RISK_ASSESS', label: 'Modificar la evaluación de riesgo', group: 'Seguridad', severity: 'media' },

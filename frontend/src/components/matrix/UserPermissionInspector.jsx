@@ -7,14 +7,21 @@ import { useAppStore } from '@/store/useAppStore'
 import { toast } from '@/store/toastStore'
 import { cn } from '@/lib/cn'
 
-/** Modulos del menu y el permiso que abre cada uno (igual que Sidebar). */
+/**
+ * Modulos del menu: `any` decide si la cuenta entra (igual que Sidebar) y
+ * `perm` es el permiso que se activa o desactiva desde aqui. Los exclusivos del
+ * OSI no se pueden activar a otros roles.
+ */
 const MODULES = [
-  { label: 'Gestión de Usuarios', any: ['USERS_READ', 'USERS_MANAGE'] },
-  { label: 'Matriz de Permisos', any: ['ROLES_MANAGE'] },
-  { label: 'Expedientes', any: ['CASES_READ'] },
-  { label: 'Auditoría', any: ['SECURITY_LOGS_VIEW'] },
-  { label: 'ISO 27001', any: ['RISK_ASSESS'] },
+  { label: 'Expedientes', perm: 'CASES_READ', any: ['CASES_READ'] },
+  { label: 'Auditoría', perm: 'AUDIT_VIEW', any: ['SECURITY_LOGS_VIEW', 'AUDIT_VIEW'] },
+  { label: 'ISO 27001', perm: 'RISK_ASSESS', any: ['RISK_ASSESS'] },
+  { label: 'Gestión de Usuarios', perm: 'USERS_READ', any: ['USERS_READ', 'USERS_MANAGE'], exclusive: true },
+  { label: 'Matriz de Permisos', perm: 'ROLES_MANAGE', any: ['ROLES_MANAGE'], exclusive: true },
 ]
+
+const alsoText = (codes = []) =>
+  codes.length > 0 ? ` · también: ${codes.map(labelOf).join(', ')}` : ''
 
 const labelOf = (code) => PERMISSIONS.find((p) => p.id === code)?.label ?? code
 const groupOf = (code) => PERMISSIONS.find((p) => p.id === code)?.group ?? 'Otros'
@@ -143,9 +150,10 @@ export default function UserPermissionInspector() {
       setInfo(data)
       toast.pastel(
         'Permiso actualizado',
-        granted === null
+        (granted === null
           ? `${info.user.username} vuelve a lo que da su rol en «${labelOf(row.code)}»`
-          : `«${labelOf(row.code)}» ${granted ? 'concedido' : 'retirado'} solo a ${info.user.username}`,
+          : `«${labelOf(row.code)}» ${granted ? 'concedido' : 'retirado'} solo a ${info.user.username}`) +
+          alsoText(data.alsoChanged),
       )
     } catch (error) {
       toast.danger('No se pudo cambiar el permiso', error.message)
@@ -157,11 +165,12 @@ export default function UserPermissionInspector() {
   const confirmRoleChange = async () => {
     setBusy('role')
     try {
-      await togglePermission(roleChange.role, roleChange.permission)
+      const { alsoChanged } = await togglePermission(roleChange.role, roleChange.permission)
       await Promise.all([loadMatrix(), reload()])
       toast.pastel(
         'Matriz actualizada',
-        `«${labelOf(roleChange.permission)}» ${roleChange.granted ? 'concedido' : 'retirado'} a todos los ${roleChange.roleLabel}`,
+        `«${labelOf(roleChange.permission)}» ${roleChange.granted ? 'concedido' : 'retirado'} a todos los ${roleChange.roleLabel}` +
+          alsoText(alsoChanged),
       )
       setRoleChange(null)
     } catch (error) {
@@ -245,23 +254,82 @@ export default function UserPermissionInspector() {
             </div>
 
             <div>
-              <p className="mb-1.5 font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted">Módulos a los que entra</p>
-              <div className="flex flex-wrap gap-1.5">
-                <span className="inline-flex items-center gap-1 rounded-full border border-ok/50 bg-ok/10 px-2.5 py-0.5 text-[11px] text-ok">
-                  <Check className="h-3 w-3" /> Dashboard
-                </span>
+              <p className="mb-1.5 font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted">
+                Módulos · secciones del menú a las que entra
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
                 {MODULES.map((m) => {
                   const open = m.any.some((p) => info.effective.includes(p))
+                  const roleHas = info.rolePermissions.includes(m.perm)
+                  const override = info.overrides.find((o) => o.permission === m.perm)
+                  const canToggle = !locked && !(m.exclusive && !open)
                   return (
-                    <span
+                    <div
                       key={m.label}
                       className={cn(
-                        'inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px]',
-                        open ? 'border-ok/50 bg-ok/10 text-ok' : 'border-line/40 text-muted line-through',
+                        'rounded-xl border p-3',
+                        open ? 'border-ok/40 bg-ok/5' : 'border-line/40 bg-surface2/30',
                       )}
                     >
-                      {open ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />} {m.label}
-                    </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={cn('inline-flex items-center gap-1.5 text-[12.5px] font-semibold', open ? 'text-ok' : 'text-muted')}>
+                          {open ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />} {m.label}
+                        </span>
+                        <span className="font-mono text-[9.5px] text-muted">
+                          {open ? 'activado' : 'desactivado'}
+                          {override ? ' · solo esta cuenta' : ''}
+                        </span>
+                      </div>
+                      {canToggle ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {override ? (
+                            <button
+                              type="button"
+                              disabled={Boolean(busy)}
+                              onClick={() => changeForUser({ code: m.perm }, null)}
+                              className="inline-flex items-center gap-1 rounded-md border border-line/60 px-2 py-1 text-[10.5px] text-muted hover:border-accent/60 hover:text-accent disabled:opacity-50"
+                            >
+                              <RotateCcw className="h-3 w-3" /> Volver a lo del rol
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={Boolean(busy)}
+                              onClick={() => changeForUser({ code: m.perm }, !open)}
+                              className={cn(
+                                'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10.5px] font-semibold disabled:opacity-50',
+                                open
+                                  ? 'border-danger/50 text-danger hover:bg-danger/10'
+                                  : 'border-ok/60 text-ok hover:bg-ok/10',
+                              )}
+                            >
+                              <User className="h-3 w-3" /> {open ? 'Desactivar' : 'Activar'} {m.label} solo a {info.user.username}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={Boolean(busy)}
+                            onClick={() =>
+                              setRoleChange({
+                                role: info.user.role,
+                                roleLabel: info.user.roleLabel,
+                                permission: m.perm,
+                                granted: !roleHas,
+                              })
+                            }
+                            className="inline-flex items-center gap-1 rounded-md border border-line/60 px-2 py-1 text-[10.5px] text-ink/80 hover:border-warn/60 hover:text-warn disabled:opacity-50"
+                          >
+                            <Users className="h-3 w-3" /> {roleHas ? 'Desactivar' : 'Activar'} a todos los {info.user.roleLabel}
+                          </button>
+                        </div>
+                      ) : (
+                        !locked && (
+                          <p className="mt-2 inline-flex items-center gap-1 font-mono text-[10px] text-muted">
+                            <Lock className="h-3 w-3" /> Exclusivo del OSI
+                          </p>
+                        )
+                      )}
+                    </div>
                   )
                 })}
               </div>

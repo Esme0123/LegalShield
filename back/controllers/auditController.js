@@ -151,9 +151,10 @@ async function listSecurityLogs(req, res) {
 
 /** Bitacora de actividad: acciones de negocio del despacho (socios/abogados). */
 async function listActivityLogs(req, res) {
-  // Solo la direccion (todo el despacho) y el OSI leen la actividad ajena; el
-  // abogado ve unicamente sus propias acciones.
-  if (!hasPermission(req.user, 'CASES_READ_ALL') && !hasPermission(req.user, 'SECURITY_LOGS_VIEW')) {
+  // Solo la direccion (todo el despacho), el OSI y quien tenga la seccion
+  // Auditoria (AUDIT_VIEW) leen la actividad ajena; el resto, solo la suya.
+  const seesAll = ['CASES_READ_ALL', 'SECURITY_LOGS_VIEW', 'AUDIT_VIEW'].some((p) => hasPermission(req.user, p))
+  if (!seesAll) {
     req.query.userCode = req.user.user_code
   }
   return listFrom('activity', req, res)

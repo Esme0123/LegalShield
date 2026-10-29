@@ -270,7 +270,24 @@ async function login(req, res) {
       record('AUTH_FAILED', { userCode: auditCode, req, details: { reason, ip } })
       throw unauthorized('Validación CAPTCHA requerida o incorrecta')
     }
-    await bcrypt.compare(password, DUMMY_HASH)
+    // Cuenta dada de baja por el OSI: solo con la clave CORRECTA se informa la
+    // suspension. El titular legitimo sabe por que no entra; quien prueba claves
+    // al azar sigue recibiendo la respuesta uniforme y no descubre la cuenta.
+    // Ambas ramas ejecutan un bcrypt.compare: el tiempo de respuesta no delata nada.
+    if (disabled && (await bcrypt.compare(password, user.password_hash))) {
+      record('AUTH_DISABLED', {
+        userCode: user.user_code,
+        req,
+        details: { reason: 'cuenta_suspendida_clave_correcta', ip },
+      })
+      return res.status(403).json({
+        error: 'Su cuenta fue suspendida por el Oficial de Seguridad (OSI)',
+        code: 'ACCOUNT_SUSPENDED',
+        suspended: true,
+        userCode: user.user_code,
+      })
+    }
+    if (!disabled) await bcrypt.compare(password, DUMMY_HASH)
     const after = ghostAttempts.registerFailure(ghostKey, GHOST_POLICY)
     record(after.locked ? 'LOGIN_LOCKED' : (disabled ? 'AUTH_DISABLED' : 'AUTH_FAILED'), {
       userCode: auditCode,

@@ -13,7 +13,25 @@
 
 const { one, query, rows, withTransaction } = require('../config/db')
 const { record } = require('../services/auditService')
-const { RBAC_MATRIX, LOCKED_ROLES, OSI_EXCLUSIVE } = require('../config/rbacBaseline')
+const { RBAC_MATRIX, LOCKED_ROLES, OSI_EXCLUSIVE, requirementsOf, dependentsOf } = require('../config/rbacBaseline')
+
+/**
+ * Completa un lote de cambios con sus dependencias: conceder agrega lo que el
+ * permiso requiere y retirar agrega lo que depende de el. Los cambios pedidos
+ * explicitamente mandan sobre los derivados.
+ */
+function withDependencies(entries) {
+  const key = (e) => `${e.role}|${e.permission}`
+  const result = new Map(entries.map((e) => [key(e), e]))
+  for (const e of entries) {
+    const related = e.granted ? requirementsOf(e.permission) : dependentsOf(e.permission)
+    for (const permission of related) {
+      const derived = { role: e.role, permission, granted: e.granted, derivedFrom: e.permission }
+      if (!result.has(key(derived))) result.set(key(derived), derived)
+    }
+  }
+  return [...result.values()]
+}
 const { badRequest, conflict, notFound, unprocessable } = require('../utils/errors')
 const { loadPermissions } = require('../services/authService')
 
@@ -85,14 +103,16 @@ async function updatePermissions(req, res) {
     throw badRequest('Se esperaba { grants: [{ role, permission, granted }] } con al menos una entrada')
   }
 
-  const entries = grants.map((g) => ({
+  const requested = grants.map((g) => ({
     role: String(g?.role ?? '').trim().toLowerCase(),
     permission: String(g?.permission ?? '').trim().toUpperCase(),
     granted: Boolean(g?.granted),
   }))
 
-  const invalid = entries.find((g) => !g.role || !g.permission)
+  const invalid = requested.find((g) => !g.role || !g.permission)
   if (invalid) throw unprocessable('Cada entrada debe traer role y permission', { entry: invalid })
+
+  const entries = withDependencies(requested)
 
   // Un OSI no cambia los permisos de los OSI (ni los suyos): evita que uno se
   // otorgue mas poder o deje sin administracion a los demas. Se rechaza el lote.
@@ -307,23 +327,46 @@ async function setUserPermission(req, res) {
     throw unprocessable(`${permission} es exclusivo del OSI: no se puede conceder a otro usuario`)
   }
 
-  // Si la excepcion coincide con lo que ya da el rol, no aporta nada: se elimina.
-  const fromRole = await one(
-    `SELECT 1 AS ok FROM role_permissions rp JOIN roles r ON r.id = rp.role_id
-      WHERE r.code = ? AND rp.permission_id = ?`,
-    [user.role_code, perm.id],
+  const roleGrants = new Set(
+    (
+      await rows(
+        `SELECT p.code FROM role_permissions rp
+           JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
+          WHERE r.code = ?`,
+        [user.role_code],
+      )
+    ).map((r) => r.code),
   )
-  const redundant = granted !== null && granted === Boolean(fromRole)
 
-  if (granted === null || redundant) {
-    await query('DELETE FROM user_permissions WHERE user_id = ? AND permission_id = ?', [user.id, perm.id])
-  } else {
-    await query(
-      `INSERT INTO user_permissions (user_id, permission_id, granted, granted_by)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE granted = VALUES(granted), granted_by = VALUES(granted_by), granted_at = NOW()`,
-      [user.id, perm.id, granted, req.user.user_code],
-    )
+  /** Aplica (o elimina) la excepcion de un permiso. Si coincide con el rol no aporta nada y se borra. */
+  const applyOverride = async (code, value) => {
+    const target = await one('SELECT id FROM permissions WHERE code = ?', [code])
+    if (!target) return
+    if (value === null || value === roleGrants.has(code)) {
+      await query('DELETE FROM user_permissions WHERE user_id = ? AND permission_id = ?', [user.id, target.id])
+    } else {
+      await query(
+        `INSERT INTO user_permissions (user_id, permission_id, granted, granted_by)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE granted = VALUES(granted), granted_by = VALUES(granted_by), granted_at = NOW()`,
+        [user.id, target.id, value, req.user.user_code],
+      )
+    }
+  }
+
+  // Dependencias: conceder trae lo que requiere (exportar la bitacora abre la
+  // seccion Auditoria) y retirar se lleva lo que depende de el.
+  const related = granted === true ? requirementsOf(permission) : granted === false ? dependentsOf(permission) : []
+  await applyOverride(permission, granted)
+  for (const code of related) await applyOverride(code, granted)
+
+  // Volver a lo del rol puede dejar sin acceso: se retiran tambien sus dependientes.
+  if (granted === null && !(await loadPermissions(user.id)).includes(permission)) {
+    const effective = await loadPermissions(user.id)
+    for (const code of dependentsOf(permission).filter((c) => effective.includes(c))) {
+      related.push(code)
+      await applyOverride(code, false)
+    }
   }
 
   record('USER_PERMISSION_CHANGED', {
@@ -332,11 +375,12 @@ async function setUserPermission(req, res) {
     details: {
       target: user.user_code,
       permission,
-      effect: granted === null || redundant ? 'segun_rol' : granted ? 'concedido' : 'revocado',
+      effect: granted === null ? 'segun_rol' : granted ? 'concedido' : 'revocado',
+      ...(related.length > 0 ? { alsoChanged: related } : {}),
     },
   })
 
-  res.json(await describeUserPermissions(user))
+  res.json({ ...(await describeUserPermissions(user)), alsoChanged: related })
 }
 
 /* -------------------------------------------------------------------------- */

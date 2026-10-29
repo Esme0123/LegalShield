@@ -127,7 +127,7 @@ export default function Sidebar({ open, onClose, collapsed, onToggleCollapse }) 
     '/users': ['USERS_READ', 'USERS_MANAGE'],
     '/cases': ['CASES_READ'],
     '/roles': ['ROLES_MANAGE'],
-    '/audit': ['SECURITY_LOGS_VIEW'],
+    '/audit': ['SECURITY_LOGS_VIEW', 'AUDIT_VIEW'],
     '/risk-assessment': ['RISK_ASSESS'],
   }
 

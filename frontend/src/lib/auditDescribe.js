@@ -45,7 +45,10 @@ const BUILDERS = {
     d.requiresOsi
       ? `Cuenta bloqueada tras ${d.failedAttempts ?? 3} intentos · solo el OSI puede desbloquearla`
       : `Cuenta bloqueada ${Math.round((d.remainingSeconds ?? 60) / 60)} min tras ${d.failedAttempts ?? 3} intentos fallidos`,
-  AUTH_DISABLED: () => 'Intentó entrar con una cuenta dada de baja',
+  AUTH_DISABLED: (d) =>
+    d.reason === 'cuenta_suspendida_clave_correcta'
+      ? 'Intentó entrar con su cuenta suspendida (clave correcta) · se le mostró el aviso'
+      : 'Intentó entrar con una cuenta dada de baja (clave incorrecta)',
   AUTH_UNLOCK: (_d, t) => `Desbloqueó la cuenta de ${t}`,
   LOGOUT: () => 'Cerró sesión',
   TOKEN_REFRESH: () => 'Renovó su sesión activa',

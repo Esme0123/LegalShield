@@ -2,6 +2,7 @@
 
 const jwt = require('jsonwebtoken')
 const { one, rows } = require('../config/db')
+const { requirementsOf } = require('../config/rbacBaseline')
 const { unauthorized } = require('../utils/errors')
 const { logger } = require('../utils/logger')
 const { assertUnlockSecretConfigured } = require('../utils/unlockToken')
@@ -64,7 +65,11 @@ async function loadPermissions(userId) {
      ORDER BY code`,
     [userId, userId],
   )
-  return result.map((row) => row.code)
+  // Red de seguridad: un permiso trae consigo el acceso al modulo que necesita
+  // (p. ej. LOGS_EXPORT -> AUDIT_VIEW), aunque la matriz no lo marque.
+  const codes = new Set(result.map((row) => row.code))
+  for (const code of [...codes]) for (const required of requirementsOf(code)) codes.add(required)
+  return [...codes].sort()
 }
 
 /** Payload del access token: User ID + identidad + permisos resueltos al emitir. */

@@ -24,12 +24,12 @@ const RBAC_MATRIX = {
     'USERS_MANAGE', 'USERS_READ', 'USERS_CREATE', 'USERS_UPDATE', 'USERS_DELETE',
     'USERS_UNLOCK', 'ACCOUNT_UNLOCK',
     'ROLES_MANAGE', 'TOKEN_RESET',
-    'SECURITY_LOGS_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'RISK_ASSESS',
+    'SECURITY_LOGS_VIEW', 'AUDIT_VIEW', 'LOGS_VIEW', 'LOGS_EXPORT', 'RISK_ASSESS',
   ],
   socio: [
     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE', 'CASES_ARCHIVE', 'CASES_READ_ALL',
     'DOCS_REVEAL', 'DOCS_DOWNLOAD', 'DOCS_UPLOAD',
-    'LOGS_VIEW', 'LOGS_EXPORT', 'AUDIT_RECEIPT',
+    'LOGS_VIEW', 'AUDIT_RECEIPT',
   ],
   abogado: [
     'CASES_CREATE', 'CASES_READ', 'CASES_WRITE',
@@ -56,4 +56,52 @@ const OSI_EXCLUSIVE = [
   'USERS_UNLOCK', 'ACCOUNT_UNLOCK', 'ROLES_MANAGE', 'TOKEN_RESET', 'SECURITY_LOGS_VIEW',
 ]
 
-module.exports = { RBAC_MATRIX, LOCKED_ROLES, OSI_EXCLUSIVE }
+/**
+ * Dependencias: un permiso no sirve sin el acceso al modulo donde se usa.
+ * Exportar la bitacora sin ver la seccion Auditoria, o subir documentos sin
+ * ver Expedientes, seria un permiso inutil. Por eso:
+ *   · conceder un permiso concede tambien lo que requiere;
+ *   · retirar un acceso retira tambien lo que depende de el.
+ */
+const PERMISSION_REQUIRES = {
+  LOGS_EXPORT: ['AUDIT_VIEW'],
+  CASES_CREATE: ['CASES_READ'],
+  CASES_WRITE: ['CASES_READ'],
+  CASES_ARCHIVE: ['CASES_READ'],
+  CASES_READ_ALL: ['CASES_READ'],
+  DOCS_REVEAL: ['CASES_READ'],
+  DOCS_UPLOAD: ['CASES_READ'],
+  DOCS_DOWNLOAD: ['CASES_READ'],
+}
+
+/** Permisos que `code` necesita (cierre transitivo, sin incluirlo). */
+function requirementsOf(code) {
+  const out = new Set()
+  const walk = (c) => {
+    for (const req of PERMISSION_REQUIRES[c] ?? []) {
+      if (!out.has(req)) {
+        out.add(req)
+        walk(req)
+      }
+    }
+  }
+  walk(code)
+  return [...out]
+}
+
+/** Permisos que dejan de tener sentido si se retira `code` (cierre transitivo). */
+function dependentsOf(code) {
+  const out = new Set()
+  const walk = (c) => {
+    for (const [perm, reqs] of Object.entries(PERMISSION_REQUIRES)) {
+      if (reqs.includes(c) && !out.has(perm)) {
+        out.add(perm)
+        walk(perm)
+      }
+    }
+  }
+  walk(code)
+  return [...out]
+}
+
+module.exports = { RBAC_MATRIX, LOCKED_ROLES, OSI_EXCLUSIVE, PERMISSION_REQUIRES, requirementsOf, dependentsOf }

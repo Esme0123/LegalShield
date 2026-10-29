@@ -51,11 +51,16 @@ export default function RbacPermissionMatrix() {
     if (!canEdit || isLockedRole(roleCode)) return
     const roleLabel = roles.find((r) => r.code === roleCode)?.name ?? roleCode
     try {
-      const { granting } = await togglePermission(roleCode, permission.code)
+      const { granting, alsoChanged } = await togglePermission(roleCode, permission.code)
       await loadMatrix()
+      const extra = alsoChanged.length
+        ? ` · también ${granting ? 'se activó' : 'se quitó'}: ${alsoChanged
+            .map((code) => PERMISSIONS.find((p) => p.id === code)?.label ?? code)
+            .join(', ')}`
+        : ''
       toast.pastel(
         granting ? 'Permiso concedido' : 'Permiso retirado',
-        `${permission.label} ${granting ? 'habilitado' : 'deshabilitado'} para ${roleLabel} · evento PERMISSION_CHANGED`,
+        `${permission.label} ${granting ? 'habilitado' : 'deshabilitado'} para ${roleLabel}${extra}`,
       )
     } catch (error) {
       toast.danger('La API rechazo el cambio', error.message ?? 'La matriz se reequilibro al estado persistido')
